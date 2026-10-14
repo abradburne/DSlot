@@ -2,6 +2,8 @@
 # dslot: run from Apps on the stock RG DS+ menu.
 
 progdir="$(cd "$(dirname "$0")" && pwd)/dslot"
+up() { cut -d' ' -f1 /proc/uptime; }
+t_script=$(up)
 
 . /etc/profile.d/myenv.sh 2>/dev/null
 export XDG_RUNTIME_DIR=/var/run
@@ -39,4 +41,8 @@ cd "$progdir" || exit 1
 	echo "== dmenu_ln"; cat /mnt/vendor/ctrl/dmenu_ln 2>&1
 	echo "== loadapp tail"; tail -n 25 /mnt/vendor/ctrl/loadapp.sh 2>&1
 } > "$progdir/diag.txt" 2>&1
-./dslot "$@" > "$progdir/log.txt" 2>&1
+{
+	echo "dslot.sh: $t_script s started"
+	echo "dslot.sh: $(up) s diagnostics written"
+	./dslot "$@"
+} > "$progdir/log.txt" 2>&1

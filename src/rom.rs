@@ -1,6 +1,7 @@
 //! Reads what a DS ROM says about itself: game code, banner title and the 32x32 icon.
 
 use crate::gfx::Img;
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -43,8 +44,16 @@ impl Game {
     }
 }
 
-pub fn scan(dirs: &[PathBuf]) -> Vec<Game> {
+/// `known` remembers what each ROM said the last time, so that a start only lists the folders
+/// and opens the ROMs it has not met. A ROM is known by its path alone: asking the card for
+/// each file's size and date costs as much as reading it. Deleting the file has every ROM
+/// read again.
+pub fn scan(dirs: &[PathBuf], known: &Path) -> Vec<Game> {
+    let old = read_known(known).unwrap_or_default();
+    crate::mark("known games read");
+    let mut fresh = false;
     let mut games = Vec::new();
+    let mut roms = 0;
     for dir in dirs {
         let Ok(rd) = fs::read_dir(dir) else { continue };
         for entry in rd.flatten() {
@@ -54,13 +63,93 @@ pub fn scan(dirs: &[PathBuf]) -> Vec<Game> {
             if stem.starts_with('.') || !matches!(ext.as_str(), "nds" | "zip") {
                 continue;
             }
-            let (code, title, icon) = if ext == "nds" { parse(&path).unwrap_or_default() } else { Default::default() };
+            if ext != "nds" {
+                games.push(Game { path, title: vec![stem.clone()], stem, code: String::new(), icon: None });
+                continue;
+            }
+            roms += 1;
+            let (code, title, icon) = match old.get(&path) {
+                Some(k) => (k.code.clone(), k.title.clone(), k.icon.clone()),
+                None => {
+                    fresh = true;
+                    parse(&path).unwrap_or_default()
+                }
+            };
             let title = if title.is_empty() { vec![stem.clone()] } else { title };
             games.push(Game { path, stem, code, title, icon });
         }
     }
+    // Rewritten when a ROM was read, and when one has gone.
+    if fresh || roms != old.len() {
+        if let Err(e) = write_known(known, &games) {
+            eprintln!("dslot: cannot write {}: {e}", known.display());
+        }
+    }
     games.sort_by_key(|g| g.name().to_lowercase());
     games
+}
+
+/// One ROM as the last scan found it.
+struct Known {
+    code: String,
+    title: Vec<String>,
+    icon: Option<Img>,
+}
+
+const KNOWN_MAGIC: &[u8] = b"dslot games 2\n";
+
+fn write_known(file: &Path, games: &[Game]) -> std::io::Result<()> {
+    let text = |out: &mut Vec<u8>, s: &str| {
+        out.extend((s.len() as u32).to_le_bytes());
+        out.extend(s.as_bytes());
+    };
+    let mut out = KNOWN_MAGIC.to_vec();
+    for g in games.iter().filter(|g| g.path.extension().is_some_and(|e| e.eq_ignore_ascii_case("nds"))) {
+        text(&mut out, &g.path.to_string_lossy());
+        text(&mut out, &g.code);
+        text(&mut out, &g.title.join("\n"));
+        match &g.icon {
+            Some(icon) if icon.px.len() == 32 * 32 * 4 => {
+                out.push(1);
+                out.extend(&icon.px);
+            }
+            _ => out.push(0),
+        }
+    }
+    if let Some(dir) = file.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    fs::write(file, out)
+}
+
+/// `None` for a missing, older or damaged file: everything is then read from the ROMs again.
+fn read_known(file: &Path) -> Option<HashMap<PathBuf, Known>> {
+    let bytes = fs::read(file).ok()?;
+    let mut rest = bytes.strip_prefix(KNOWN_MAGIC)?;
+    fn take<'a>(rest: &mut &'a [u8], n: usize) -> Option<&'a [u8]> {
+        if rest.len() < n {
+            return None;
+        }
+        let (head, tail) = rest.split_at(n);
+        *rest = tail;
+        Some(head)
+    }
+    fn text(rest: &mut &[u8]) -> Option<String> {
+        let n = u32::from_le_bytes(take(rest, 4)?.try_into().ok()?) as usize;
+        String::from_utf8(take(rest, n)?.to_vec()).ok()
+    }
+    let mut known = HashMap::new();
+    while !rest.is_empty() {
+        let path = PathBuf::from(text(&mut rest)?);
+        let code = text(&mut rest)?;
+        let title = text(&mut rest)?.lines().map(str::to_owned).collect();
+        let icon = match take(&mut rest, 1)?[0] {
+            0 => None,
+            _ => Some(Img { w: 32, h: 32, px: take(&mut rest, 32 * 32 * 4)?.to_vec() }),
+        };
+        known.insert(path, Known { code, title, icon });
+    }
+    Some(known)
 }
 
 const BANNER_LEN: usize = 0x840;

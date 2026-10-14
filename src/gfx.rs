@@ -230,8 +230,6 @@ pub fn save_png(path: &Path, w: u32, h: u32, rgba: &[u8]) -> Result<(), String> 
 pub struct Fonts {
     regular: fontdue::Font,
     bold: fontdue::Font,
-    /// CJK fallback, loaded from the device when present (the embedded faces are Latin only).
-    fallback: Option<fontdue::Font>,
 }
 
 const FALLBACK_FONTS: [&str; 2] = [
@@ -239,26 +237,43 @@ const FALLBACK_FONTS: [&str; 2] = [
     "/mnt/vendor/bin/default.ttf",
 ];
 
+/// CJK fallback, loaded from the device when present (the embedded faces are Latin only).
+/// Reading it takes about a second there and holds up everything else being read from the
+/// card, so it is left until the shelf is on screen; only text that needs it sooner waits.
+fn fallback() -> Option<&'static fontdue::Font> {
+    static FALLBACK: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
+    FALLBACK
+        .get_or_init(|| {
+            FALLBACK_FONTS.iter().find_map(|p| {
+                let bytes = std::fs::read(p).ok()?;
+                fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
+            })
+        })
+        .as_ref()
+}
+
+/// Reads the fallback font in the background, ahead of the first title that wants it.
+pub fn warm_fallback() {
+    std::thread::spawn(fallback);
+}
+
 impl Fonts {
     pub fn load() -> Fonts {
         let mk = |b: &[u8]| fontdue::Font::from_bytes(b, fontdue::FontSettings::default()).expect("embedded font");
-        let fallback = FALLBACK_FONTS.iter().find_map(|p| {
-            let bytes = std::fs::read(p).ok()?;
-            fontdue::Font::from_bytes(bytes, fontdue::FontSettings::default()).ok()
-        });
         Fonts {
             regular: mk(include_bytes!("../assets/RobotoCondensed-Regular.ttf")),
             bold: mk(include_bytes!("../assets/RobotoCondensed-Bold.ttf")),
-            fallback,
         }
     }
 
     fn pick(&self, c: char, bold: bool) -> &fontdue::Font {
         let main = if bold { &self.bold } else { &self.regular };
-        match &self.fallback {
-            Some(fb) if main.lookup_glyph_index(c) == 0 => fb,
-            _ => main,
+        if main.lookup_glyph_index(c) == 0 {
+            if let Some(fb) = fallback() {
+                return fb;
+            }
         }
+        main
     }
 
     pub fn width(&self, s: &str, size: f32, bold: bool) -> f32 {

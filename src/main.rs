@@ -29,6 +29,12 @@ const DEFAULT_LAUNCHER: &str = "/mnt/vendor/deep/nnddss/launch.sh";
 // What the stock emulator logs once a game has shut down and it is about to show its own menu.
 const BACK_TO_MENU: &str = "returning to NNDDSS menu";
 
+/// Logs a stage of start-up against the kernel's clock, to show where the time goes.
+pub fn mark(stage: &str) {
+    let up = std::fs::read_to_string("/proc/uptime").unwrap_or_default();
+    eprintln!("dslot: {} s {stage}", up.split_whitespace().next().unwrap_or("?"));
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("dslot: {e}");
@@ -74,15 +80,19 @@ fn run() -> Result<(), String> {
         roms = DEFAULT_ROMS.iter().map(PathBuf::from).collect();
     }
 
+    mark("started");
     boot::refresh(&opts.boot_script);
     eprintln!("dslot: start at power-on: available={} enabled={}", boot::available(), boot::enabled(&opts.boot_script));
     let fonts = gfx::Fonts::load();
-    let games = rom::scan(&roms);
+    mark("fonts loaded");
+    let games = rom::scan(&roms, &opts.cache.join("games.bin"));
+    mark("games scanned");
     eprintln!("dslot: {} games in {:?}", games.len(), roms);
     opts.searched = roms;
 
     let mut stats = stats::Stats::load(exe_dir.join("stats.tsv"));
     let mut settings = settings::Settings::load(exe_dir.join("settings.ini"));
+    mark("stats and settings loaded");
 
     loop {
         // The window is dropped before the game starts and rebuilt when it exits.

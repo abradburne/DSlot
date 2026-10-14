@@ -155,6 +155,7 @@ struct Ui<'a> {
 
 pub fn run(games: &[Game], stats: &mut Stats, settings: &mut Settings, fonts: &Fonts, opts: &Opts) -> Result<Outcome, String> {
     let shell = Shell::load();
+    crate::mark("cart shell loaded");
     // The artwork workers live exactly as long as the shelf is up.
     std::thread::scope(|scope| shelf(scope, games, stats, settings, fonts, &shell, opts))
 }
@@ -170,6 +171,7 @@ fn shelf<'scope, 'env: 'scope>(
 ) -> Result<Outcome, String> {
     let sdl = sdl2::init()?;
     let video = sdl.video()?;
+    crate::mark("video ready");
 
     // The DS+ exposes its two panels as two displays side by side. Span both, like the stock emulator.
     let bounds: Vec<Rect> = (0..video.num_video_displays()?).filter_map(|i| video.display_bounds(i).ok()).collect();
@@ -197,6 +199,7 @@ fn shelf<'scope, 'env: 'scope>(
     sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "1");
     let mut canvas = builder.build().map_err(|e| e.to_string())?;
     canvas.set_blend_mode(BlendMode::Blend);
+    crate::mark("window and renderer ready");
     sdl.mouse().show_cursor(!dual);
 
     let pads = sdl.game_controller()?;
@@ -204,8 +207,11 @@ fn shelf<'scope, 'env: 'scope>(
         let _ = pads.load_mappings(db);
     }
     let _open: Vec<_> = (0..pads.num_joysticks()?).filter(|&i| pads.is_game_controller(i)).filter_map(|i| pads.open(i).ok()).collect();
+    crate::mark("controllers ready");
     let mut sound = Sound { pacat: true, system: sdl.audio().ok(), queue: None, idle: 0.0, on: settings.sound };
+    crate::mark("audio ready");
     let mut panel = if dual { Panel::open() } else { None };
+    crate::mark("touch panel ready");
 
     let tc = canvas.texture_creator();
     let white = texture(&tc, &Img { w: 1, h: 1, px: vec![255; 4] })?;
@@ -248,6 +254,7 @@ fn shelf<'scope, 'env: 'scope>(
     // Power off has been asked for once and wants confirming.
     let mut armed = false;
     let mut events = sdl.event_pump()?;
+    crate::mark("shelf set up");
     let mut pointers = Vec::new();
     let mut tick = Instant::now();
     let mut frame = 0u32;
@@ -572,6 +579,9 @@ fn shelf<'scope, 'env: 'scope>(
                 .chain((1..=THUMBS / 2).flat_map(|d| [Job::Thumb(sel.wrapping_sub(d)), Job::Thumb(sel + d)]));
             let hold: HashSet<usize> = if grid { next.iter().copied().chain([sel]).collect() } else { near.iter().chain(&next).copied().chain([sel]).collect() };
             settled = ui.load(&order, wants, &hold, sel)?;
+            if frame == 0 {
+                crate::mark("artwork asked for");
+            }
 
             let place = (n > 0).then(|| format!("{} / {n}", sel + 1));
             let notes = [settings.faves_only.then_some("Favourites"), (settings.sort != Sort::Name).then_some(settings.sort.label())];
@@ -594,7 +604,16 @@ fn shelf<'scope, 'env: 'scope>(
                 ui.text(bot, &format!("Sound {} of {}", v + 1, sounds.len()), 24.0, true, 40.0, 22.0, 0.0, WHITE)?;
             }
         }
+        if frame == 0 {
+            crate::mark("first frame drawn");
+        }
         ui.canvas.present();
+        if frame < 2 {
+            crate::mark(if frame == 0 { "first frame shown" } else { "second frame shown" });
+        }
+        if frame == 1 {
+            crate::gfx::warm_fallback();
+        }
         frame += 1;
 
         if let Some(path) = &opts.shot {
