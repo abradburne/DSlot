@@ -29,7 +29,7 @@ The screenshots use made-up games. With your own box art in place it looks like 
 ## Install
 
 1. Download `DSlot-0.1.0-rgdsplus.zip` from the [latest release](https://github.com/abradburne/dslot/releases/latest) and unzip it. Inside is a folder, `Roms`, holding one folder, `APPS`.
-2. Turn the DS+ off, take out the SD card in the slot marked **TF1/INT** (the one the DS+ starts from) and put it in your computer. It shows as a drive called `ROMS`. Install DSlot there rather than on the games card in TF2: that card is usually exFAT, which the DS+ reads much more slowly, and only from TF1 can DSlot start early with dsboot. DSlot finds games on both cards wherever it is installed. (If your DS+ starts from its internal storage and has no card in TF1, use the card your games are on.)
+2. Turn the DS+ off, take out the SD card in the slot marked **TF1/INT** (the one the DS+ starts from) and put it in your computer. It shows as a drive called `ROMS`. Install DSlot there rather than on the games card in TF2: that card is usually exFAT, which the DS+ reads much more slowly, and only from TF1 can DSlot start early with [dsboot](https://github.com/abradburne/dsboot). DSlot finds games on both cards wherever it is installed. (If your DS+ starts from its internal storage and has no card in TF1, use the card your games are on.)
 3. On the card, open `Roms`, then `APPS`. (No `APPS` folder there? Create one, in capitals.)
 4. Copy **everything inside the zip's `Roms/APPS` folder** into the card's `Roms/APPS` folder. That is four things:
 
@@ -56,7 +56,7 @@ If you would rather do it from the stock menu, **DSlot_boot_on** and **DSlot_boo
 
 How it works: it puts one file on the card, `update/update.sh`, which the stock boot script runs before its own menu comes up. To undo it without the device, delete that file from the card on a computer.
 
-On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. dsboot, a faster start-up for the stock OS (not yet published), runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; DSlot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
+On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. [dsboot](https://github.com/abradburne/dsboot), a faster start-up for the stock OS, runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; DSlot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
 
 ### Update
 
