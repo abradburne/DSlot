@@ -23,13 +23,13 @@ The screenshots use made-up games. With your own box art in place it looks like 
 ## What you need
 
 - An Anbernic RG DS+ on the stock OS. dslot was made and tested on firmware V1.0 (20260915).
-- DS games in `Roms/NDS` on the SD card, where the stock menu already expects them.
+- DS games in `Roms/NDS` on either SD card, where the stock menu already expects them.
 - A computer with an SD card reader.
 
 ## Install
 
 1. Download `dslot-0.1.0-rgdsplus.zip` from the [latest release](https://github.com/abradburne/dslot/releases/latest) and unzip it. Inside is a folder, `Roms`, holding one folder, `APPS`.
-2. Turn the DS+ off, take out the SD card your games are on and put it in your computer.
+2. Turn the DS+ off, take out an SD card and put it in your computer. If your DS+ starts from an SD card, use that one: it shows on the computer as a drive called `ROMS`, and dslot starts faster from it. Otherwise use the card your games are on. dslot finds games on both cards wherever it is installed.
 3. On the card, open `Roms`, then `APPS`. (No `APPS` folder there? Create one, in capitals.)
 4. Copy **everything inside the zip's `Roms/APPS` folder** into the card's `Roms/APPS` folder. That is four things:
 
@@ -44,7 +44,7 @@ The screenshots use made-up games. With your own box art in place it looks like 
 5. Eject the card, put it back in the DS+ and turn it on.
 6. In the stock menu open **Apps** and choose **dslot**.
 
-When it is right, the card has `Roms/APPS/dslot.sh` and `Roms/APPS/dslot/dslot` on it, alongside your games in `Roms/NDS`.
+When it is right, the card has `Roms/APPS/dslot.sh` and `Roms/APPS/dslot/dslot` on it.
 
 The first start reads every game and prepares its artwork, so covers may take a moment to appear. After that they are kept ready.
 
@@ -56,13 +56,15 @@ If you would rather do it from the stock menu, **dslot_boot_on** and **dslot_boo
 
 How it works: it puts one file on the card, `update/update.sh`, which the stock boot script runs before its own menu comes up. To undo it without the device, delete that file from the card on a computer.
 
+On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. [dsboot](../dsboot), a faster start-up for the stock OS, runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; dslot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
+
 ### Update
 
 Do the install again with the new zip, replacing the files on the card. Your play times, favourites, ratings and settings are kept.
 
 ### Remove
 
-Turn off **Start at power-on**, then delete `dslot`, `dslot.sh`, `dslot_boot_on.sh` and `dslot_boot_off.sh` from the card's `Roms/APPS`.
+Turn off **Start at power-on**, then delete `dslot`, `dslot.sh`, `dslot_boot_on.sh` and `dslot_boot_off.sh` from the card's `Roms/APPS`. (Already removed it without turning that off? Delete `update/update.sh` and `update/early.sh` from the card as well.)
 
 ## Controls
 
@@ -96,7 +98,7 @@ X opens the menu on the touch screen. D-pad up / down picks a row, left / right 
 
 Favourites and ratings are kept with the play times in `Roms/APPS/dslot/stats.tsv`; the other choices are in `settings.ini` beside it.
 
-Artwork is read and scaled on background threads, nearest the selection first, so browsing never waits for it. Grid covers are also saved, already scaled, in `Roms/APPS/dslot/cache` (about 120 KB a game), which makes every start after the first quick. The folder can be deleted at any time; it is rebuilt as needed.
+Artwork is read and scaled on background threads, nearest the selection first, so browsing never waits for it. Grid covers are also saved, already scaled, in `Roms/APPS/dslot/cache` (about 120 KB a game), which makes every start after the first quick. What each ROM says about itself (title, game code, icon) is kept there too, in `games.bin`, so a start only has to list the game folders. A ROM is known there by its file name: one replaced by a different game under the same name keeps the old title and icon until the folder is deleted. The folder can be deleted at any time; it is rebuilt as needed.
 
 Games are read from `Roms/NDS` on both cards. `.nds` files get their title, icon and game code from the ROM itself; `.zip` files are listed by filename.
 
@@ -169,7 +171,7 @@ target/release/dslot --roms /tmp/demo
 - **Touch does nothing or lands in the wrong place.** Buttons work regardless. Add `export DSLOT_TOUCH_DEV=/dev/input/eventN` in the same place, with the touch panel's event number.
 - **It does not start at power-on.** That relies on the stock `/mnt/mod/ctrl/autostart` script, which is part of firmware V1.0 (20260915). Other firmware may not have it.
 
-For anything else, `Roms/APPS/dslot/log.txt` and `diag.txt` on the card record what dslot saw the last time it started. Attach both to a bug report.
+For anything else, `Roms/APPS/dslot/log.txt` and `diag.txt` on the card record what dslot saw the last time it started, and `log.txt` how long each stage of starting took. Attach both to a bug report.
 
 ## Licence
 
