@@ -56,7 +56,7 @@ If you would rather do it from the stock menu, **dslot_boot_on** and **dslot_boo
 
 How it works: it puts one file on the card, `update/update.sh`, which the stock boot script runs before its own menu comes up. To undo it without the device, delete that file from the card on a computer.
 
-On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. [dsboot](../dsboot), a faster start-up for the stock OS, runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; dslot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
+On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. dsboot, a faster start-up for the stock OS (not yet published), runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; dslot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
 
 ### Update
 
