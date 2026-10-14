@@ -153,11 +153,9 @@ struct Ui<'a> {
     heart: Texture,
 }
 
-pub fn run(games: &[Game], stats: &mut Stats, settings: &mut Settings, fonts: &Fonts, opts: &Opts) -> Result<Outcome, String> {
-    let shell = Shell::load();
-    crate::mark("cart shell loaded");
+pub fn run(games: &[Game], stats: &mut Stats, settings: &mut Settings, fonts: &Fonts, shell: &Shell, opts: &Opts) -> Result<Outcome, String> {
     // The artwork workers live exactly as long as the shelf is up.
-    std::thread::scope(|scope| shelf(scope, games, stats, settings, fonts, &shell, opts))
+    std::thread::scope(|scope| shelf(scope, games, stats, settings, fonts, shell, opts))
 }
 
 fn shelf<'scope, 'env: 'scope>(
@@ -613,6 +611,10 @@ fn shelf<'scope, 'env: 'scope>(
         }
         if frame == 1 {
             crate::gfx::warm_fallback();
+            // Started early by dsboot, which holds back the radios until this is up.
+            if let Ok(shown) = std::env::var("DSBOOT_SHOWN") {
+                let _ = std::fs::write(shown, b"");
+            }
         }
         frame += 1;
 

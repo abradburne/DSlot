@@ -10,4 +10,10 @@ if [ -f "$hook" ] && ! grep -q dslot "$hook"; then
 fi
 # Where earlier versions put it.
 grep -qs dslot /mnt/mmc/dmenu.bin && rm -f /mnt/mmc/dmenu.bin
-mkdir -p "$card/update" && cp "$card/Roms/APPS/dslot/boot.sh" "$hook" && sync
+mkdir -p "$card/update" || exit 1
+# See early.sh: only of use on the card the OS starts from.
+early="$card/update/early.sh"
+if [ "$card" = /mnt/mmc ] && { [ ! -f "$early" ] || grep -q dslot "$early"; }; then
+	cp "$card/Roms/APPS/dslot/early.sh" "$early"
+fi
+cp "$card/Roms/APPS/dslot/boot.sh" "$hook" && sync

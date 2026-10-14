@@ -85,6 +85,14 @@ fn run() -> Result<(), String> {
     eprintln!("dslot: start at power-on: available={} enabled={}", boot::available(), boot::enabled(&opts.boot_script));
     let fonts = gfx::Fonts::load();
     mark("fonts loaded");
+    let shell = art::Shell::load();
+    mark("cart shell loaded");
+    // Started ahead of the stock boot script (see early.sh), which is what mounts the games
+    // card: it may be a moment behind.
+    if let Ok(dir) = std::env::var("DSLOT_WAIT_FOR") {
+        wait_for_mount(&dir);
+        mark("games card mounted");
+    }
     let games = rom::scan(&roms, &opts.cache.join("games.bin"));
     mark("games scanned");
     eprintln!("dslot: {} games in {:?}", games.len(), roms);
@@ -96,7 +104,7 @@ fn run() -> Result<(), String> {
 
     loop {
         // The window is dropped before the game starts and rebuilt when it exits.
-        match ui::run(&games, &mut stats, &mut settings, &fonts, &opts)? {
+        match ui::run(&games, &mut stats, &mut settings, &fonts, &shell, &opts)? {
             ui::Outcome::Quit => return Ok(()),
             ui::Outcome::PowerOff => {
                 // As the stock menu does it. Only on the device: a desktop preview just closes.
@@ -120,6 +128,17 @@ fn run() -> Result<(), String> {
                 opts.returning = true;
             }
         }
+    }
+}
+
+/// Returns once something is mounted at `dir`, or after three seconds.
+fn wait_for_mount(dir: &str) {
+    for _ in 0..150 {
+        let mounted = std::fs::read_to_string("/proc/mounts").is_ok_and(|m| m.lines().any(|l| l.split(' ').nth(1) == Some(dir)));
+        if mounted {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
