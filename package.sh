@@ -12,5 +12,5 @@ cp -R card/Roms "$stage/"
 cp target/aarch64-unknown-linux-gnu/release/dslot "$stage/Roms/APPS/dslot/dslot"
 cp README.md "$stage/Roms/APPS/dslot/README.md"
 find "$stage" -name .DS_Store -delete
-(cd "$stage" && zip -qr "../dslot-$version-rgdsplus.zip" Roms)
-echo "dist/dslot-$version-rgdsplus.zip"
+(cd "$stage" && zip -qr "../DSlot-$version-rgdsplus.zip" Roms)
+echo "dist/DSlot-$version-rgdsplus.zip"

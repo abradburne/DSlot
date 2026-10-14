@@ -23,5 +23,5 @@ for disk in /sys/block/mmcblk[0-9]; do
 done
 
 echo "$(date '+%F %T') started early, $(cut -d' ' -f1 /proc/uptime) s after the kernel" >> "$card/Roms/APPS/dslot/boot.log"
-bash "$card/Roms/APPS/dslot.sh"
+bash "$card/Roms/APPS/DSlot.sh"
 echo $? > /tmp/dslot.early.done

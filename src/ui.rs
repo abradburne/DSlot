@@ -181,13 +181,13 @@ fn shelf<'scope, 'env: 'scope>(
         let (half, s) = (union.width() as f32 / 2.0, (union.height() as f32 / SH).min(union.width() as f32 / 2.0 / SW));
         let pad = ((half - SW * s) / 2.0, (union.height() as f32 - SH * s) / 2.0);
         let (left, right) = (View { ox: pad.0, oy: pad.1, s }, View { ox: half + pad.0, oy: pad.1, s });
-        let w = video.window("dslot", union.width(), union.height()).position(union.x(), union.y()).borderless().build();
+        let w = video.window("DSlot", union.width(), union.height()).position(union.x(), union.y()).borderless().build();
         // The touch panel is the right-hand output, so that is the bottom screen.
         if opts.swap { (w, right, left) } else { (w, left, right) }
     } else {
         // Desktop preview: the two screens stacked, as you hold the device.
         let s = if headless { 1.0 } else { 0.5 };
-        let w = video.window("dslot", (SW * s) as u32, (SH * 2.0 * s) as u32).position_centered().build();
+        let w = video.window("DSlot", (SW * s) as u32, (SH * 2.0 * s) as u32).position_centered().build();
         (w, View { ox: 0.0, oy: 0.0, s }, View { ox: 0.0, oy: SH * s, s })
     };
     let window = window.map_err(|e| e.to_string())?;
@@ -703,7 +703,7 @@ impl Sound {
 /// Play 48 kHz mono `pcm` behind `lead` seconds of silence through PulseAudio's own player.
 fn pacat(lead: f32, pcm: &[u8]) -> std::io::Result<()> {
     let rate = format!("--rate={CLIP_HZ}");
-    let args = ["--playback", "--raw", "--format=s16le", "--channels=1", &rate, "--latency-msec=30", "--client-name=dslot"];
+    let args = ["--playback", "--raw", "--format=s16le", "--channels=1", &rate, "--latency-msec=30", "--client-name=DSlot"];
     let mut child = Command::new("pacat").args(args).stdin(Stdio::piped()).stdout(Stdio::null()).spawn()?;
     let mut data = vec![0u8; (lead * CLIP_HZ as f32) as usize * 2];
     data.extend_from_slice(pcm);
@@ -1031,7 +1031,7 @@ impl Ui<'_> {
         self.canvas.set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         let path = game.map(|g| self.games[g].path.clone());
         let name = game.map_or("No game selected", |g| self.games[g].name()).to_owned();
-        for (r, heading) in [(0, name.as_str()), (2, "Library"), (5, "dslot")] {
+        for (r, heading) in [(0, name.as_str()), (2, "Library"), (5, "DSlot")] {
             self.text(v, heading, 20.0, true, 150.0, row_y(r) - 54.0, 0.0, FAINT)?;
         }
         for (r, label) in MENU.iter().enumerate() {

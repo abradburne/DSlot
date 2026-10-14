@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start dslot at power-on. Undo with "dslot_boot_off", from dslot's own menu, or by deleting
+# Start DSlot at power-on. Undo with "DSlot_boot_off", from DSlot's own menu, or by deleting
 # update/update.sh from this card on a computer.
 
 card="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -1,4 +1,4 @@
-# dslot
+# DSlot
 
 A game shelf for the Anbernic RG DS+. The touch screen holds your carts over a card slot; the top screen shows the selected game's box, how long you have played it and your rating. Push a cart into the slot to play.
 
@@ -22,49 +22,51 @@ The screenshots use made-up games. With your own box art in place it looks like 
 
 ## What you need
 
-- An Anbernic RG DS+ on the stock OS. dslot was made and tested on firmware V1.0 (20260915).
+- An Anbernic RG DS+ on the stock OS. DSlot was made and tested on firmware V1.0 (20260915).
 - DS games in `Roms/NDS` on either SD card, where the stock menu already expects them.
 - A computer with an SD card reader.
 
 ## Install
 
-1. Download `dslot-0.1.0-rgdsplus.zip` from the [latest release](https://github.com/abradburne/dslot/releases/latest) and unzip it. Inside is a folder, `Roms`, holding one folder, `APPS`.
-2. Turn the DS+ off, take out an SD card and put it in your computer. If your DS+ starts from an SD card, use that one: it shows on the computer as a drive called `ROMS`, and dslot starts faster from it. Otherwise use the card your games are on. dslot finds games on both cards wherever it is installed.
+1. Download `DSlot-0.1.0-rgdsplus.zip` from the [latest release](https://github.com/abradburne/dslot/releases/latest) and unzip it. Inside is a folder, `Roms`, holding one folder, `APPS`.
+2. Turn the DS+ off, take out an SD card and put it in your computer. If your DS+ starts from an SD card, use that one: it shows on the computer as a drive called `ROMS`, and DSlot starts faster from it. Otherwise use the card your games are on. DSlot finds games on both cards wherever it is installed.
 3. On the card, open `Roms`, then `APPS`. (No `APPS` folder there? Create one, in capitals.)
 4. Copy **everything inside the zip's `Roms/APPS` folder** into the card's `Roms/APPS` folder. That is four things:
 
    ```
    dslot/               folder
-   dslot.sh
-   dslot_boot_on.sh
-   dslot_boot_off.sh
+   DSlot.sh
+   DSlot_boot_on.sh
+   DSlot_boot_off.sh
    ```
 
    Copy the contents, not the `Roms` folder itself: dragging `Roms` onto the card makes some computers replace the card's `Roms` folder, games and all, or put a second one (`Roms 2`) beside it.
 5. Eject the card, put it back in the DS+ and turn it on.
-6. In the stock menu open **Apps** and choose **dslot**.
+6. In the stock menu open **Apps** and choose **DSlot**.
 
-When it is right, the card has `Roms/APPS/dslot.sh` and `Roms/APPS/dslot/dslot` on it.
+When it is right, the card has `Roms/APPS/DSlot.sh` and `Roms/APPS/dslot/dslot` on it.
 
 The first start reads every game and prepares its artwork, so covers may take a moment to appear. After that they are kept ready.
 
 ### Start at power-on
 
-In dslot press **X** for the menu, go to **Start at power-on** and press **A** to turn it on. The DS+ then boots into dslot. Leaving dslot (Select + Start) takes you to the stock menu.
+In DSlot press **X** for the menu, go to **Start at power-on** and press **A** to turn it on. The DS+ then boots into DSlot. Leaving DSlot (Select + Start) takes you to the stock menu.
 
-If you would rather do it from the stock menu, **dslot_boot_on** and **dslot_boot_off** in Apps do the same.
+If you would rather do it from the stock menu, **DSlot_boot_on** and **DSlot_boot_off** in Apps do the same.
 
 How it works: it puts one file on the card, `update/update.sh`, which the stock boot script runs before its own menu comes up. To undo it without the device, delete that file from the card on a computer.
 
-On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. dsboot, a faster start-up for the stock OS (not yet published), runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; dslot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
+On the card the DS+ starts from, it also puts `update/early.sh` beside it. The stock system never runs that file. dsboot, a faster start-up for the stock OS (not yet published), runs it as soon as the screen is up, a second or more before the stock boot script gets to `update.sh`; DSlot then appears that much sooner, and `update.sh` only waits for it. Delete both files to undo it by hand.
 
 ### Update
 
 Do the install again with the new zip, replacing the files on the card. Your play times, favourites, ratings and settings are kept.
 
+From 0.1.0: first delete `dslot.sh`, `dslot_boot_on.sh` and `dslot_boot_off.sh` from the card's `Roms/APPS`. They are now `DSlot.sh` and so on, and copying over files whose names differ only in capitals keeps the old names. Leave the `dslot` folder: it holds your play times and settings.
+
 ### Remove
 
-Turn off **Start at power-on**, then delete `dslot`, `dslot.sh`, `dslot_boot_on.sh` and `dslot_boot_off.sh` from the card's `Roms/APPS`. (Already removed it without turning that off? Delete `update/update.sh` and `update/early.sh` from the card as well.)
+Turn off **Start at power-on**, then delete `dslot`, `DSlot.sh`, `DSlot_boot_on.sh` and `DSlot_boot_off.sh` from the card's `Roms/APPS`. (Already removed it without turning that off? Delete `update/update.sh` and `update/early.sh` from the card as well.)
 
 ## Controls
 
@@ -78,7 +80,7 @@ Turn off **Start at power-on**, then delete `dslot`, `dslot.sh`, `dslot_boot_on.
 | Tap a cover in the grid, then tap it again | Pick it, then play it |
 | Y | Mark or unmark the game as a favourite |
 | X | Open the menu |
-| Select + Start | Leave dslot |
+| Select + Start | Leave DSlot |
 
 ## Menu
 
@@ -93,7 +95,7 @@ X opens the menu on the touch screen. D-pad up / down picks a row, left / right 
 | Show | All games, or favourites only. |
 | Game case | The plastic around the box art: clear (PAL), black (everywhere else), or by region, which goes by the game code in the ROM. |
 | Sounds | The insert and eject sounds. |
-| Start at power-on | Whether the device boots into dslot instead of the stock menu. |
+| Start at power-on | Whether the device boots into DSlot instead of the stock menu. |
 | Power off | Shuts the device down. Press A, then A again to confirm. |
 
 Favourites and ratings are kept with the play times in `Roms/APPS/dslot/stats.tsv`; the other choices are in `settings.ini` beside it.
@@ -139,7 +141,7 @@ These shapes are the ones GameTDB uses for its DS `label` and `cart` images, whi
 
 ### The shell
 
-The cart's plastic is drawn by dslot itself, in `src/art.rs`, to the proportions of a real card, on a 336 × 360 grid with the sticker's window at (32, 20), 272 × 296. No artwork of any game, and no image of the card, ships with dslot.
+The cart's plastic is drawn by DSlot itself, in `src/art.rs`, to the proportions of a real card, on a 336 × 360 grid with the sticker's window at (32, 20), 272 × 296. No artwork of any game, and no image of the card, ships with dslot.
 
 ## Build
 
@@ -161,17 +163,17 @@ target/release/dslot --make-demo /tmp/demo     # six tiny fake ROMs
 target/release/dslot --roms /tmp/demo
 ```
 
-`SDL_VIDEODRIVER=dummy dslot --roms DIR --shot out.png` draws one frame to a file.
+`SDL_VIDEODRIVER=dummy DSlot --roms DIR --shot out.png` draws one frame to a file.
 
 ## Troubleshooting
 
-- **dslot is not in Apps.** The files are in the wrong place. Check the card has `Roms/APPS/dslot.sh` (not `Roms/APPS/Roms/APPS/dslot.sh`, and not in a `Roms 2` folder).
-- **No games listed.** dslot reads `.nds` and `.zip` files from `Roms/NDS` on both cards.
-- **The two screens are the wrong way round.** Edit `Roms/APPS/dslot.sh` and add `export DSLOT_SWAP=1` above the last line.
+- **DSlot is not in Apps.** The files are in the wrong place. Check the card has `Roms/APPS/DSlot.sh` (not `Roms/APPS/Roms/APPS/DSlot.sh`, and not in a `Roms 2` folder).
+- **No games listed.** DSlot reads `.nds` and `.zip` files from `Roms/NDS` on both cards.
+- **The two screens are the wrong way round.** Edit `Roms/APPS/DSlot.sh` and add `export DSLOT_SWAP=1` above the last line.
 - **Touch does nothing or lands in the wrong place.** Buttons work regardless. Add `export DSLOT_TOUCH_DEV=/dev/input/eventN` in the same place, with the touch panel's event number.
 - **It does not start at power-on.** That relies on the stock `/mnt/mod/ctrl/autostart` script, which is part of firmware V1.0 (20260915). Other firmware may not have it.
 
-For anything else, `Roms/APPS/dslot/log.txt` and `diag.txt` on the card record what dslot saw the last time it started, and `log.txt` how long each stage of starting took. Attach both to a bug report.
+For anything else, `Roms/APPS/dslot/log.txt` and `diag.txt` on the card record what DSlot saw the last time it started, and `log.txt` how long each stage of starting took. Attach both to a bug report.
 
 ## Licence
 
@@ -179,6 +181,6 @@ GPL-3.0-or-later; see [LICENSE](LICENSE).
 
 - Roboto Condensed, embedded for the text, is under the Apache License 2.0.
 - The insert and eject sounds are our own recording of a DS card slot.
-- dslot contains no game artwork, ROMs, BIOS files or code from Nintendo or any emulator. Game titles and icons on screen are read from your own ROM files as it runs.
+- DSlot contains no game artwork, ROMs, BIOS files or code from Nintendo or any emulator. Game titles and icons on screen are read from your own ROM files as it runs.
 
-dslot is not affiliated with Nintendo or Anbernic. Nintendo DS is a trademark of Nintendo.
+DSlot is not affiliated with Nintendo or Anbernic. Nintendo DS is a trademark of Nintendo.

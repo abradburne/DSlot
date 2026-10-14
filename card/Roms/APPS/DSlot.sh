@@ -1,5 +1,5 @@
 #!/bin/bash
-# dslot: run from Apps on the stock RG DS+ menu.
+# DSlot: run from Apps on the stock RG DS+ menu.
 
 progdir="$(cd "$(dirname "$0")" && pwd)/dslot"
 up() { cut -d' ' -f1 /proc/uptime; }
@@ -44,6 +44,6 @@ cd "$progdir" || exit 1
 	echo "== loadapp tail"; tail -n 25 /mnt/vendor/ctrl/loadapp.sh 2>&1
 ) > "$progdir/diag.txt" 2>&1 &
 {
-	echo "dslot.sh: $t_script s started"
+	echo "DSlot.sh: $t_script s started"
 	./dslot "$@"
 } > "$progdir/log.txt" 2>&1
