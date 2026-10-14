@@ -29,8 +29,10 @@ echo 0 > /sys/class/anbernic_misc/tpctrl
 
 cd "$progdir" || exit 1
 
-# What decides whether dslot starts at power-on, written out for troubleshooting.
-{
+# What decides whether dslot starts at power-on, written out for troubleshooting. Left until
+# the shelf is up: it took half a second that the shelf was waiting behind.
+(
+	sleep 5
 	date
 	echo "== boot_device: $(cat /sys/class/anbernic_misc/boot_device 2>&1)"
 	echo "== version"; cat /mnt/vendor/oem/version.ini 2>&1
@@ -40,9 +42,8 @@ cd "$progdir" || exit 1
 	echo "== sound"; echo "runapp: $(cat /sys/class/anbernic_misc/runapp 2>&1)"; pactl info 2>&1 | grep -E "Default Sink|Server Name"; pactl list short sinks 2>&1
 	echo "== dmenu_ln"; cat /mnt/vendor/ctrl/dmenu_ln 2>&1
 	echo "== loadapp tail"; tail -n 25 /mnt/vendor/ctrl/loadapp.sh 2>&1
-} > "$progdir/diag.txt" 2>&1
+) > "$progdir/diag.txt" 2>&1 &
 {
 	echo "dslot.sh: $t_script s started"
-	echo "dslot.sh: $(up) s diagnostics written"
 	./dslot "$@"
 } > "$progdir/log.txt" 2>&1
