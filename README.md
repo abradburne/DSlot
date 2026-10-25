@@ -26,6 +26,9 @@ Inspired by [slot.](https://github.com/BrandonKowalski/slot) Written in Rust on 
 
 The screenshots use made-up games. With your own box art in place it looks like your shelf.
 
+On the DS+'s stock OS? See [On the stock OS](#on-the-stock-os): until a stock-OS zip of this
+version is out, the ready-made one is the [DSlot 0.2.0 release](https://github.com/abradburne/DSlot/releases/tag/v0.2.0).
+
 ## Two builds
 
 DSlot is one program built for one of two systems:
@@ -42,6 +45,11 @@ how it starts at power-on, how it gets the screens) is in [`src/platform/`](src/
 [docs/building.md](docs/building.md) builds either.
 
 ## On the stock OS
+
+> **Looking for DSlot for the stock OS?** This version builds for it, but its stock-OS zip is
+> not out yet. Until it is, install the ready-made zip from the
+> [DSlot 0.2.0 release](https://github.com/abradburne/DSlot/releases/tag/v0.2.0), the last
+> stock-OS-only version. Its source is on the [`stock-0.2`](https://github.com/abradburne/DSlot/tree/stock-0.2) branch.
 
 ### What you need
 
