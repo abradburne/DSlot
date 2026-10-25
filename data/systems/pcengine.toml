@@ -1,0 +1,37 @@
+# PC Engine / TurboGrafx-16: the system card's facts, from https://en.wikipedia.org/wiki/TurboGrafx-16
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "PC Engine / TurboGrafx-16"
+maker = "NEC (designed by Hudson Soft)"
+source = "https://en.wikipedia.org/wiki/TurboGrafx-16"
+bio = "Designed by Hudson Soft and built by NEC, it launched in Japan on 30 October 1987, the first console of the fourth generation. An 8-bit processor drives two 16-bit graphics chips. In Japan it sold 10 million and rivalled the Super Famicom."
+fact = "At 14 × 14 × 3.5 cm, the PC Engine is still the smallest major home console ever released."
+
+[[stats]]
+label = "Released"
+value = "1987"
+bar = 1987
+
+[[stats]]
+label = "Sold"
+value = "10 million in Japan"
+bar = 10
+
+[[stats]]
+label = "Processor"
+value = "7.16 MHz HuC6280"
+bar = 7.16
+
+[[stats]]
+label = "Memory"
+value = "8 KB"
+bar = 8
+
+[[stats]]
+label = "Screen"
+value = "256 × 239, 482 of 512 colours"
+bar = 61184
+
+[[stats]]
+label = "Games"
+value = "678"
+bar = 678

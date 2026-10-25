@@ -1,0 +1,42 @@
+# Game Boy: the system card's facts, from https://en.wikipedia.org/wiki/Game_Boy
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Game Boy"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Game_Boy"
+bio = "Built by Nintendo's R&D1 team around a Sharp 8-bit processor and a 160 × 144 screen in four shades, the Game Boy launched in Japan on 21 April 1989. More than 1,000 games were released for it, and with the Game Boy Color it sold 118.69 million units."
+fact = "Some of the engineers called early prototypes \"DameGame\" (dame: hopeless, in Japanese), for their poor screens."
+
+[[stats]]
+label = "Released"
+value = "1989"
+bar = 1989
+
+[[stats]]
+label = "Launch price"
+value = "US$89.99"
+bar = 89.99
+
+[[stats]]
+label = "Sold"
+value = "118.69 million (with GBC)"
+bar = 118.69
+
+[[stats]]
+label = "Processor"
+value = "4.19 MHz Sharp SM83"
+bar = 4.194304
+
+[[stats]]
+label = "Memory"
+value = "8 KB"
+bar = 8
+
+[[stats]]
+label = "Screen"
+value = "160 × 144, 4 shades"
+bar = 23040
+
+[[stats]]
+label = "Games"
+value = "Over 1,000"
+bar = 1000

@@ -1,0 +1,57 @@
+# DSlot on both screens at power-on, in place of the tty1 login shell (nibOS's boot UI).
+# Shipped by the dslot package; nibOS turns it on and off with `nib boot-ui on|off`.
+#
+# The user it runs as is nibOS's to say, in a drop-in, dslot.service.d/user.conf:
+#
+#   [Service]
+#   User=<user>
+#   Group=<user>
+#   Environment=XDG_RUNTIME_DIR=/run/user/<uid>
+#
+# XDG_RUNTIME_DIR is for the clicks: they go through pacat to PipeWire in the user's own user
+# manager (lingering, so it runs without a login), and outside a session nothing else tells
+# pacat where its socket is. Without the drop-in DSlot would be root, and refuses to start.
+#
+# Known shortcut, kept on purpose: CAP_DAC_OVERRIDE. DSlot starts from sysinit.target, with no
+# login, PAM, logind session or user manager, so it has no seat and no uaccess ACLs, and the
+# DRM and input nodes still belong to root: udev gives them their groups during its coldplug,
+# well after this starts. The capability lets DSlot open them regardless of their modes. The
+# ways to drop it cost boot time or need a seat manager: order the unit after udev's coldplug
+# (the shelf then waits for it), or have seatd or a logind session hand DSlot its devices.
+[Unit]
+Description=DSlot game shelf
+Documentation=https://github.com/abradburne/DSlot
+DefaultDependencies=no
+After=systemd-journald.socket systemd-tmpfiles-setup-dev-early.service systemd-remount-fs.service
+Conflicts=getty@tty1.service shutdown.target
+Before=shutdown.target
+# Leaving DSlot (Select + Start), or DSlot failing, brings up the shell on tty1.
+OnSuccess=getty@tty1.service
+OnFailure=getty@tty1.service
+
+[Service]
+Type=exec
+SupplementaryGroups=video input audio
+WorkingDirectory=~
+# See the top of this file.
+AmbientCapabilities=CAP_DAC_OVERRIDE
+ExecStart=/usr/bin/dslot $DSLOT_ARGS
+Environment=DSLOT_ARGS=
+Environment=SDL_VIDEODRIVER=kmsdrm
+# DSlot starts with the skeleton through KMS, then the shelf on GL. In /etc/default/dslot:
+# DSLOT_KMS=0 for GL only, DSLOT_KMS=1 for KMS only, DSLOT_PRELOAD=0 to leave loading Mesa to
+# SDL, DSLOT_ARGS for other Roms folders (`dslot --help`).
+EnvironmentFile=-/etc/default/dslot
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+# The shelf is what you see; keep it ahead of everything else starting.
+Nice=-5
+# The games DSlot starts run in this unit and inherit its limits: real-time priority up to 10,
+# below PipeWire's data loops, for an emulator's frame and audio threads. (PipeWire's client
+# library sets RLIMIT_RTTIME to 200 ms in such a process: a real-time thread that never sleeps
+# is killed, which the emulator has to allow for.)
+LimitRTPRIO=10
+
+[Install]
+WantedBy=sysinit.target

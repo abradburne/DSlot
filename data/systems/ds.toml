@@ -1,0 +1,37 @@
+# Nintendo DS: the system card's facts, from https://en.wikipedia.org/wiki/Nintendo_DS
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Nintendo DS"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Nintendo_DS"
+bio = "Nintendo's handheld with two screens, the lower one a touch screen. It came out in North America on 21 November 2004, ahead of Japan: the first Nintendo hardware to launch in North America first. It went on to sell more than 154 million units."
+fact = "Its best-selling game was New Super Mario Bros., at 30.80 million copies."
+
+[[stats]]
+label = "Released"
+value = "2004"
+bar = 2004
+
+[[stats]]
+label = "Launch price"
+value = "US$149.99"
+bar = 149.99
+
+[[stats]]
+label = "Sold"
+value = "154.02 million"
+bar = 154.02
+
+[[stats]]
+label = "Processor"
+value = "67 MHz ARM9 + 33 MHz ARM7"
+bar = 67
+
+[[stats]]
+label = "Memory"
+value = "4 MB"
+bar = 4096
+
+[[stats]]
+label = "Screen"
+value = "Two, 256 × 192"
+bar = 98304

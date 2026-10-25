@@ -1,0 +1,36 @@
+# WonderSwan: the system card's facts, from https://en.wikipedia.org/wiki/WonderSwan
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "WonderSwan"
+maker = "Bandai (with Koto Laboratory)"
+source = "https://en.wikipedia.org/wiki/WonderSwan"
+bio = "Bandai's Japan-only handheld launched on 4 March 1999, the last hardware Gunpei Yokoi worked on. It runs 40 hours on one AA battery and plays held upright or sideways. With the later Color and SwanCrystal, it sold 3.5 million."
+fact = "Yokoi designed the puzzle game Gunpey for it as an answer to Tetris, and it was named in his honour."
+
+[[stats]]
+label = "Released"
+value = "1999"
+bar = 1999
+
+[[stats]]
+label = "Launch price"
+value = "¥4,800"
+
+[[stats]]
+label = "Sold"
+value = "3.5 million (all models)"
+bar = 3.5
+
+[[stats]]
+label = "Processor"
+value = "3.072 MHz NEC V30 MZ"
+bar = 3.072
+
+[[stats]]
+label = "Memory"
+value = "64 KB"
+bar = 64
+
+[[stats]]
+label = "Screen"
+value = "224 × 144, 241 of 4,096 (Color)"
+bar = 32256

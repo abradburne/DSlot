@@ -1,0 +1,7 @@
+# Snes9x through the stock menu's RetroArch launcher, as with mGBA and Gambatte.
+name = "Snes9x (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/snes9x_libretro.so"]
+
+[systems]
+SFC = ["/mnt/mod/ctrl/RA_launch.sh", "snes9x_libretro.so", "{rom}"]

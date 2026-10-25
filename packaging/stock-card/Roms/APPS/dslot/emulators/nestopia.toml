@@ -1,0 +1,6 @@
+# Available only when both the stock launcher and this core are installed.
+name = "Nestopia (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/nestopia_libretro.so"]
+[systems]
+FC = ["/mnt/mod/ctrl/RA_launch.sh", "nestopia_libretro.so", "{rom}"]

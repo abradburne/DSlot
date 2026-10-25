@@ -1,0 +1,6 @@
+# Available only when both the stock launcher and this core are installed.
+name = "Genesis Plus GX (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/genesis_plus_gx_libretro.so"]
+[systems]
+MD = ["/mnt/mod/ctrl/RA_launch.sh", "genesis_plus_gx_libretro.so", "{rom}"]

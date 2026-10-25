@@ -1,0 +1,6 @@
+# Available only when both the stock launcher and this core are installed.
+name = "Gearsystem (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/gearsystem_libretro.so"]
+[systems]
+GG = ["/mnt/mod/ctrl/RA_launch.sh", "gearsystem_libretro.so", "{rom}"]

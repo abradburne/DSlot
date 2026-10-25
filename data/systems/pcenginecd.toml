@@ -1,0 +1,33 @@
+# CD-ROM² / TurboGrafx-CD: the system card's facts, from the CD-ROM² section of
+# https://en.wikipedia.org/wiki/TurboGrafx-16 (it has no article of its own; read 21 October 2026).
+# The bio and fun fact are DSlot's own words.
+name = "CD-ROM² / TurboGrafx-CD"
+maker = "NEC"
+source = "https://en.wikipedia.org/wiki/TurboGrafx-16#CD-ROM%C2%B2_/_TurboGrafx-CD"
+bio = "The PC Engine's CD-ROM drive arrived in Japan on 4 December 1988, the first time a console played games from CD-ROM. North America got the TurboGrafx-CD in November 1989; a 1991 Super CD-ROM² upgrade raised its buffer RAM from 64 KB to 256 KB."
+fact = "Its name is said \"CD-ROM-ROM\", not \"CD-ROM two\" or \"CD-ROM squared\"."
+
+[[stats]]
+label = "Released"
+value = "1988"
+bar = 1988
+
+[[stats]]
+label = "Launch price"
+value = "US$399.99"
+bar = 399.99
+
+[[stats]]
+label = "Sold"
+value = "1.92 million in Japan, with Duo"
+bar = 1.92
+
+[[stats]]
+label = "Processor"
+value = "7.16 MHz HuC6280 (PC Engine)"
+bar = 7.16
+
+[[stats]]
+label = "Memory"
+value = "64 KB buffer (Super: 256 KB)"
+bar = 64

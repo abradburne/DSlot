@@ -1,0 +1,6 @@
+# Minimal working contract. nibcase's package hook generates the full current core options.
+name = "Nestopia (nibcase)"
+priority = 100
+requires = ["/usr/lib/libretro/nestopia_libretro.so"]
+[systems]
+FC = ["/usr/bin/nibcase", "--core", "/usr/lib/libretro/nestopia_libretro.so", "--system", "FC", "{options}", "--saves", "{saves}", "{rom}"]

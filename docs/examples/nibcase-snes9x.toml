@@ -1,0 +1,9 @@
+# Minimal working nibcase/Snes9x contract (docs/snes.md).
+# nibcase's package hook generates this with the installed core's full option definitions.
+# Documentation only: install nibcase and a core to register the current integration.
+name = "Snes9x (nibcase)"
+priority = 100
+requires = ["/usr/lib/libretro/snes9x_libretro.so"]
+
+[systems]
+SFC = ["/usr/bin/nibcase", "--core", "/usr/lib/libretro/snes9x_libretro.so", "--system", "SFC", "{options}", "--saves", "{saves}", "{rom}"]

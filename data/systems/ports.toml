@@ -1,0 +1,9 @@
+# Ports: the system card for PortMaster's ports. Not a console, so no stats or photo; what
+# PortMaster is, from https://portmaster.games (read 21 October 2026). The bio and fact are
+# DSlot's own words.
+name = "Ports"
+maker = "Installed with PortMaster"
+source = "https://portmaster.games"
+bio = "PC and homebrew games rebuilt to run on Linux handhelds, each a script and a folder of its own in Roms/PORTS on a card. PortMaster, on the Apps page, finds and installs them over Wi-Fi."
+fact = "Some ports bring only the engine: the game itself comes from your own copy's files, copied into the port's folder."
+stats = []

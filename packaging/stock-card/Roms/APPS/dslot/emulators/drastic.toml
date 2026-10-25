@@ -1,0 +1,12 @@
+# DraStic, which the stock OS also has, as the stock menu starts it: the saves folder set
+# for the card the game is on (save_nds/), then the game.
+name = "DraStic"
+priority = 10
+requires = ["/mnt/vendor/ctrl/setNDS64.sh", "/mnt/vendor/deep/drastic64/drastic_oga"]
+
+[systems]
+NDS = [
+    "/bin/bash", "-c",
+    "/mnt/vendor/ctrl/setNDS64.sh savedir \"$1\"; exec /mnt/vendor/ctrl/setNDS64.sh run \"$1\"",
+    "drastic", "{rom}",
+]

@@ -1,0 +1,31 @@
+# Famicom Disk System: the system card's facts, from https://en.wikipedia.org/wiki/Famicom_Disk_System
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Famicom Disk System"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Famicom_Disk_System"
+bio = "A disk drive add-on for the Famicom, released in Japan on 21 February 1986. Its double-sided 112 KB Disk Cards held more than the cartridges of the day and could save progress. About 194 games were made for it."
+fact = "At Disk Writer kiosks in Japanese shops, players could have a new game written onto a disk they already owned for ¥500."
+
+[[stats]]
+label = "Released"
+value = "1986"
+bar = 1986
+
+[[stats]]
+label = "Launch price"
+value = "¥15,000"
+
+[[stats]]
+label = "Sold"
+value = "4.4 million"
+bar = 4.4
+
+[[stats]]
+label = "Memory"
+value = "32 KB cache + 8 KB"
+bar = 40
+
+[[stats]]
+label = "Games"
+value = "194"
+bar = 194

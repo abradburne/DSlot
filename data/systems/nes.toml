@@ -1,0 +1,37 @@
+# NES / Famicom: the system card's facts, from https://en.wikipedia.org/wiki/Nintendo_Entertainment_System
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "NES / Famicom"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Nintendo_Entertainment_System"
+bio = "Nintendo's 8-bit console launched in Japan as the Family Computer on 15 July 1983. Its Ricoh 2A03 processor runs at 1.79 MHz, and its picture shows up to 25 colours at once from 54. It sold 61.91 million units."
+fact = "The cartridge eject lever was Gunpei Yokoi's idea, and it was there to amuse children."
+
+[[stats]]
+label = "Released"
+value = "1983"
+bar = 1983
+
+[[stats]]
+label = "Launch price"
+value = "US$180"
+bar = 180
+
+[[stats]]
+label = "Sold"
+value = "61.91 million"
+bar = 61.91
+
+[[stats]]
+label = "Processor"
+value = "1.79 MHz Ricoh 2A03"
+bar = 1.79
+
+[[stats]]
+label = "Memory"
+value = "2 KB"
+bar = 2
+
+[[stats]]
+label = "Screen"
+value = "256 × 240, 25 of 54 colours"
+bar = 61440

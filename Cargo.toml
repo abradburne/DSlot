@@ -1,0 +1,39 @@
+[package]
+name = "dslot"
+version = "0.3.0"
+edition = "2021"
+rust-version = "1.87"
+description = "A cart-and-box game shelf for the Anbernic RG DS+, on its stock OS or on nibOS."
+license = "GPL-3.0-or-later"
+repository = "https://github.com/abradburne/DSlot"
+
+# One of the two platforms is chosen at build time (src/platform/): where DSlot finds games and
+# keeps its files, how it starts at power-on, how it takes the screens. See docs/building.md.
+[features]
+# The stock Anbernic OS: an app in Roms/APPS, built with packaging/stock-card/package.sh.
+stock = ["nibkit/stock"]
+# nibOS: the boot UI, built with packaging/nibos/PKGBUILD.
+nibos = ["nibkit/nibos", "nibkit/net-control"]
+
+[dependencies]
+# nibOS's SDK library (github.com/abradburne/nibkit, MIT): the screens, buttons, touch,
+# brightness, settings and emulator descriptions DSlot shares with other apps.
+nibkit = { git = "https://github.com/abradburne/nibkit", tag = "v0.1.0", default-features = false, features = ["dslot", "menu"] }
+sdl2 = { version = "0.38", features = ["unsafe_textures"] }
+png = "0.17"
+fontdue = "0.9"
+libc = "0.2"
+miniz_oxide = "0.8"
+# SNES headers may be megabytes into a zipped ROM; stream just far enough to read them.
+zip = { version = "2.4.2", default-features = false, features = ["deflate-miniz"] }
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+# PortMaster ports: their port.json, and the JPEG screenshots many of them have.
+serde_json = "1"
+zune-jpeg = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

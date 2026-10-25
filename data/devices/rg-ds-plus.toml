@@ -1,0 +1,30 @@
+# The Anbernic RG DS+: the Apps card's facts about the device, from nibOS's board notes
+# (nibos boards/rg-ds-plus/README.md, read 21 October 2026), which the stock-OS probe measured.
+# `board` is nibOS's name for it (NIBOS_BOARD in /usr/lib/nibos/board.conf).
+board = "rg-ds-plus"
+name = "Anbernic RG DS+"
+source = "nibOS board notes: boards/rg-ds-plus"
+
+[[specs]]
+label = "Chip"
+value = "Rockchip RK3568"
+
+[[specs]]
+label = "CPU"
+value = "4 × Cortex-A55, up to 1.99 GHz"
+
+[[specs]]
+label = "GPU"
+value = "Mali-G52"
+
+[[specs]]
+label = "Memory"
+value = "1 GB LPDDR3"
+
+[[specs]]
+label = "Screens"
+value = "Two 1024 × 768, one touch"
+
+[[specs]]
+label = "Storage"
+value = "Two microSD slots"

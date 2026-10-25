@@ -1,0 +1,6 @@
+# Illustrative contract. nibcase-test --sync generates the full installed core options.
+name = "Game Gear (nibcase)"
+priority = 100
+requires = ["/usr/lib/libretro/gearsystem_libretro.so"]
+[systems]
+GG = ["/usr/bin/nibcase", "--core", "/usr/lib/libretro/gearsystem_libretro.so", "--system", "GG", "{options}", "--saves", "{saves}", "{rom}"]

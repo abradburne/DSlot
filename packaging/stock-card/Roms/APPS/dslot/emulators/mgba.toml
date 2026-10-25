@@ -1,0 +1,7 @@
+# RetroArch with its mGBA core, through the stock menu's own RetroArch launcher.
+name = "mGBA (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/mgba_libretro.so"]
+
+[systems]
+GBA = ["/mnt/mod/ctrl/RA_launch.sh", "mgba_libretro.so", "{rom}"]

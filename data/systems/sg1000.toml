@@ -1,0 +1,41 @@
+# SG-1000: the system card's facts, from https://en.wikipedia.org/wiki/SG-1000
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "SG-1000"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/SG-1000"
+bio = "Sega's first home console came out in Japan on 15 July 1983, beside the SC-3000, a version with a keyboard built in. It sold 160,000 units that year, far past the 50,000 Sega expected, and it led on to the Master System."
+fact = "It went on sale the very day Nintendo launched the Famicom in Japan."
+
+[[stats]]
+label = "Released"
+value = "1983"
+bar = 1983
+
+[[stats]]
+label = "Launch price"
+value = "¥15,000"
+
+[[stats]]
+label = "Sold"
+value = "400,000 in Japan"
+bar = 0.4
+
+[[stats]]
+label = "Processor"
+value = "3.58 MHz Zilog Z80A"
+bar = 3.58
+
+[[stats]]
+label = "Memory"
+value = "1 KB"
+bar = 1
+
+[[stats]]
+label = "Screen"
+value = "256 × 192, 15 colours"
+bar = 49152
+
+[[stats]]
+label = "Games"
+value = "51 cartridges, 29 cards"
+bar = 80

@@ -1,0 +1,6 @@
+# Illustrative contract. nibcase-test --sync generates the full installed core options.
+name = "Mega Drive (nibcase)"
+priority = 100
+requires = ["/usr/lib/libretro/blastem_libretro.so"]
+[systems]
+MD = ["/usr/bin/nibcase", "--core", "/usr/lib/libretro/blastem_libretro.so", "--system", "MD", "{options}", "--saves", "{saves}", "{rom}"]

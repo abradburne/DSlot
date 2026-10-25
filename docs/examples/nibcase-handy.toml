@@ -1,0 +1,6 @@
+# Illustrative contract. nibcase-test --sync generates the full installed core options.
+name = "Lynx (nibcase)"
+priority = 100
+requires = ["/usr/lib/libretro/handy_libretro.so"]
+[systems]
+LYNX = ["/usr/bin/nibcase", "--core", "/usr/lib/libretro/handy_libretro.so", "--system", "LYNX", "{options}", "--saves", "{saves}", "{rom}"]

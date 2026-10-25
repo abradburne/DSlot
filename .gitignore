@@ -1,0 +1,5 @@
+target/
+dist/
+sysroot/
+.DS_Store
+packaging/nibos/out/

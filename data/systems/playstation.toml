@@ -1,0 +1,42 @@
+# PlayStation: the system card's facts, from https://en.wikipedia.org/wiki/PlayStation_(console)
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "PlayStation"
+maker = "Sony"
+source = "https://en.wikipedia.org/wiki/PlayStation_(console)"
+bio = "Sony's first home console launched in Japan on 3 December 1994, running games from CD on a 33.87 MHz R3000 processor. Around 7,900 games came out for it, and in 2005 it became the first console to ship 100 million units."
+fact = "Its name goes back to a CD-ROM add-on Sony was building for the Super Nintendo, provisionally called the \"Play Station\", until Nintendo cancelled it."
+
+[[stats]]
+label = "Released"
+value = "1994"
+bar = 1994
+
+[[stats]]
+label = "Launch price"
+value = "US$299"
+bar = 299
+
+[[stats]]
+label = "Sold"
+value = "102.49 million"
+bar = 102.49
+
+[[stats]]
+label = "Processor"
+value = "33.87 MHz R3000"
+bar = 33.87
+
+[[stats]]
+label = "Memory"
+value = "2 MB"
+bar = 2048
+
+[[stats]]
+label = "Screen"
+value = "Up to 640 × 480, 24-bit colour"
+bar = 307200
+
+[[stats]]
+label = "Games"
+value = "Around 7,900"
+bar = 7900

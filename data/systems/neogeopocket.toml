@@ -1,0 +1,37 @@
+# Neo Geo Pocket Color: the system card's facts, from https://en.wikipedia.org/wiki/Neo_Geo_Pocket
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Neo Geo Pocket Color"
+maker = "SNK"
+source = "https://en.wikipedia.org/wiki/Neo_Geo_Pocket"
+bio = "SNK's colour handheld followed its monochrome Neo Geo Pocket, launching in Japan on 19 March 1999 and in North America that August, and it plays the older model's games too. Reviewers liked its microswitched stick. 73 games came out for it."
+fact = "SNK sold the monochrome model in North America by mail order, and only two were bought before the colour one arrived."
+
+[[stats]]
+label = "Released"
+value = "1999"
+bar = 1999
+
+[[stats]]
+label = "Launch price"
+value = "US$69.95"
+bar = 69.95
+
+[[stats]]
+label = "Processor"
+value = "6.144 MHz Toshiba TLCS-900/H"
+bar = 6.144
+
+[[stats]]
+label = "Memory"
+value = "12 KB + 4 KB for Z80"
+bar = 16
+
+[[stats]]
+label = "Screen"
+value = "160 × 152, 146 of 4,096 colours"
+bar = 24320
+
+[[stats]]
+label = "Games"
+value = "73"
+bar = 73

@@ -1,0 +1,42 @@
+# Game Boy Color: the system card's facts, from https://en.wikipedia.org/wiki/Game_Boy_Color
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Game Boy Color"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Game_Boy_Color"
+bio = "The Game Boy in colour: it launched in Japan on 21 October 1998, showing up to 56 colours at once from 32,768, with a double-speed mode for its 8-bit processor, and it still plays the original Game Boy's games. 915 games were made for it."
+fact = "It took the place of Project Atlantis, a 32-bit handheld dropped so that a colour Game Boy could come out sooner."
+
+[[stats]]
+label = "Released"
+value = "1998"
+bar = 1998
+
+[[stats]]
+label = "Launch price"
+value = "US$79.95"
+bar = 79.95
+
+[[stats]]
+label = "Sold"
+value = "118.69 million (with GB)"
+bar = 118.69
+
+[[stats]]
+label = "Processor"
+value = "8.4 MHz Sharp SM83 (double speed)"
+bar = 8.388608
+
+[[stats]]
+label = "Memory"
+value = "32 KB"
+bar = 32
+
+[[stats]]
+label = "Screen"
+value = "160 × 144, 56 of 32,768 colours"
+bar = 23040
+
+[[stats]]
+label = "Games"
+value = "915"
+bar = 915

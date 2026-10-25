@@ -1,0 +1,72 @@
+# dslot for nibOS (Arch Linux ARM, aarch64): the game shelf that is nibOS's boot UI.
+#
+# Built from this checkout, not downloaded: prepare() copies the sources into $srcdir, so the
+# build never writes to the repository. Dependencies are fetched once, at the versions
+# Cargo.lock pins (nibkit from its repository, at the tag Cargo.toml names), and the build
+# itself runs offline. On an aarch64 Arch machine (nibOS's
+# build machine; docs/building.md):
+#
+#   cd packaging/nibos && PKGDEST="$PWD/out" BUILDDIR="$HOME/makepkg-build" makepkg -f --nodeps
+#
+# (--nodeps: the build machine needs Rust and SDL2, not what the shelf needs to run.)
+#
+# What it does not ship, being nibOS's (its rootfs/dslot): the user DSlot runs as
+# (dslot.service.d/user.conf), the polkit rule that lets that user power off, `nib boot-ui`.
+# Emulators ship their own descriptions in /usr/share/dslot/emulators (docs/emulators.md).
+
+pkgname=dslot
+pkgver=0.3.0
+pkgrel=3
+pkgdesc="Game shelf for the Anbernic RG DS+: carts over a slot, boxes on the top screen"
+arch=(aarch64)
+url="https://github.com/abradburne/DSlot"
+license=(GPL-3.0-or-later OFL-1.1)
+# libpulse: pacat, which plays the insert and eject clicks.
+depends=(sdl2-compat libpulse)
+makedepends=(cargo)
+optdepends=('dsperate: DS and GBA games'
+            'noto-fonts-cjk: game titles in Japanese, Chinese and Korean')
+
+_root=$(cd "$startdir/../.." && pwd)
+
+pkgver() {
+    sed -n 's/^version = "\(.*\)"/\1/p' "$_root/Cargo.toml" | head -1
+}
+
+prepare() {
+    rm -rf "$srcdir/dslot"
+    mkdir -p "$srcdir/dslot/packaging/nibos"
+    cp -r "$_root"/{Cargo.toml,Cargo.lock,build.rs,src,assets,data,README.md,CHANGELOG.md,LICENSE,THIRD-PARTY.md,docs} "$srcdir/dslot/"
+    cp -r "$_root/packaging/stock-card" "$srcdir/dslot/packaging/"
+    cp "$_root/packaging/nibos/dslot.service" "$srcdir/dslot/packaging/nibos/"
+    cd "$srcdir/dslot"
+    cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+}
+
+build() {
+    cd "$srcdir/dslot"
+    cargo build --release --frozen --features nibos
+}
+
+check() {
+    cd "$srcdir/dslot"
+    cargo test --release --frozen --features nibos
+}
+
+package() {
+    cd "$srcdir/dslot"
+    install -Dm755 target/release/dslot "$pkgdir/usr/bin/dslot"
+    install -Dm644 packaging/nibos/dslot.service "$pkgdir/usr/lib/systemd/system/dslot.service"
+    install -d "$pkgdir/usr/share/dslot/emulators"
+    # The picture nibOS's power-on splash shows until DSlot's first frame.
+    install -d "$pkgdir/var/lib/dslot"
+    target/release/dslot --write-splash "$pkgdir/var/lib/dslot/splash"
+    install -Dm644 -t "$pkgdir/usr/share/doc/dslot" README.md CHANGELOG.md docs/*.md
+    install -Dm644 -t "$pkgdir/usr/share/doc/dslot/examples" docs/examples/*.toml
+    # The embedded Roboto Condensed's licence, which goes with every copy.
+    install -Dm644 assets/OFL.txt "$pkgdir/usr/share/licenses/dslot/OFL.txt"
+    # The crates built in: their licences and notices.
+    install -Dm644 -t "$pkgdir/usr/share/licenses/dslot" LICENSE THIRD-PARTY.md
+    # Who took the photos on the system cards, and where they come from.
+    install -Dm644 data/systems/photos/CREDITS.md "$pkgdir/usr/share/doc/dslot/photo-credits.md"
+}

@@ -1,0 +1,42 @@
+# Super Nintendo: the system card's facts, from https://en.wikipedia.org/wiki/Super_Nintendo_Entertainment_System
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Super Nintendo"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Super_Nintendo_Entertainment_System"
+bio = "Nintendo's 16-bit console launched in Japan as the Super Famicom on 21 November 1990, able to show 256 colours at once from 32,768. 1,757 games were released for it, and it sold 49.10 million units."
+fact = "Its first Japanese shipment sold out within hours, and Nintendo delivered later ones at night to keep them from being stolen."
+
+[[stats]]
+label = "Released"
+value = "1990"
+bar = 1990
+
+[[stats]]
+label = "Launch price"
+value = "US$199"
+bar = 199
+
+[[stats]]
+label = "Sold"
+value = "49.10 million"
+bar = 49.1
+
+[[stats]]
+label = "Processor"
+value = "3.58 MHz Ricoh 5A22"
+bar = 3.58
+
+[[stats]]
+label = "Memory"
+value = "128 KB"
+bar = 128
+
+[[stats]]
+label = "Screen"
+value = "256 × 224, 256 of 32,768 colours"
+bar = 57344
+
+[[stats]]
+label = "Games"
+value = "1,757"
+bar = 1757

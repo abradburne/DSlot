@@ -1,0 +1,12 @@
+# inkdot, a Game Boy and Game Boy Color emulator of our own, from its stock-OS zip
+# (packaging/stock in inkdot): Roms/APPS/inkdot.sh and inkdot/ on the card the OS starts from.
+# Installed there, it is the GB and GBC default over Gambatte. inkdot.sh sets up the stock helper
+# (sound, volume and brightness keys) as the stock menu's scripts do. On the stock OS inkdot
+# keeps its options and saves itself (inkdot/settings.toml, Saves/GB and Saves/GBC), so this
+# declares none. Installed on the other card, change /mnt/mmc to /mnt/sdcard.
+name = "inkdot"
+priority = 30
+
+[systems]
+GB = ["/mnt/mmc/Roms/APPS/inkdot.sh", "{rom}"]
+GBC = ["/mnt/mmc/Roms/APPS/inkdot.sh", "{rom}"]

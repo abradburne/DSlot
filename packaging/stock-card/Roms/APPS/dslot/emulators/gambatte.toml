@@ -1,0 +1,8 @@
+# RetroArch with its Gambatte core, through the stock menu's own RetroArch launcher.
+name = "Gambatte (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/gambatte_libretro.so"]
+
+[systems]
+GB = ["/mnt/mod/ctrl/RA_launch.sh", "gambatte_libretro.so", "{rom}"]
+GBC = ["/mnt/mod/ctrl/RA_launch.sh", "gambatte_libretro.so", "{rom}"]

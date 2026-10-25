@@ -1,0 +1,41 @@
+# Master System / Mark III: the system card's facts, from https://en.wikipedia.org/wiki/Master_System
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Master System / Mark III"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/Master_System"
+bio = "Sega's console began as the Mark III in Japan on 20 October 1985, and was reworked for export as the Master System, reaching North America in September 1986. The NES held it back there and in Japan, but it did well in Europe and Brazil."
+fact = "In Brazil, Tectoy has sold 8 million licensed Master System variants, and still sells plug-and-play versions of it."
+
+[[stats]]
+label = "Released"
+value = "1985"
+bar = 1985
+
+[[stats]]
+label = "Launch price"
+value = "US$200"
+bar = 200
+
+[[stats]]
+label = "Sold"
+value = "13 million"
+bar = 13
+
+[[stats]]
+label = "Processor"
+value = "3.58 MHz Zilog Z80A"
+bar = 3.58
+
+[[stats]]
+label = "Memory"
+value = "8 KB"
+bar = 8
+
+[[stats]]
+label = "Screen"
+value = "256 × 192, 32 of 64 colours"
+bar = 49152
+
+[[stats]]
+label = "Games"
+value = "Over 100 in North America"

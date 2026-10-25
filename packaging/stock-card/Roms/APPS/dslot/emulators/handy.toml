@@ -1,0 +1,6 @@
+# Available only when both the stock launcher and this core are installed.
+name = "Handy (RetroArch)"
+priority = 20
+requires = ["/mnt/vendor/deep/retro/cores/handy_libretro.so"]
+[systems]
+LYNX = ["/mnt/mod/ctrl/RA_launch.sh", "handy_libretro.so", "{rom}"]

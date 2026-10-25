@@ -1,0 +1,37 @@
+# Game Boy Advance: the system card's facts, from https://en.wikipedia.org/wiki/Game_Boy_Advance
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Game Boy Advance"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Game_Boy_Advance"
+bio = "Nintendo's 32-bit handheld launched in Japan on 21 March 2001, with an ARM7TDMI processor and a screen of 32,768 colours. A second, 8-bit processor lets it play Game Boy and Game Boy Color cartridges too. It sold 81.51 million units."
+fact = "Work on one of its last games, Shantae Advance: Risky Revolution, stalled in 2004 for want of a publisher and resumed in 2023."
+
+[[stats]]
+label = "Released"
+value = "2001"
+bar = 2001
+
+[[stats]]
+label = "Launch price"
+value = "US$99.99"
+bar = 99.99
+
+[[stats]]
+label = "Sold"
+value = "81.51 million"
+bar = 81.51
+
+[[stats]]
+label = "Processor"
+value = "16.8 MHz ARM7TDMI"
+bar = 16.8
+
+[[stats]]
+label = "Memory"
+value = "288 KB"
+bar = 288
+
+[[stats]]
+label = "Screen"
+value = "240 × 160, 32,768 colours"
+bar = 38400

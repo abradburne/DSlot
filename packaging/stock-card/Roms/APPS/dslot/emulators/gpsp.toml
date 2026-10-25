@@ -1,0 +1,7 @@
+# RetroArch with its gpSP core, through the stock menu's own RetroArch launcher.
+name = "gpSP (RetroArch)"
+priority = 10
+requires = ["/mnt/vendor/deep/retro/cores/gpsp_libretro.so"]
+
+[systems]
+GBA = ["/mnt/mod/ctrl/RA_launch.sh", "gpsp_libretro.so", "{rom}"]

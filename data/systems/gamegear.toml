@@ -1,0 +1,42 @@
+# Game Gear: the system card's facts, from https://en.wikipedia.org/wiki/Game_Gear
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Game Gear"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/Game_Gear"
+bio = "Sega's colour handheld launched in Japan on 6 October 1990 with a backlit 160 × 144 screen. It was designed as a Master System to carry, and with an adapter it plays Master System games. More than 300 games were released for it."
+fact = "It came with Columns, a falling-block puzzle game, as the Game Boy came with Tetris."
+
+[[stats]]
+label = "Released"
+value = "1990"
+bar = 1990
+
+[[stats]]
+label = "Launch price"
+value = "US$149.99"
+bar = 149.99
+
+[[stats]]
+label = "Sold"
+value = "14 million"
+bar = 14
+
+[[stats]]
+label = "Processor"
+value = "3.5 MHz Zilog Z80"
+bar = 3.5
+
+[[stats]]
+label = "Memory"
+value = "8 KB"
+bar = 8
+
+[[stats]]
+label = "Screen"
+value = "160 × 144, 32 of 4,096 colours"
+bar = 23040
+
+[[stats]]
+label = "Games"
+value = "Over 300"
+bar = 300

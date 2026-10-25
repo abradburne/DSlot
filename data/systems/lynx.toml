@@ -1,0 +1,42 @@
+# Atari Lynx: the system card's facts, from https://en.wikipedia.org/wiki/Atari_Lynx
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Atari Lynx"
+maker = "Atari (designed by Epyx)"
+source = "https://en.wikipedia.org/wiki/Atari_Lynx"
+bio = "Designed by Epyx and launched by Atari in North America on 1 September 1989, the Lynx was the first handheld console with a colour LCD. Its backlit 160 × 102 screen draws from 4,096 colours."
+fact = "It was designed by RJ Mical and Dave Needle, who had worked on the Amiga."
+
+[[stats]]
+label = "Released"
+value = "1989"
+bar = 1989
+
+[[stats]]
+label = "Launch price"
+value = "US$179.99"
+bar = 179.99
+
+[[stats]]
+label = "Sold"
+value = "2 million"
+bar = 2
+
+[[stats]]
+label = "Processor"
+value = "4 MHz 65C02"
+bar = 4
+
+[[stats]]
+label = "Memory"
+value = "64 KB"
+bar = 64
+
+[[stats]]
+label = "Screen"
+value = "160 × 102, 16 of 4,096 colours"
+bar = 16320
+
+[[stats]]
+label = "Games"
+value = "71 from Atari"
+bar = 71

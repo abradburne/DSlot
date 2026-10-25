@@ -1,0 +1,42 @@
+# Mega Drive / Genesis: the system card's facts, from https://en.wikipedia.org/wiki/Sega_Genesis
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Mega Drive / Genesis"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/Sega_Genesis"
+bio = "Sega's 16-bit console launched in Japan as the Mega Drive on 29 October 1988, and in North America as the Genesis. A Motorola 68000 at 7.6 MHz runs its games, with a Z80 for sound. More than 800 games were released for it, and it sold 30.75 million units."
+fact = "Sega's advertising promised \"blast processing\", a term with no real meaning in graphics programming."
+
+[[stats]]
+label = "Released"
+value = "1988"
+bar = 1988
+
+[[stats]]
+label = "Launch price"
+value = "US$189"
+bar = 189
+
+[[stats]]
+label = "Sold"
+value = "30.75 million"
+bar = 30.75
+
+[[stats]]
+label = "Processor"
+value = "7.6 MHz Motorola 68000 + Z80"
+bar = 7.6
+
+[[stats]]
+label = "Memory"
+value = "64 KB"
+bar = 64
+
+[[stats]]
+label = "Screen"
+value = "320 × 224, 61 of 512 colours"
+bar = 71680
+
+[[stats]]
+label = "Games"
+value = "Over 800"
+bar = 800

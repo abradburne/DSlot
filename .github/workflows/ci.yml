@@ -1,0 +1,63 @@
+# Format, lint and test both builds on every push and pull request; check that every commit of a
+# pull request is signed off (the DCO, CONTRIBUTING.md).
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        platform: [stock, nibos]
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --features ${{ matrix.platform }} --all-targets -- -D warnings
+      - run: cargo test --locked --features ${{ matrix.platform }}
+
+  # Both builds natively on arm64, as the handheld runs them (Ubuntu's SDL2, not the
+  # handheld's: the stock build's own needs its libSDL2, docs/building.md).
+  arm64:
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        platform: [stock, nibos]
+    steps:
+      - uses: actions/checkout@v4
+      - name: SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --locked --release --features ${{ matrix.platform }}
+
+  # Every commit of a pull request carries a Signed-off-by: line (git commit -s).
+  dco:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Signed off
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          missing=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            if ! git log -1 --format=%B "$c" | grep -q '^Signed-off-by: '; then
+              echo "::error::$(git log -1 --format='%h %s' "$c"): no Signed-off-by: line (git commit -s)"
+              missing=1
+            fi
+          done
+          exit $missing

@@ -1,0 +1,10 @@
+# The stock OS's DS emulator, as the stock menu starts it. DSlot's default for DS games here.
+# It keeps its saves on the card the game is on (save_nnddss/), as from the stock menu.
+name = "NNDDSS"
+priority = 20
+
+# It goes back to its own menu when a game ends; DSlot asks it to quit then instead.
+quit_on_output = "returning to NNDDSS menu"
+
+[systems]
+NDS = ["/mnt/vendor/deep/nnddss/launch.sh", "{rom}"]

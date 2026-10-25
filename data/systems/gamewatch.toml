@@ -1,0 +1,35 @@
+# Game & Watch: the system card's facts, from https://en.wikipedia.org/wiki/Game_%26_Watch
+# (read 21 October 2026). The bio and fun fact are DSlot's own words.
+name = "Game & Watch"
+maker = "Nintendo"
+source = "https://en.wikipedia.org/wiki/Game_%26_Watch"
+bio = "Gunpei Yokoi's line of pocket games began with Ball on 28 April 1980: one game to a unit, on a segmented LCD. Nintendo made 60 of them in eleven series until 1991, and sold 43.4 million."
+fact = "Multi Screen Donkey Kong brought the flat four-way D-pad, which won a Technology & Engineering Emmy Award in 2008."
+
+[[stats]]
+label = "Released"
+value = "1980"
+bar = 1980
+
+[[stats]]
+label = "Launch price"
+value = "¥5,800"
+
+[[stats]]
+label = "Sold"
+value = "43.4 million"
+bar = 43.4
+
+[[stats]]
+label = "Processor"
+value = "Sharp SM5xx, about 16 kHz"
+bar = 0.016
+
+[[stats]]
+label = "Screen"
+value = "Segmented LCD"
+
+[[stats]]
+label = "Games"
+value = "60"
+bar = 60
