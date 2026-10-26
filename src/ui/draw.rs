@@ -43,6 +43,15 @@ const START_HINT: &str = "A  start  \u{b7}  D-pad  browse  \u{b7}  L / R  page  
 const NOTICE_WIDTH: usize = 52;
 const NOTICE_LINES: usize = 6;
 
+/// What the stopped notice shows: the reason, the bug report's outcome and its code once it has
+/// one (shown large), and the line of hints under it all (empty while the report is on its way).
+pub struct NoticeShown<'a> {
+    pub text: &'a str,
+    pub outcome: Option<String>,
+    pub code: Option<&'a str>,
+    pub hint: &'static str,
+}
+
 const PICKER_HINT: &str = "D-pad  choose   \u{b7}   A  go   \u{b7}   B / Select  back";
 /// What the touch screen's hint line says in the menu.
 /// Grid covers kept as textures. They are small, so in most libraries that is all of them.
@@ -1851,16 +1860,21 @@ impl Ui<'_> {
     }
 
     /// A game came straight back: why, over both screens dimmed, in a box on the touch screen,
-    /// until any button is pressed.
-    pub fn draw_notice(&mut self, notice: &str) -> Result<(), String> {
+    /// until any button is pressed; with the bug report's state under it, where one can be sent.
+    pub fn draw_notice(&mut self, shown: &NoticeShown) -> Result<(), String> {
         for v in [self.top, self.bot] {
             self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
             self.shade(v, 0.75)?;
         }
         let v = self.bot;
-        let lines = crate::update::wrap(notice, NOTICE_WIDTH);
+        let lines = crate::update::wrap(shown.text, NOTICE_WIDTH);
         let step = 30.0;
-        let height = 150.0 + lines.len().min(NOTICE_LINES) as f32 * step;
+        let outcome_h = match (shown.outcome.is_some(), shown.code.is_some()) {
+            (false, _) => 0.0,
+            (true, false) => 56.0,
+            (true, true) => 128.0,
+        };
+        let height = 150.0 + lines.len().min(NOTICE_LINES) as f32 * step + outcome_h;
         let (x, width) = (40.0, SW - 80.0);
         let top = (SH - height) / 2.0;
         self.white[v.c].set_alpha_mod(255);
@@ -1879,10 +1893,23 @@ impl Ui<'_> {
             self.text(v, line, (20.0, false), (x + 24.0, y), 0.0, WHITE)?;
             y += step;
         }
-        let hint = format!(
-            "The whole log: {}   \u{b7}   any button closes this",
-            crate::platform::LOG_HINT
-        );
+        if let Some(outcome) = &shown.outcome {
+            y += 16.0;
+            self.text(v, outcome, (22.0, true), (SW / 2.0, y), 0.5, GOLD)?;
+            y += 34.0;
+            if let Some(code) = shown.code {
+                self.text(v, code, (56.0, true), (SW / 2.0, y), 0.5, WHITE)?;
+            }
+        }
+        let hint = if shown.hint.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "The whole log: {}   \u{b7}   {}",
+                crate::platform::LOG_HINT,
+                shown.hint
+            )
+        };
         self.text(
             v,
             &hint,

@@ -191,7 +191,7 @@ struct State {
     /// The power menu, over everything else.
     power: Option<PowerMenu>,
     /// Why the game just left came straight back, over the shelf until any button is pressed.
-    notice: Option<String>,
+    notice: Option<Notice>,
     /// The game last selected on each page, by index into `games`.
     kept: [Option<usize>; Console::COUNT],
     /// A page to turn to at the top of the next frame.
@@ -205,6 +205,97 @@ struct State {
     /// The page the shelf had to leave (its games gone, or not there yet at the start): turned
     /// back to when its games are, unless another page has been chosen since.
     away_from: Option<Console>,
+}
+
+/// The notice of a game that came straight back: why, and a bug report about it, where one can
+/// be sent from here (nibOS: bugreport.rs).
+struct Notice {
+    text: String,
+    report: Report,
+}
+
+/// Where the notice's bug report is.
+enum Report {
+    /// Can't be sent from here: the notice only says what happened.
+    NotHere,
+    /// Y sends it.
+    Offered,
+    /// On its way; the outcome comes on the receiver.
+    Sending(std::sync::mpsc::Receiver<crate::bugreport::Outcome>),
+    Done(crate::bugreport::Outcome),
+}
+
+impl Notice {
+    fn new(text: String) -> Notice {
+        let report = if crate::bugreport::available() {
+            Report::Offered
+        } else {
+            Report::NotHere
+        };
+        Notice { text, report }
+    }
+
+    /// A button or a touch: Y sends the report when it can be; while it is on its way nothing
+    /// happens; anything else closes the notice. Returns whether it stays.
+    fn press(&mut self, key: Option<Key>) -> bool {
+        match (&self.report, key) {
+            (Report::Offered, Some(Key::Y)) => {
+                self.report = Report::Sending(crate::bugreport::send(&self.text));
+                true
+            }
+            (Report::Sending(_), _) => true,
+            _ => false,
+        }
+    }
+
+    /// Takes in the outcome of a report on its way, if it has come.
+    fn poll(&mut self) {
+        if let Report::Sending(rx) = &self.report {
+            match rx.try_recv() {
+                Ok(outcome) => self.report = Report::Done(outcome),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                // The thread is gone without a word: it says so on stderr.
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.report = Report::Done(crate::bugreport::Outcome::Failed { file: None })
+                }
+            }
+        }
+    }
+
+    fn sending(&self) -> bool {
+        matches!(self.report, Report::Sending(_))
+    }
+
+    /// What the box shows under the reason: the report's outcome, and the line of hints.
+    fn shown(&self) -> super::draw::NoticeShown<'_> {
+        use super::draw::NoticeShown;
+        match &self.report {
+            Report::NotHere => NoticeShown {
+                text: &self.text,
+                outcome: None,
+                code: None,
+                hint: "any button closes this",
+            },
+            Report::Offered => NoticeShown {
+                text: &self.text,
+                outcome: None,
+                code: None,
+                hint: "Y  send a bug report   \u{b7}   any other button closes this",
+            },
+            Report::Sending(_) => NoticeShown {
+                text: &self.text,
+                outcome: Some("Sending the report...".to_owned()),
+                code: None,
+                hint: "",
+            },
+            Report::Done(outcome) => NoticeShown {
+                text: &self.text,
+                outcome: Some(outcome.words()),
+                code: outcome.code(),
+                hint: "any button closes this",
+            },
+        }
+    }
 }
 
 /// The system picker, open: the blade chosen, where the stack is as it glides to it, and a
@@ -541,7 +632,7 @@ impl State {
     ) -> State {
         let back_from = back.as_ref().map(|b| b.game);
         let put_away = back.as_ref().filter(|b| b.put_away).map(|b| b.game);
-        let notice = back.and_then(|b| b.notice);
+        let notice = back.and_then(|b| b.notice).map(Notice::new);
         let pages = pages(games, searched, settings.show_empty());
         // Back from a game: on the page it was on.
         if let Some(g) = back_from.and_then(|i| games.get(i)) {
@@ -1254,11 +1345,18 @@ fn show(
                     _ => {}
                 },
                 Some(Input::Pointer(p)) if state.power.is_some() => pointers.push(p),
-                // The notice of a game that came straight back: any button or touch closes it.
-                Some(Input::Press(_) | Input::Pointer(Pointer::Down(..)))
-                    if state.notice.is_some() =>
-                {
-                    state.notice = None;
+                // The notice of a game that came straight back: Y may send a bug report; any
+                // other button or a touch closes it.
+                Some(Input::Press(key)) if state.notice.is_some() => {
+                    if !state.notice.as_mut().is_some_and(|n| n.press(Some(key))) {
+                        state.notice = None;
+                    }
+                    state.repeat.stop();
+                }
+                Some(Input::Pointer(Pointer::Down(..))) if state.notice.is_some() => {
+                    if !state.notice.as_mut().is_some_and(|n| n.press(None)) {
+                        state.notice = None;
+                    }
                     state.repeat.stop();
                 }
                 Some(Input::Pointer(_)) if state.notice.is_some() => {}
@@ -1525,10 +1623,15 @@ fn show(
         }
         sound.tick(dt);
 
+        // A bug report on its way from the notice: its outcome, when it comes.
+        if let Some(n) = state.notice.as_mut() {
+            n.poll();
+        }
         // Resting: the screens stay as they are, and the loop only looks for input, a few
         // times a second, until something changes. A held direction, a finger down, a cart
-        // moving, games found or artwork coming in keep it drawing.
+        // moving, games found, artwork coming in or a report on its way keep it drawing.
         let resting = !headless
+            && !state.notice.as_ref().is_some_and(Notice::sending)
             && opts.shot.is_none()
             && idle.elapsed() >= REST_AFTER
             && was_settled
@@ -1671,7 +1774,7 @@ fn show(
             }
         }
         if let Some(notice) = &state.notice {
-            soft("the stopped notice", ui.draw_notice(notice));
+            soft("the stopped notice", ui.draw_notice(&notice.shown()));
         }
         if let Some(open) = &state.power {
             let labels: Vec<&str> = open.choices.iter().map(|c| c.label()).collect();

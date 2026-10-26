@@ -51,6 +51,19 @@ and quits, docs/emulators.md), then opens the menu; Cancel, or waking from Sleep
 game again where it was. Sleep, restart and power off go through logind (`systemctl suspend`,
 `reboot`, `poweroff`), which nibOS's polkit rule lets DSlot's user do.
 
+## Bug reports from the shelf
+
+When a game comes straight back (the shelf's "The game stopped" notice, README.md "A game
+does not start"), the notice offers **Y: send a bug report** where nibOS's
+`/usr/lib/nibos/nib-bug-report` is installed (never on the stock OS or a desktop preview).
+DSlot runs `nib bug-report send --why "<the notice's line>"` on a thread (bugreport.rs): the
+command saves a scrubbed copy of this start's log on the card as `nibos/bug-report-DATE.txt`
+(its `saved:` line) and posts it to the bug tracker. The shelf says "Sending the report..."
+while it runs (up to a minute), then "Sent. Report code XXXXXXXX" (the eight characters after
+`sent: report code`, shown large to copy by hand), "No network. Saved on the card as ..."
+(exit 4) or "Could not send. Saved on the card as ..." (exit 3, no tracker configured, or 5,
+the send failed). The command's output goes to the journal. Any button then closes the notice.
+
 ## Updates
 
 The menu's **Update** page (where nibOS has its updater, `nibos-update@.service`) shows the

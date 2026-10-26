@@ -3,6 +3,7 @@
 //! leaving the game brings the shelf back. docs/architecture.md has the map of the code.
 
 mod art;
+mod bugreport;
 mod device;
 mod emulator;
 mod folders;
