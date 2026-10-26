@@ -4,10 +4,15 @@
 
 - **A game that comes straight back says why.** When an emulator stops at once, with an error
   or a signal, the shelf shows a notice with the emulator's own last line ("DSperate stopped
-  (exit 1): launch: ... ZIP NOT SUPPORTED") until any button, and logs it. On nibOS the notice
+  (exit 1): launch: ... ZIP NOT SUPPORTED") until any button, and logs it. When DSperate
+  crashed, the notice prefers the line its crash handler writes ("dsperate: crashed (SIGNAL)
+  after ...") to the runtime's "Bus error" after it. On nibOS the notice
   offers **Y: send a bug report**: `nib bug-report send` posts a scrubbed copy of the boot log
   to nibOS's bug tracker and the notice shows the report code to quote, or where the report
   was saved on the card when there is no network.
+- **Notices from nibOS.** A file nibOS leaves under `/run/nibos/notice/` (its `root-verify`
+  does, while the card was written badly) is shown the same way when the shelf comes up, or
+  when it appears while the shelf is showing; once per run, again at the next start.
 - **The TF2 card no longer slows the shelf** with the slot empty: nibOS mounts it when it
   appears, DSlot waits briefly for a card that is in but not mounted yet, and **Rescan games**
   reads the system's Roms folders again, so a card put in or taken out since power-on is picked

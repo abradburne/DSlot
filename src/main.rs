@@ -12,6 +12,7 @@ mod kms;
 mod launch;
 mod library;
 mod loader;
+mod notices;
 mod platform;
 mod rescan;
 mod resume;
@@ -96,6 +97,7 @@ fn run() -> Result<(), String> {
         searched: Default::default(),
         outputs: std::sync::Mutex::new(None),
         last_frame: std::sync::Mutex::new(None),
+        notices: std::sync::Mutex::new(notices::Notices::system()),
     };
 
     let mut args = std::env::args().skip(1);

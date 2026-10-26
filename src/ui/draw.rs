@@ -46,6 +46,7 @@ const NOTICE_LINES: usize = 6;
 /// What the stopped notice shows: the reason, the bug report's outcome and its code once it has
 /// one (shown large), and the line of hints under it all (empty while the report is on its way).
 pub struct NoticeShown<'a> {
+    pub title: &'static str,
     pub text: &'a str,
     pub outcome: Option<String>,
     pub code: Option<&'a str>,
@@ -1882,7 +1883,7 @@ impl Ui<'_> {
         self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, top, width, height))?;
         self.text(
             v,
-            "The game stopped",
+            shown.title,
             (28.0, true),
             (SW / 2.0, top + 22.0),
             0.5,

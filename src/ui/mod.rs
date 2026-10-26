@@ -75,6 +75,8 @@ pub struct Opts {
     pub outputs: Mutex<Option<Kms>>,
     /// The shelf's last frame, top screen and bottom, as it left for a game.
     pub last_frame: Mutex<Option<[crate::gfx::Img; 2]>>,
+    /// Notices nibOS leaves for the shelf (notices.rs), and which have been shown this run.
+    pub notices: Mutex<crate::notices::Notices>,
 }
 
 /// What the shelf works with, the same every time it comes up. (The games are passed beside

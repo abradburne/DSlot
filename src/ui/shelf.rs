@@ -210,6 +210,7 @@ struct State {
 /// The notice of a game that came straight back: why, and a bug report about it, where one can
 /// be sent from here (nibOS: bugreport.rs).
 struct Notice {
+    title: &'static str,
     text: String,
     report: Report,
 }
@@ -232,7 +233,20 @@ impl Notice {
         } else {
             Report::NotHere
         };
-        Notice { text, report }
+        Notice {
+            title: "The game stopped",
+            text,
+            report,
+        }
+    }
+
+    /// A notice nibOS left for the shelf (notices.rs): its text, nothing to send.
+    fn from_system(text: String) -> Notice {
+        Notice {
+            title: "A notice from nibOS",
+            text,
+            report: Report::NotHere,
+        }
     }
 
     /// A button or a touch: Y sends the report when it can be; while it is on its way nothing
@@ -271,24 +285,28 @@ impl Notice {
         use super::draw::NoticeShown;
         match &self.report {
             Report::NotHere => NoticeShown {
+                title: self.title,
                 text: &self.text,
                 outcome: None,
                 code: None,
                 hint: "any button closes this",
             },
             Report::Offered => NoticeShown {
+                title: self.title,
                 text: &self.text,
                 outcome: None,
                 code: None,
                 hint: "Y  send a bug report   \u{b7}   any other button closes this",
             },
             Report::Sending(_) => NoticeShown {
+                title: self.title,
                 text: &self.text,
                 outcome: Some("Sending the report...".to_owned()),
                 code: None,
                 hint: "",
             },
             Report::Done(outcome) => NoticeShown {
+                title: self.title,
                 text: &self.text,
                 outcome: Some(outcome.words()),
                 code: outcome.code(),
@@ -1626,6 +1644,20 @@ fn show(
         // A bug report on its way from the notice: its outcome, when it comes.
         if let Some(n) = state.notice.as_mut() {
             n.poll();
+        }
+        // A notice nibOS left for the shelf, once nothing else is over it: now, and when one
+        // appears while the shelf is up.
+        if state.notice.is_none() && state.power.is_none() && state.menu.is_none() {
+            let next = opts
+                .notices
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .next();
+            if let Some(text) = next {
+                state.notice = Some(Notice::from_system(text));
+                // Drawn now, whatever was resting.
+                idle = Instant::now();
+            }
         }
         // Resting: the screens stay as they are, and the loop only looks for input, a few
         // times a second, until something changes. A held direction, a finger down, a cart

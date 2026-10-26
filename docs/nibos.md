@@ -64,6 +64,15 @@ while it runs (up to a minute), then "Sent. Report code XXXXXXXX" (the eight cha
 (exit 4) or "Could not send. Saved on the card as ..." (exit 3, no tracker configured, or 5,
 the send failed). The command's output goes to the journal. Any button then closes the notice.
 
+## Notices from nibOS
+
+Each file under `/run/nibos/notice/` (a tmpfs) is a notice for the shelf: its text, wrapped,
+in the same box as the stopped notice ("A notice from nibOS"), until any button. nibOS's
+`root-verify` leaves one there at every start while the card was written badly, for instance.
+The folder is read when the shelf comes up and every three seconds while it shows (notices.rs);
+a file is shown once per run of DSlot, by name and modification time, and again at the next
+start.
+
 ## Updates
 
 The menu's **Update** page (where nibOS has its updater, `nibos-update@.service`) shows the
