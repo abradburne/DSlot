@@ -5,6 +5,7 @@
 //! - `input`: SDL's events as the DS+'s buttons and the touch panel's pointers.
 //! - `draw`: the textures and how each part of the screens is drawn.
 //! - `menu`: the menu's rows on the touch screen.
+//! - `netinfo`: the Wi-Fi page's Network info page, read from the system on a thread.
 //! - `layout`: where things are on the screens, in screen units.
 //! - `skeleton`: the shelf's layout with nothing in it, for the first moment at power-on.
 //! - `sound`: the insert and eject clicks.
@@ -15,6 +16,7 @@ mod draw;
 mod input;
 mod layout;
 mod menu;
+mod netinfo;
 mod power;
 mod radios;
 mod screens;

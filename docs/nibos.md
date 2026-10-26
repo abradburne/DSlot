@@ -64,6 +64,33 @@ while it runs (up to a minute), then "Sent. Report code XXXXXXXX" (the eight cha
 (exit 4) or "Could not send. Saved on the card as ..." (exit 3, no tracker configured, or 5,
 the send failed). The command's output goes to the journal. Any button then closes the notice.
 
+## Network info
+
+The Wi-Fi page shows the IPv4 address under the network joined (**Address**), and opens
+**Network info** (its row, or **Y** on any row but a saved network, where Y forgets): a
+read-only page of what a player is asked for when something won't connect, so support needn't
+guess whether they were on Wi-Fi at all (`src/ui/netinfo.rs`). Its lines: Wi-Fi (off, on and
+not connected, on and connected), the network with its signal in dBm and band, the address with
+its prefix, the gateway, the DNS servers, the device's name on the network (`<hostname>.local`,
+what to ssh to), the Wi-Fi MAC, and three reachability checks: the internet
+(`one.one.one.one` on 443; when its name fails but `1.1.1.1` answers, "DNS failed"), the update
+server (`api.github.com`) and the bug tracker (the host out of `/etc/nibos/bug-report.conf`'s
+DSN, never its key; "Not set" without one). Each says "Reachable", "No route" or "DNS failed";
+when the internet check finds no route, the other two say so without trying. The DNS line is
+shown only while there is a route (without one, resolved lists just its fallback servers).
+The title line sums it up ("Connected to Endless", "Wi-Fi is on, not connected", "Wi-Fi is
+off"), and when Wi-Fi is off or no network is joined, the address, gateway, DNS and network
+lines say that rather than going blank.
+
+Nothing here needs root or a daemon: the facts are read on a thread every 2 s while the Wi-Fi
+page is up, from `nib wifi status` (`nibkit::device::wifi`), `ip -j addr`, `ip -j route`,
+iwd's `iwctl station wlan0 show` (or `iw dev wlan0 link` without iwctl),
+`/run/systemd/resolve/resolv.conf` and `/etc/hostname`. The checks run on a thread of their own
+when the page opens and again on **A** (each a name lookup and a TCP connect to port 443, 4 s at
+most), so a slow one never holds the page. **B** goes back to the Wi-Fi page. The parsers have
+unit tests fed with the commands' captured output. On the stock OS there is no Wi-Fi page and
+none of this is built in.
+
 ## Notices from nibOS
 
 Each file under `/run/nibos/notice/` (a tmpfs) is a notice for the shelf: its text, wrapped,

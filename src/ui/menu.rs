@@ -10,7 +10,9 @@
 //! - **Wi-Fi** and **Bluetooth** (nibOS): the networks in range, joining one (its passphrase
 //!   typed on nibkit's keyboard), leaving and forgetting; Bluetooth on and off, the paired
 //!   devices to connect and disconnect, forgetting one, and pairing a new one. The work is done
-//!   on a thread of its own (`radios.rs`).
+//!   on a thread of its own (`radios.rs`). The Wi-Fi page shows the IPv4 address too, and opens
+//!   **Network info** (its row, or Y): a read-only page of what a player is asked for when
+//!   something won't connect (`netinfo.rs`).
 //! - **Update** (nibOS): the version, the update channel, checking for an update, downloading
 //!   it in the background (paused and resumed), restarting into it, what's new, and going back
 //!   to the version before; the work is nibOS's updater's (`update.rs`).
@@ -19,6 +21,7 @@
 //! it is set here; Y resets it to what it inherits. L / R or the tabs change page; up and down
 //! pick a row, left and right or A (or a tap) change it, B closes the menu.
 
+use super::netinfo;
 use super::radios::{Ask, Do, Radios, Reply, Snapshot};
 use crate::emulator::{Action, Emulator, Emulators};
 use crate::launch;
@@ -85,6 +88,12 @@ pub enum Item {
     PowerOff,
     /// Wi-Fi: the network joined, or what the Wi-Fi is doing; shown, not changed.
     Joined,
+    /// Wi-Fi: the IPv4 address, for the common case; shown, not changed.
+    Address,
+    /// Wi-Fi: opens the Network info page (netinfo.rs).
+    NetworkInfo,
+    /// A line of the Network info page; A on any runs the reachability checks again.
+    Info(InfoRow),
     /// Wi-Fi: look for networks again.
     Scan,
     /// Wi-Fi: a network in range, by name: A joins it (or leaves it), Y forgets it.
@@ -134,6 +143,9 @@ impl Item {
             Item::ImportTuning => "Import official tuning",
             Item::RestartNow => "Restart now",
             Item::Joined => "Joined",
+            Item::Address => "Address",
+            Item::NetworkInfo => "Network info",
+            Item::Info(row) => row.label(),
             Item::Scan => "Look for networks",
             Item::Network(name) => name,
             Item::BluetoothPower => "Bluetooth",
@@ -159,6 +171,51 @@ impl Item {
                 | Item::RestartNow
                 | Item::Rollback
         )
+    }
+}
+
+/// The Network info page's lines, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InfoRow {
+    Wifi,
+    Network,
+    Address,
+    Gateway,
+    Dns,
+    Name,
+    Mac,
+    Internet,
+    Updates,
+    Tracker,
+}
+
+impl InfoRow {
+    const ALL: [InfoRow; 10] = [
+        InfoRow::Wifi,
+        InfoRow::Network,
+        InfoRow::Address,
+        InfoRow::Gateway,
+        InfoRow::Dns,
+        InfoRow::Name,
+        InfoRow::Mac,
+        InfoRow::Internet,
+        InfoRow::Updates,
+        InfoRow::Tracker,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            InfoRow::Wifi => "Wi-Fi",
+            InfoRow::Network => "Network",
+            InfoRow::Address => "Address",
+            InfoRow::Gateway => "Gateway",
+            InfoRow::Dns => "DNS",
+            InfoRow::Name => "This device",
+            InfoRow::Mac => "Wi-Fi MAC",
+            InfoRow::Internet => "Internet",
+            InfoRow::Updates => "Update server",
+            InfoRow::Tracker => "Bug tracker",
+        }
     }
 }
 
@@ -390,6 +447,11 @@ pub struct Menu {
     update_notes: Option<(String, String)>,
     /// What's new is open on the Update page, in place of its rows.
     reading_notes: bool,
+    /// The network's facts, read on a thread while the Wi-Fi page is up (nibOS).
+    netinfo: Option<netinfo::Watch>,
+    net: netinfo::Info,
+    /// Network info is open on the Wi-Fi page, in place of its rows.
+    reading_net: bool,
 }
 
 /// What the keyboard is typing.
@@ -436,6 +498,9 @@ impl Menu {
             update_notice: None,
             update_notes: None,
             reading_notes: false,
+            netinfo: None,
+            net: netinfo::Info::default(),
+            reading_net: false,
         }
     }
 
@@ -591,6 +656,9 @@ impl Menu {
                 }
                 items.push(Item::PowerOff);
             }
+            Page::Wifi if self.reading_net => {
+                items.extend(InfoRow::ALL.into_iter().map(Item::Info));
+            }
             Page::Wifi => {
                 if self
                     .controls
@@ -599,8 +667,12 @@ impl Menu {
                 {
                     items.push(Item::Control(Control::Wifi));
                 }
+                if self.radio.wifi.is_some() {
+                    items.extend([Item::Joined, Item::Address]);
+                }
+                items.push(Item::NetworkInfo);
                 if let Some(wifi) = &self.radio.wifi {
-                    items.extend([Item::Joined, Item::Scan]);
+                    items.push(Item::Scan);
                     items.extend(wifi.networks.iter().map(|n| Item::Network(n.name.clone())));
                 }
             }
@@ -744,6 +816,22 @@ impl Menu {
         if self.page == Page::Update {
             self.read_update();
         }
+        // The network's facts, while the Wi-Fi page is up.
+        if self.page == Page::Wifi && self.radios.is_some() {
+            if self.netinfo.is_none() {
+                self.netinfo = netinfo::Watch::start();
+            }
+            if let Some(watch) = &self.netinfo {
+                self.net = watch.now();
+            }
+        } else if self.netinfo.take().is_some() {
+            self.net = netinfo::Info::default();
+        }
+        // Network info: B goes back to the Wi-Fi page, A checks again.
+        if self.reading_net && input.close {
+            self.close_net_info();
+            return Done::default();
+        }
 
         let items = self.items(cx);
         let was = self.row;
@@ -761,9 +849,24 @@ impl Menu {
             self.moving = None;
         }
         let item = &items[self.row];
-        if matches!(self.page, Page::Wifi | Page::Bluetooth) && !matches!(item, Item::Control(_)) {
+        let chosen = pressed && was == self.row;
+        // Y on the Wi-Fi page opens Network info, except on a saved network, where it forgets.
+        let forgets = matches!(item, Item::Network(name) if self.known(name));
+        if self.page == Page::Wifi && self.reading_net {
+            if chosen {
+                if let Some(watch) = &self.netinfo {
+                    watch.check_again();
+                }
+            }
+        } else if self.page == Page::Wifi
+            && ((*item == Item::NetworkInfo && chosen) || (input.reset && !forgets))
+        {
+            self.open_net_info();
+        } else if matches!(self.page, Page::Wifi | Page::Bluetooth)
+            && !matches!(item, Item::Control(_))
+        {
             let item = item.clone();
-            self.radio_row(&item, pressed && was == self.row, turn, input.reset);
+            self.radio_row(&item, chosen, turn, input.reset);
         } else if self.page == Page::Update {
             let item = item.clone();
             self.update_row(&item, pressed && was == self.row, turn);
@@ -971,6 +1074,38 @@ impl Menu {
         }
     }
 
+    /// Whether a network in range is a saved one (Y forgets it).
+    fn known(&self, name: &str) -> bool {
+        self.radio
+            .wifi
+            .as_ref()
+            .is_some_and(|w| w.networks.iter().any(|n| n.name == name && n.known))
+    }
+
+    /// Opens Network info over the Wi-Fi page's rows, and runs its checks.
+    fn open_net_info(&mut self) {
+        (self.reading_net, self.row, self.scroll) = (true, 0, 0);
+        (self.armed, self.note, self.forget) = (None, None, None);
+        if let Some(watch) = &self.netinfo {
+            watch.check_again();
+        }
+    }
+
+    /// Back to the Wi-Fi page's rows, on its Network info row.
+    fn close_net_info(&mut self) {
+        self.reading_net = false;
+        let joined_rows = if self.radio.wifi.is_some() { 2 } else { 0 };
+        self.row = usize::from(self.has_wifi_switch()) + joined_rows;
+        self.scroll = self.row.saturating_sub(VISIBLE - 1);
+    }
+
+    /// Whether the Wi-Fi page starts with the switch's row.
+    fn has_wifi_switch(&self) -> bool {
+        self.controls
+            .iter()
+            .any(|(c, v)| *c == Control::Wifi && v.is_some())
+    }
+
     /// Whether the keyboard is up: it takes every button.
     pub fn typing(&self) -> bool {
         self.typing.is_some()
@@ -1003,7 +1138,7 @@ impl Menu {
     fn turn_to(&mut self, page: Page) {
         if self.page != page {
             (self.page, self.row, self.scroll, self.armed, self.note) = (page, 0, 0, None, None);
-            (self.forget, self.reading_notes) = (None, false);
+            (self.forget, self.reading_notes, self.reading_net) = (None, false, false);
             if page == Page::System {
                 self.reread(|_| true);
                 self.hour12 = nibkit::clock::hour12();
@@ -1190,6 +1325,9 @@ impl Menu {
             | Item::RestartNow
             | Item::Rescan
             | Item::Joined
+            | Item::Address
+            | Item::NetworkInfo
+            | Item::Info(_)
             | Item::Scan
             | Item::Network(_)
             | Item::BluetoothPower
@@ -1323,6 +1461,7 @@ impl Menu {
                 (Some(Ask::Show(code)), ..) => format!("Type {code} on the device, then Enter"),
                 (_, Some(busy), _) => busy.clone(),
                 (_, _, Some(said)) if !said.is_empty() => said.clone(),
+                _ if self.page == Page::Wifi && self.reading_net => self.net.summary(),
                 _ if self.page == Page::Wifi => "Wi-Fi networks".into(),
                 _ => "Bluetooth devices".into(),
             }
@@ -1369,16 +1508,21 @@ impl Menu {
             .filter(|i| i.set_here)
             .map(|i| format!("Y  use {}   \u{b7}   ", i.from));
         let hint = match (self.page, items.get(self.row)) {
-            (Page::Wifi, Some(Item::Network(_))) => {
+            (Page::Wifi, Some(Item::Info(_))) => {
+                "A  check again   \u{b7}   L / R  page   \u{b7}   B  back to Wi-Fi".into()
+            }
+            (Page::Wifi, Some(Item::Network(name))) if self.known(name) => {
                 "A  join or leave   \u{b7}   Y  forget   \u{b7}   L / R  page   \u{b7}   B  back"
+                    .into()
+            }
+            (Page::Wifi, _) => {
+                "A  choose   \u{b7}   Y  network info   \u{b7}   L / R  page   \u{b7}   B  back"
                     .into()
             }
             (Page::Bluetooth, Some(Item::Gadget { .. })) => {
                 "A  connect, disconnect or pair   \u{b7}   Y  forget   \u{b7}   B  back".into()
             }
-            (Page::Wifi | Page::Bluetooth, _) => {
-                "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into()
-            }
+            (Page::Bluetooth, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             (Page::Update, _) if self.reading_notes => {
                 "A  back to Update   \u{b7}   L / R  page   \u{b7}   B  close".into()
             }
@@ -1402,6 +1546,102 @@ impl Menu {
             row: self.row,
             hint,
             keyboard: self.typing.as_ref().map(|(kb, _)| kb.clone()),
+        }
+    }
+
+    /// A Network info line's value: a fact, or plainly why there isn't one.
+    fn info_value(&self, row: InfoRow) -> Value {
+        let net = &self.net;
+        let prompt = |text: String, warning: bool| Value::Prompt { text, warning };
+        let dash = || prompt("\u{2013}".into(), false);
+        if !net.read {
+            return dash();
+        }
+        let off = net.wifi == Some(false);
+        let station = net.station.as_ref();
+        let joined = station.is_some_and(|s| s.connected());
+        // Why there is no address, route or server: the radio, or no network joined yet.
+        let because = || {
+            prompt(
+                if off {
+                    "Wi-Fi is off".into()
+                } else if !joined {
+                    "Not connected".into()
+                } else {
+                    "None yet".into()
+                },
+                !off,
+            )
+        };
+        match row {
+            InfoRow::Wifi => prompt(
+                match (net.wifi, station) {
+                    (Some(false), _) => "Off".into(),
+                    (_, Some(s)) if s.connected() => "On, connected".into(),
+                    (_, Some(s)) if s.state == "connecting" => "On, joining\u{2026}".into(),
+                    (Some(true), _) | (None, Some(_)) => "On, not connected".into(),
+                    (None, None) => "Unknown".into(),
+                },
+                false,
+            ),
+            InfoRow::Network => match station.filter(|s| s.connected()) {
+                Some(s) => {
+                    let name = s.network.clone().unwrap_or_else(|| "(hidden)".into());
+                    let mut text = name;
+                    if let Some(dbm) = s.rssi {
+                        text.push_str(&format!(", {dbm} dBm"));
+                    }
+                    if let Some(band) = s.band() {
+                        text.push_str(&format!(", {band}"));
+                    }
+                    // The status bar's bars where it has them, else from the signal read here.
+                    let bars = self
+                        .radio
+                        .wifi
+                        .as_ref()
+                        .and_then(|w| w.joined.as_ref())
+                        .map_or(s.bars(), |(_, bars)| *bars);
+                    Value::Status {
+                        text,
+                        glyphs: vec![nibkit::menu::Glyph::Signal(bars)],
+                    }
+                }
+                None => because(),
+            },
+            InfoRow::Address => match net.address_line() {
+                Some(line) => prompt(line, false),
+                None => because(),
+            },
+            InfoRow::Gateway => match &net.gateway {
+                Some(gw) => prompt(gw.clone(), false),
+                None => because(),
+            },
+            // Without a route, resolved lists only its fallback servers: not this network's.
+            InfoRow::Dns => match net.dns.as_slice() {
+                [] => because(),
+                _ if net.gateway.is_none() => because(),
+                [a] => prompt(a.clone(), false),
+                [a, b] => prompt(format!("{a}, {b}"), false),
+                [a, b, rest @ ..] => prompt(format!("{a}, {b} +{}", rest.len()), false),
+            },
+            InfoRow::Name => prompt(net.name.clone(), false),
+            InfoRow::Mac => prompt(net.mac.clone().unwrap_or_else(|| "\u{2013}".into()), false),
+            InfoRow::Internet | InfoRow::Updates | InfoRow::Tracker => {
+                use netinfo::Reach;
+                let (host, reach) = match row {
+                    InfoRow::Internet => (None, net.checks.internet),
+                    InfoRow::Updates => (Some(netinfo::UPDATE_HOST.to_owned()), net.checks.updates),
+                    _ => match &net.tracker {
+                        Some(host) => (Some(host.clone()), net.checks.tracker),
+                        None => return prompt("Not set".into(), false),
+                    },
+                };
+                let text = match host {
+                    Some(host) => format!("{host}: {reach}"),
+                    None => reach.to_string(),
+                };
+                prompt(text, matches!(reach, Reach::NoRoute | Reach::DnsFailed))
+            }
         }
     }
 
@@ -1480,6 +1720,28 @@ impl Menu {
                     },
                 }
             }
+            Item::Address => Value::Prompt {
+                text: match (&self.net.address, self.net.read) {
+                    (Some((ip, _)), _) => ip.clone(),
+                    (None, true)
+                        if self.radio.wifi.as_ref().is_some_and(|w| w.joined.is_some()) =>
+                    {
+                        "No address yet".into()
+                    }
+                    (None, true) => "No address".into(),
+                    (None, false) => "\u{2013}".into(),
+                },
+                warning: false,
+            },
+            Item::NetworkInfo => Value::Prompt {
+                text: if r == self.row {
+                    "Press A".into()
+                } else {
+                    String::new()
+                },
+                warning: false,
+            },
+            Item::Info(row) => self.info_value(*row),
             Item::Scan => Value::Prompt {
                 text: if self.radio.wifi.as_ref().is_some_and(|w| w.scanning) {
                     "Looking\u{2026}".into()
