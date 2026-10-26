@@ -366,10 +366,17 @@ fn spawn_watched(mut command: Command, cue: String) -> std::io::Result<(Child, A
 }
 
 /// Among the last lines a game wrote, the one that says why it stopped: the last that an
-/// emulator marks as its reason (`launch:`, `gba:`, `zip:`, `rom:`, `could not`), else the last
-/// that says anything.
+/// emulator marks as its reason (`launch:`, `gba:`, `zip:`, `rom:`, `could not`, and DSperate's
+/// own crash line `dsperate: crashed`), else the last that says anything.
 pub fn reason(lines: &[String]) -> Option<&str> {
-    const MARKED: [&str; 5] = ["launch:", "gba:", "zip:", "rom:", "could not"];
+    const MARKED: [&str; 6] = [
+        "launch:",
+        "gba:",
+        "zip:",
+        "rom:",
+        "could not",
+        "dsperate: crashed",
+    ];
     let mut said = lines.iter().map(|l| l.trim()).filter(|l| !l.is_empty());
     said.clone()
         .rev()
@@ -828,6 +835,16 @@ mod tests {
         assert_eq!(
             reason(&lines(&["Segmentation fault", "", "   "])),
             Some("Segmentation fault")
+        );
+        // DSperate's crash line, written from its signal handler, over the
+        // launch marks before it and whatever the runtime said after.
+        assert_eq!(
+            reason(&lines(&[
+                "dsperate: 12.345 s displays open",
+                "dsperate: crashed (SIGBUS) after \"displays open\", loading /mnt/ds/Roms/NDS/X.nds",
+                "Bus error"
+            ])),
+            Some("dsperate: crashed (SIGBUS) after \"displays open\", loading /mnt/ds/Roms/NDS/X.nds")
         );
     }
 
