@@ -114,3 +114,6 @@ pub fn set_start_at_power_on(_on: bool) -> std::io::Result<()> {
 }
 
 pub fn refresh_power_on_hook() {}
+
+/// Where to read DSlot's whole log, as the shelf's notices say.
+pub const LOG_HINT: &str = "journalctl -u dslot";

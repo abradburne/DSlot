@@ -73,3 +73,6 @@ pub fn check_user() -> Result<(), String> {
 pub fn start_at_power_on() -> Option<bool> {
     power_on::available().then(power_on::enabled)
 }
+
+/// Where to read DSlot's whole log, as the shelf's notices say.
+pub const LOG_HINT: &str = "Roms/APPS/dslot/log.txt";

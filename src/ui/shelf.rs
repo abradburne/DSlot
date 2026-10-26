@@ -190,6 +190,8 @@ struct State {
     menu: Option<Menu>,
     /// The power menu, over everything else.
     power: Option<PowerMenu>,
+    /// Why the game just left came straight back, over the shelf until any button is pressed.
+    notice: Option<String>,
     /// The game last selected on each page, by index into `games`.
     kept: [Option<usize>; Console::COUNT],
     /// A page to turn to at the top of the next frame.
@@ -537,8 +539,9 @@ impl State {
         back: Option<Back>,
         searched: &[Vec<PathBuf>; Console::COUNT],
     ) -> State {
-        let back_from = back.map(|b| b.game);
-        let put_away = back.filter(|b| b.put_away).map(|b| b.game);
+        let back_from = back.as_ref().map(|b| b.game);
+        let put_away = back.as_ref().filter(|b| b.put_away).map(|b| b.game);
+        let notice = back.and_then(|b| b.notice);
         let pages = pages(games, searched, settings.show_empty());
         // Back from a game: on the page it was on.
         if let Some(g) = back_from.and_then(|i| games.get(i)) {
@@ -578,6 +581,7 @@ impl State {
             // After an update (or one that didn't start), its notice, on the Update page.
             menu: (put_away.is_none() && crate::update::notice()).then(|| Menu::open_update(game)),
             power: put_away.map(|g| PowerMenu::open(Some(g))),
+            notice,
             kept: [None; Console::COUNT],
             turn_page: None,
             strip: (0.0, 0.0),
@@ -1250,6 +1254,14 @@ fn show(
                     _ => {}
                 },
                 Some(Input::Pointer(p)) if state.power.is_some() => pointers.push(p),
+                // The notice of a game that came straight back: any button or touch closes it.
+                Some(Input::Press(_) | Input::Pointer(Pointer::Down(..)))
+                    if state.notice.is_some() =>
+                {
+                    state.notice = None;
+                    state.repeat.stop();
+                }
+                Some(Input::Pointer(_)) if state.notice.is_some() => {}
                 Some(Input::Pointer(_) | Input::Press(_)) if busy => {}
                 Some(Input::Pointer(p)) => pointers.push(p),
                 Some(Input::Press(key)) if state.picker.is_some() => match key {
@@ -1657,6 +1669,9 @@ fn show(
                     ui.draw_card(c, card, &yours(games, stats, c)),
                 );
             }
+        }
+        if let Some(notice) = &state.notice {
+            soft("the stopped notice", ui.draw_notice(notice));
         }
         if let Some(open) = &state.power {
             let labels: Vec<&str> = open.choices.iter().map(|c| c.label()).collect();

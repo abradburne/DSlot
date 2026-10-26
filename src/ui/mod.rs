@@ -49,10 +49,12 @@ pub enum Outcome {
 
 /// The game the shelf comes back from: an index into the games, and whether it was put away
 /// for the power menu (which then opens at once) rather than left.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct Back {
     pub game: usize,
     pub put_away: bool,
+    /// Why it came straight back, if it did: shown until a button is pressed.
+    pub notice: Option<String>,
 }
 
 /// How DSlot was asked to run.

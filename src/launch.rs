@@ -10,9 +10,12 @@ use crate::emulator::{Action, Emulator, Emulators, Seed};
 use crate::rom::Game;
 use crate::settings::{def, game_chain, Settings};
 use nibkit::dslot;
-use std::io::{BufRead, BufReader};
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// The emulator `game` starts in.
 pub fn emulator_for<'a>(
@@ -219,11 +222,11 @@ impl Launch {
             .args(&self.args)
             .envs(self.env.iter().map(|(k, v)| (k, v)));
         eprintln!("dslot: starting {} {}", self.program, self.args.join(" "));
-        let child = match &self.quit_on_output {
-            None => command.spawn()?,
+        let (child, tail) = match &self.quit_on_output {
+            None => spawn_tailed(command)?,
             Some(cue) => spawn_watched(command, cue.clone())?,
         };
-        wait(child, put_away)
+        wait(child, &tail, put_away)
     }
 }
 
@@ -233,6 +236,80 @@ pub struct Ended {
     pub status: ExitStatus,
     /// It was put away for the power menu, and resumes when started again.
     pub put_away: bool,
+    /// The last lines it wrote to stderr (at most [`TAIL`]), for saying why it came straight
+    /// back. They went to DSlot's own stderr too, as they came.
+    pub stderr: Vec<String>,
+}
+
+/// How many of a game's last stderr lines are kept.
+pub const TAIL: usize = 20;
+
+/// The last lines a game wrote, kept as they are forwarded to DSlot's stderr.
+#[derive(Debug, Default)]
+struct Tail {
+    lines: Mutex<VecDeque<String>>,
+    /// The game's output has ended (the pipe is closed).
+    done: AtomicBool,
+}
+
+impl Tail {
+    fn push(&self, line: String) {
+        let mut lines = self.lines.lock().unwrap_or_else(|e| e.into_inner());
+        if lines.len() == TAIL {
+            lines.pop_front();
+        }
+        lines.push_back(line);
+    }
+
+    /// The lines kept, once the game's output has ended (or shortly after the game has).
+    fn take(&self) -> Vec<String> {
+        let deadline = std::time::Instant::now() + TAIL_GRACE;
+        while !self.done.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            std::thread::sleep(POLL);
+        }
+        let lines = self.lines.lock().unwrap_or_else(|e| e.into_inner());
+        lines.iter().cloned().collect()
+    }
+}
+
+/// How long after a game has exited its last lines are waited for: its output is read on a
+/// thread, which may be a step behind (and a helper it left running may keep the pipe open).
+const TAIL_GRACE: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Forwards each line of `log` to DSlot's stderr as it comes, keeping the last [`TAIL`]; and,
+/// when `cue` says so, asks the game (`pid`) to quit on the line that contains it.
+fn tee(log: impl Read + Send + 'static, cue: Option<(String, libc::pid_t)>) -> Arc<Tail> {
+    let tail = Arc::new(Tail::default());
+    let kept = Arc::clone(&tail);
+    // Not joined: helpers the emulator leaves running keep the pipe open after it is gone.
+    std::thread::spawn(move || {
+        for line in BufReader::new(log).split(b'\n').map_while(Result::ok) {
+            let line = String::from_utf8_lossy(&line).into_owned();
+            eprintln!("{line}");
+            if let Some((cue, pid)) = &cue {
+                if line.contains(cue) {
+                    // SIGTERM, not SIGKILL: the stock DS emulator restores the GPU governor on
+                    // the way out.
+                    // SAFETY: kill(2) on our child's pid, not yet waited for while it writes
+                    // to us.
+                    unsafe { libc::kill(*pid, libc::SIGTERM) };
+                }
+            }
+            kept.push(line);
+        }
+        kept.done.store(true, Ordering::Release);
+    });
+    tail
+}
+
+/// Starts a game with its stderr read by DSlot: forwarded to DSlot's own, and its last lines
+/// kept.
+fn spawn_tailed(mut command: Command) -> std::io::Result<(Child, Arc<Tail>)> {
+    let mut child = command.stderr(Stdio::piped()).spawn()?;
+    let Some(err) = child.stderr.take() else {
+        return Err(std::io::Error::other("no pipe to the game's stderr"));
+    };
+    Ok((child, tee(err, None)))
 }
 
 /// How long a game asked to quit has to save its state before it is killed.
@@ -241,13 +318,15 @@ pub const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 const POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Waits for `child`, putting it away when `put_away` says so.
-fn wait(mut child: Child, put_away: impl Fn() -> bool) -> std::io::Result<Ended> {
+fn wait(mut child: Child, tail: &Tail, put_away: impl Fn() -> bool) -> std::io::Result<Ended> {
+    let ended = |status, put_away| Ended {
+        status,
+        put_away,
+        stderr: tail.take(),
+    };
     loop {
         if let Some(status) = child.try_wait()? {
-            return Ok(Ended {
-                status,
-                put_away: false,
-            });
+            return Ok(ended(status, false));
         }
         if put_away() {
             eprintln!("dslot: asking the game to save and quit");
@@ -255,19 +334,13 @@ fn wait(mut child: Child, put_away: impl Fn() -> bool) -> std::io::Result<Ended>
             let deadline = std::time::Instant::now() + QUIT_GRACE;
             while std::time::Instant::now() < deadline {
                 if let Some(status) = child.try_wait()? {
-                    return Ok(Ended {
-                        status,
-                        put_away: true,
-                    });
+                    return Ok(ended(status, true));
                 }
                 std::thread::sleep(POLL);
             }
             eprintln!("dslot: the game did not quit; killed");
             child.kill()?;
-            return Ok(Ended {
-                status: child.wait()?,
-                put_away: true,
-            });
+            return Ok(ended(child.wait()?, true));
         }
         std::thread::sleep(POLL);
     }
@@ -282,26 +355,26 @@ fn terminate(child: &Child) {
 
 /// Starts an emulator that goes back to a menu of its own when a game ends: its output is
 /// watched for `cue`, the line that says so, and it is asked to quit then instead.
-fn spawn_watched(mut command: Command, cue: String) -> std::io::Result<Child> {
+fn spawn_watched(mut command: Command, cue: String) -> std::io::Result<(Child, Arc<Tail>)> {
     let (log, out) = std::io::pipe()?;
     let child = command.stdout(out.try_clone()?).stderr(out).spawn()?;
     // Dropped here so that only the emulator (and what it starts) holds the pipe open.
     drop(command);
     let pid = child.id() as libc::pid_t;
-    // Not joined: helpers the emulator leaves running keep the pipe open after it is gone.
-    std::thread::spawn(move || {
-        for line in BufReader::new(log).split(b'\n').map_while(Result::ok) {
-            let line = String::from_utf8_lossy(&line);
-            eprintln!("{line}");
-            if line.contains(&cue) {
-                // SIGTERM, not SIGKILL: the stock DS emulator restores the GPU governor on the
-                // way out.
-                // SAFETY: kill(2) on our child's pid, not yet waited for while it writes to us.
-                unsafe { libc::kill(pid, libc::SIGTERM) };
-            }
-        }
-    });
-    Ok(child)
+    let tail = tee(log, Some((cue, pid)));
+    Ok((child, tail))
+}
+
+/// Among the last lines a game wrote, the one that says why it stopped: the last that an
+/// emulator marks as its reason (`launch:`, `gba:`, `zip:`, `rom:`, `could not`), else the last
+/// that says anything.
+pub fn reason(lines: &[String]) -> Option<&str> {
+    const MARKED: [&str; 5] = ["launch:", "gba:", "zip:", "rom:", "could not"];
+    let mut said = lines.iter().map(|l| l.trim()).filter(|l| !l.is_empty());
+    said.clone()
+        .rev()
+        .find(|l| MARKED.iter().any(|m| l.starts_with(m)))
+        .or_else(|| said.next_back())
 }
 
 /// Copies each seed file into place where there is none yet.
@@ -705,13 +778,57 @@ mod tests {
             "echo starting; echo returning to menu; sleep 10; echo never",
         ]);
         let began = std::time::Instant::now();
-        let ended = wait(
-            spawn_watched(command, "returning to menu".into()).unwrap(),
-            || false,
-        )
-        .unwrap();
+        let (child, tail) = spawn_watched(command, "returning to menu".into()).unwrap();
+        let ended = wait(child, &tail, || false).unwrap();
         assert!(!ended.status.success() && !ended.put_away);
         assert!(began.elapsed().as_secs() < 5);
+        assert_eq!(ended.stderr, ["starting", "returning to menu"]);
+    }
+
+    #[test]
+    fn the_last_lines_are_kept() {
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "for i in $(seq 1 30); do echo line $i >&2; done; exit 3",
+        ]);
+        let (child, tail) = spawn_tailed(command).unwrap();
+        let ended = wait(child, &tail, || false).unwrap();
+        assert_eq!(ended.status.code(), Some(3));
+        assert_eq!(ended.stderr.len(), TAIL);
+        assert_eq!(ended.stderr.first().map(String::as_str), Some("line 11"));
+        assert_eq!(ended.stderr.last().map(String::as_str), Some("line 30"));
+    }
+
+    #[test]
+    fn the_reason_is_the_marked_line_else_the_last() {
+        let lines = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(reason(&[]), None);
+        assert_eq!(reason(&lines(&["", "  "])), None);
+        // A marked line wins over later chatter.
+        assert_eq!(
+            reason(&lines(&[
+                "dsperate: starting",
+                "launch: Game.nds cannot start: ZIP NOT SUPPORTED",
+                "shutting down audio",
+                ""
+            ])),
+            Some("launch: Game.nds cannot start: ZIP NOT SUPPORTED")
+        );
+        // The last marked line, of several.
+        assert_eq!(
+            reason(&lines(&["rom: header read", "gba: bad header", "bye"])),
+            Some("gba: bad header")
+        );
+        assert_eq!(
+            reason(&lines(&["  could not open the ROM  ", "exiting"])),
+            Some("could not open the ROM")
+        );
+        // Nothing marked: the last line that says anything.
+        assert_eq!(
+            reason(&lines(&["Segmentation fault", "", "   "])),
+            Some("Segmentation fault")
+        );
     }
 
     #[test]
@@ -722,10 +839,13 @@ mod tests {
         // Asked once it has started (and set its trap), as a long press would come mid-game.
         let started = std::time::Instant::now();
         let asked = || started.elapsed() > std::time::Duration::from_millis(300);
-        let ended = wait(command.spawn().unwrap(), asked).unwrap();
+        let (child, tail) = spawn_tailed(command).unwrap();
+        let ended = wait(child, &tail, asked).unwrap();
         assert!(ended.put_away && ended.status.success(), "{ended:?}");
         // Nobody asking: it runs to its end.
-        let quick = wait(Command::new("true").spawn().unwrap(), || false).unwrap();
+        let (child, tail) = spawn_tailed(Command::new("true")).unwrap();
+        let quick = wait(child, &tail, || false).unwrap();
         assert!(!quick.put_away && quick.status.success());
+        assert!(quick.stderr.is_empty());
     }
 }

@@ -273,13 +273,14 @@ fn run() -> Result<(), String> {
     let mut settings = Settings::load(dirs.settings.clone(), &dirs.legacy, &games, &emulators);
     mark("stats and settings loaded");
 
-    let mut back = None;
+    let mut back: Option<ui::Back> = None;
     let mut refresh = false;
     loop {
         if refresh {
-            let put_away = back.is_some_and(|b: ui::Back| b.put_away);
+            let put_away = back.as_ref().is_some_and(|b| b.put_away);
             let selected = back
-                .and_then(|b: ui::Back| games.get(b.game))
+                .as_ref()
+                .and_then(|b| games.get(b.game))
                 .map(|g| g.path.clone());
             emulators = Emulators::load(&dirs.emulators);
             if !given_roots {
@@ -310,7 +311,11 @@ fn run() -> Result<(), String> {
             settings.reload();
             back = selected
                 .and_then(|path| games.iter().position(|g| g.path == path))
-                .map(|game| ui::Back { game, put_away });
+                .map(|game| ui::Back {
+                    game,
+                    put_away,
+                    notice: None,
+                });
             rescan.watch(folders(&opts));
             mark("emulator integrations refreshed");
         }
@@ -334,6 +339,7 @@ fn run() -> Result<(), String> {
                 back = selected.map(|game| ui::Back {
                     game,
                     put_away: false,
+                    notice: None,
                 });
                 refresh = true;
             }
@@ -353,15 +359,16 @@ fn run() -> Result<(), String> {
                 hold_last_frame(&opts);
                 mark("game starting");
                 let played = if game.is_app() {
-                    start_app(game, &apps, &power)
+                    start_app(game, &apps, &power).map(|ended| (ended, None))
                 } else {
                     play(game, &emulators, &settings, &power)
                 };
-                let put_away = match played {
-                    Ok(ended) => ended.put_away,
+                // Why it came straight back, if it did: the shelf says so when it is up again.
+                let (put_away, notice) = match played {
+                    Ok((ended, notice)) => (ended.put_away, notice),
                     Err(e) => {
                         eprintln!("dslot: {e}");
-                        false
+                        (false, Some(e))
                     }
                 };
                 mark("game exited");
@@ -370,7 +377,11 @@ fn run() -> Result<(), String> {
                 // An emulator may set its own options in DSlot's settings, from its own menu.
                 settings.reload();
                 stats.record(&game.path, began.elapsed().as_secs());
-                back = Some(ui::Back { game: i, put_away });
+                back = Some(ui::Back {
+                    game: i,
+                    put_away,
+                    notice,
+                });
                 refresh = emulator::signature(&emulators)
                     != emulator::signature(&Emulators::load(&dirs.emulators));
                 // PortMaster has been getting ports (Roms/PORTS may be new), or an app has
@@ -406,13 +417,14 @@ fn hold_last_frame(opts: &ui::Opts) {
 }
 
 /// Starts `game` in its emulator and waits for it to exit, or puts it away when the power
-/// menu is asked for.
+/// menu is asked for. With it, why it stopped when it did so at once or badly (`stopped`),
+/// for the shelf to show; logged here too.
 fn play(
     game: &Game,
     emulators: &Emulators,
     settings: &Settings,
     power: &Requests,
-) -> Result<Ended, String> {
+) -> Result<(Ended, Option<String>), String> {
     let emulator = launch::emulator_for(emulators, settings, game).ok_or_else(|| {
         format!(
             "no emulator for {} games here (docs/emulators.md)",
@@ -421,6 +433,7 @@ fn play(
     })?;
     let options = launch::options(settings, emulator, game);
     let launch = Launch::new(emulator, game, &options, platform::saves().as_deref())?;
+    let began = Instant::now();
     let ended = launch
         .run(|| power.take())
         .map_err(|e| format!("cannot start {}: {e}", launch.program))?;
@@ -429,7 +442,35 @@ fn play(
         game.path.display(),
         ended.status
     );
-    Ok(ended)
+    let notice = stopped(&emulator.name, began.elapsed(), &ended);
+    if let Some(notice) = &notice {
+        eprintln!("dslot: {notice}");
+    }
+    Ok((ended, notice))
+}
+
+/// A game is taken to have started if it ran this long.
+const STARTED: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// What to tell the player when `emulator` stopped at once, or with an error or a signal:
+/// the status, and the line of its stderr that says why (launch::reason). Nothing for a game
+/// played and left, or put away for the power menu.
+fn stopped(emulator: &str, ran: std::time::Duration, ended: &Ended) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt;
+    let at_once = ran < STARTED;
+    if ended.put_away || (!at_once && ended.status.success()) {
+        return None;
+    }
+    let status = match (ended.status.code(), ended.status.signal()) {
+        (Some(code), _) => format!("exit {code}"),
+        (None, Some(signal)) => format!("signal {signal}"),
+        (None, None) => "no status".to_owned(),
+    };
+    let when = if at_once { " at once" } else { "" };
+    Some(match launch::reason(&ended.stderr) {
+        Some(why) => format!("{emulator} stopped{when} ({status}): {why}"),
+        None => format!("{emulator} stopped{when} ({status})"),
+    })
 }
 
 /// Starts an app from Roms/APPS and waits for it to exit, or puts it away for the power menu.
@@ -462,7 +503,7 @@ fn launch_one(rom: &Path, dirs: &platform::Dirs) -> Result<(), String> {
         std::slice::from_ref(&game),
         &emulators,
     );
-    let ended = play(&game, &emulators, &settings, &nibkit::power::watch())?;
+    let (ended, _) = play(&game, &emulators, &settings, &nibkit::power::watch())?;
     std::process::exit(ended.status.code().unwrap_or(1));
 }
 

@@ -39,6 +39,10 @@ pub const HINT: &str = "A  insert  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \
 /// The same on a page without carts (Game & Watch, the apps), where there is none to insert.
 const START_HINT: &str = "A  start  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \u{b7}  Select  systems  \u{b7}  X  menu  \u{b7}  Y  favourite  \u{b7}  Select + Start  exit";
 /// What the touch screen's hint line says over the system picker.
+/// The stopped notice: how many characters fit a line of its box, and how many lines it shows.
+const NOTICE_WIDTH: usize = 52;
+const NOTICE_LINES: usize = 6;
+
 const PICKER_HINT: &str = "D-pad  choose   \u{b7}   A  go   \u{b7}   B / Select  back";
 /// What the touch screen's hint line says in the menu.
 /// Grid covers kept as textures. They are small, so in most libraries that is all of them.
@@ -1844,6 +1848,49 @@ impl Ui<'_> {
             y += 56.0;
         }
         Ok(())
+    }
+
+    /// A game came straight back: why, over both screens dimmed, in a box on the touch screen,
+    /// until any button is pressed.
+    pub fn draw_notice(&mut self, notice: &str) -> Result<(), String> {
+        for v in [self.top, self.bot] {
+            self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
+            self.shade(v, 0.75)?;
+        }
+        let v = self.bot;
+        let lines = crate::update::wrap(notice, NOTICE_WIDTH);
+        let step = 30.0;
+        let height = 150.0 + lines.len().min(NOTICE_LINES) as f32 * step;
+        let (x, width) = (40.0, SW - 80.0);
+        let top = (SH - height) / 2.0;
+        self.white[v.c].set_alpha_mod(255);
+        self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
+        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, top, width, height))?;
+        self.text(
+            v,
+            "The game stopped",
+            (28.0, true),
+            (SW / 2.0, top + 22.0),
+            0.5,
+            RED,
+        )?;
+        let mut y = top + 74.0;
+        for line in lines.iter().take(NOTICE_LINES) {
+            self.text(v, line, (20.0, false), (x + 24.0, y), 0.0, WHITE)?;
+            y += step;
+        }
+        let hint = format!(
+            "The whole log: {}   \u{b7}   any button closes this",
+            crate::platform::LOG_HINT
+        );
+        self.text(
+            v,
+            &hint,
+            (18.0, false),
+            (SW / 2.0, top + height - 40.0),
+            0.5,
+            FAINT,
+        )
     }
 
     pub fn draw_power(&mut self, labels: &[&str], row: usize) -> Result<(), String> {
