@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.3.0 (unreleased): the first public release
+## 0.3.1
+
+- **A game that comes straight back says why.** When an emulator stops at once, with an error
+  or a signal, the shelf shows a notice with the emulator's own last line ("DSperate stopped
+  (exit 1): launch: ... ZIP NOT SUPPORTED") until any button, and logs it. On nibOS the notice
+  offers **Y: send a bug report**: `nib bug-report send` posts a scrubbed copy of the boot log
+  to nibOS's bug tracker and the notice shows the report code to quote, or where the report
+  was saved on the card when there is no network.
+- **The TF2 card no longer slows the shelf** with the slot empty: nibOS mounts it when it
+  appears, DSlot waits briefly for a card that is in but not mounted yet, and **Rescan games**
+  reads the system's Roms folders again, so a card put in or taken out since power-on is picked
+  up. nibkit 0.1.1.
+
+## 0.3.0: the first public release
 
 DSlot is a cart-and-box game shelf for the Anbernic RG DS+, on its stock OS (an app in
 `Roms/APPS`) or on nibOS (its boot UI). What it has:

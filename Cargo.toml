@@ -1,6 +1,6 @@
 [package]
 name = "dslot"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.87"
 description = "A cart-and-box game shelf for the Anbernic RG DS+, on its stock OS or on nibOS."
@@ -18,7 +18,7 @@ nibos = ["nibkit/nibos", "nibkit/net-control"]
 [dependencies]
 # nibOS's SDK library (github.com/abradburne/nibkit, MIT): the screens, buttons, touch,
 # brightness, settings and emulator descriptions DSlot shares with other apps.
-nibkit = { git = "https://github.com/abradburne/nibkit", tag = "v0.1.0", default-features = false, features = ["dslot", "menu"] }
+nibkit = { git = "https://github.com/abradburne/nibkit", tag = "v0.1.1", default-features = false, features = ["dslot", "menu"] }
 sdl2 = { version = "0.38", features = ["unsafe_textures"] }
 png = "0.17"
 fontdue = "0.9"

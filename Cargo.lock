@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "dslot"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "fontdue",
  "libc",
@@ -564,8 +564,8 @@ dependencies = [
 
 [[package]]
 name = "nibkit"
-version = "0.1.0"
-source = "git+https://github.com/abradburne/nibkit?tag=v0.1.0#ecef842ecf5f6e0ed5a689fcd1b18851fd56dca3"
+version = "0.1.1"
+source = "git+https://github.com/abradburne/nibkit?tag=v0.1.1#202397c34ce00eb5e1f20ee283eec4bba24088ab"
 dependencies = [
  "libc",
  "serde",
