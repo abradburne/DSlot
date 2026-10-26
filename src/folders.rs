@@ -43,6 +43,8 @@ pub fn make_soon(roots: &[PathBuf], emulators: &crate::emulator::Emulators) {
     let _ = std::thread::Builder::new()
         .name("folders".into())
         .spawn(move || {
+            // A card in its slot but not mounted yet would look like one with neither folder.
+            nibkit::paths::wait_for_cards(std::time::Duration::from_secs(3));
             let made = make(&cards, &systems, nibos_data);
             if !made.is_empty() {
                 eprintln!("dslot: made {} game folders", made.len());

@@ -133,7 +133,10 @@ fn run() -> Result<(), String> {
             _ => return Err(format!("unknown option {arg}\n{USAGE}")),
         }
     }
-    if roots.is_empty() {
+    // Roms folders named on the command line stay as they are; the system's are read again
+    // at each rescan, for a card put in or taken out since.
+    let given_roots = !roots.is_empty();
+    if !given_roots {
         roots = platform::rom_roots();
     }
     // A console has a page when an emulator for it is installed
@@ -219,6 +222,8 @@ fn run() -> Result<(), String> {
                 if let Ok(dir) = std::env::var("DSLOT_WAIT_FOR") {
                     wait_for_mount(&dir);
                 }
+                // And a games card the kernel has seen but udev hasn't mounted yet.
+                nibkit::paths::wait_for_cards(CARD_WAIT);
                 let games = rom::scan(console, &dirs, &known);
                 mark(&format!("{} games scanned", console.label()));
                 games
@@ -277,6 +282,10 @@ fn run() -> Result<(), String> {
                 .and_then(|b: ui::Back| games.get(b.game))
                 .map(|g| g.path.clone());
             emulators = Emulators::load(&dirs.emulators);
+            if !given_roots {
+                roots = platform::rom_roots();
+                nibkit::paths::wait_for_cards(CARD_WAIT);
+            }
             folders::make_soon(&roots, &emulators);
             games.clear();
             for console in Console::ALL {
@@ -458,6 +467,10 @@ fn launch_one(rom: &Path, dirs: &platform::Dirs) -> Result<(), String> {
 }
 
 /// Returns once something is mounted at `dir`, or after three seconds.
+/// How long to give a games card that is in its slot to be mounted (nibkit's
+/// `wait_for_cards`): udev and systemd take well under a second.
+const CARD_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
 fn wait_for_mount(dir: &str) {
     for _ in 0..300 {
         let mounts = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
