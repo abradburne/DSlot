@@ -6,7 +6,8 @@
 //! - **The console** (DS, GBA, ...): the emulator its games start in, that emulator's options,
 //!   and how the page is shown.
 //! - **System**: how every page is shown, the clicks, button repeat, the device's volume,
-//!   brightness and Wi-Fi where DSlot can change them, start at power-on, power off.
+//!   brightness and Wi-Fi where DSlot can change them, start at power-on, power off, and
+//!   **System info**: a read-only page of the device and what it is using (`sysinfo.rs`).
 //! - **Wi-Fi** and **Bluetooth** (nibOS): the networks in range, joining one (its passphrase
 //!   typed on nibkit's keyboard), leaving and forgetting; Bluetooth on and off, the paired
 //!   devices to connect and disconnect, forgetting one, and pairing a new one. The work is done
@@ -23,6 +24,7 @@
 
 use super::netinfo;
 use super::radios::{Ask, Do, Radios, Reply, Snapshot};
+use super::sysinfo;
 use crate::emulator::{Action, Emulator, Emulators};
 use crate::launch;
 use crate::platform::{self, Control};
@@ -81,6 +83,10 @@ pub enum Item {
     Clock,
     /// Looks in every console's folders again, for games the watch on them missed.
     Rescan,
+    /// System: opens the System info page (sysinfo.rs).
+    SystemInfo,
+    /// A line of the System info page; shown, not changed.
+    Sys(SysRow),
     /// An emulator's action on the game's files; asks before it acts.
     Action(Action),
     /// Deletes the game's saves folder; asks before it acts.
@@ -136,6 +142,8 @@ impl Item {
             Item::PowerOnStart => "Start at power-on",
             Item::Clock => "Clock",
             Item::Rescan => "Rescan games",
+            Item::SystemInfo => "System info",
+            Item::Sys(row) => row.label(),
             Item::Action(a) => &a.label,
             Item::DeleteSaves => "Delete saves",
             Item::PowerOff => "Power off",
@@ -215,6 +223,80 @@ impl InfoRow {
             InfoRow::Internet => "Internet",
             InfoRow::Updates => "Update server",
             InfoRow::Tracker => "Bug tracker",
+        }
+    }
+}
+
+/// The System info page's lines, in order; a line whose source the device lacks is left out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SysRow {
+    Board,
+    Nibos,
+    Kernel,
+    Uptime,
+    Slot,
+    Dslot,
+    Memory,
+    Available,
+    DslotMemory,
+    Shared,
+    Cache,
+    Swap,
+    Cma,
+    Load,
+    Cpu,
+    Temperature,
+    Gpu,
+    /// A file system, by the name the page gives it ("System", "NIBOS-DATA", "TF2 card").
+    Storage(&'static str),
+    Battery,
+    Display,
+}
+
+impl SysRow {
+    /// The lines before the storage, in order.
+    const FIRST: [SysRow; 17] = [
+        SysRow::Board,
+        SysRow::Nibos,
+        SysRow::Kernel,
+        SysRow::Uptime,
+        SysRow::Slot,
+        SysRow::Dslot,
+        SysRow::Memory,
+        SysRow::Available,
+        SysRow::DslotMemory,
+        SysRow::Shared,
+        SysRow::Cache,
+        SysRow::Swap,
+        SysRow::Cma,
+        SysRow::Load,
+        SysRow::Cpu,
+        SysRow::Temperature,
+        SysRow::Gpu,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            SysRow::Board => "Board",
+            SysRow::Nibos => "nibOS",
+            SysRow::Kernel => "Kernel",
+            SysRow::Uptime => "Up for",
+            SysRow::Slot => "Slot",
+            SysRow::Dslot => "DSlot",
+            SysRow::Memory => "Memory",
+            SysRow::Available => "Available",
+            SysRow::DslotMemory => "DSlot's own",
+            SysRow::Shared => "Shared (GPU)",
+            SysRow::Cache => "File cache",
+            SysRow::Swap => "Swap",
+            SysRow::Cma => "CMA",
+            SysRow::Load => "Load",
+            SysRow::Cpu => "CPU",
+            SysRow::Temperature => "Temperature",
+            SysRow::Gpu => "GPU",
+            SysRow::Storage(name) => name,
+            SysRow::Battery => "Battery",
+            SysRow::Display => "Display",
         }
     }
 }
@@ -452,6 +534,11 @@ pub struct Menu {
     net: netinfo::Info,
     /// Network info is open on the Wi-Fi page, in place of its rows.
     reading_net: bool,
+    /// The device's facts, read on a thread while System info is up.
+    sysinfo: Option<sysinfo::Watch>,
+    sys: sysinfo::Info,
+    /// System info is open on the System page, in place of its rows.
+    reading_sys: bool,
 }
 
 /// What the keyboard is typing.
@@ -501,6 +588,9 @@ impl Menu {
             netinfo: None,
             net: netinfo::Info::default(),
             reading_net: false,
+            sysinfo: None,
+            sys: sysinfo::Info::default(),
+            reading_sys: false,
         }
     }
 
@@ -618,6 +708,12 @@ impl Menu {
                     items.extend(def::builtin(def::SNES_CART).map(Item::Setting));
                 }
             }
+            Page::System if self.reading_sys => {
+                items.extend(self.sys_rows().into_iter().map(Item::Sys));
+                if items.is_empty() {
+                    items.push(Item::Sys(SysRow::Board));
+                }
+            }
             Page::System => {
                 shelf(&mut items);
                 let own = [
@@ -645,6 +741,7 @@ impl Menu {
                 }
                 items.push(Item::Clock);
                 items.push(Item::Rescan);
+                items.push(Item::SystemInfo);
                 if self.tuning.is_some() {
                     items.extend([Item::SpeakerTuning, Item::ImportTuning]);
                 }
@@ -832,6 +929,28 @@ impl Menu {
             self.close_net_info();
             return Done::default();
         }
+        // The device's facts, while System info is up.
+        if self.page == Page::System && self.reading_sys {
+            if self.sysinfo.is_none() {
+                self.sysinfo = sysinfo::Watch::start();
+            }
+            if let Some(watch) = &self.sysinfo {
+                self.sys = watch.now();
+            }
+        } else if self.sysinfo.take().is_some() {
+            self.sys = sysinfo::Info::default();
+        }
+        // System info: B goes back to the System page, on its row.
+        if self.reading_sys && input.close {
+            self.reading_sys = false;
+            let items = self.items(cx);
+            self.row = items
+                .iter()
+                .position(|i| *i == Item::SystemInfo)
+                .unwrap_or(0);
+            self.scroll = self.row.saturating_sub(VISIBLE - 1);
+            return Done::default();
+        }
 
         let items = self.items(cx);
         let was = self.row;
@@ -852,7 +971,13 @@ impl Menu {
         let chosen = pressed && was == self.row;
         // Y on the Wi-Fi page opens Network info, except on a saved network, where it forgets.
         let forgets = matches!(item, Item::Network(name) if self.known(name));
-        if self.page == Page::Wifi && self.reading_net {
+        if self.page == Page::System && self.reading_sys {
+            // Shown only: nothing to press or turn.
+        } else if *item == Item::SystemInfo {
+            if chosen {
+                self.open_sys_info();
+            }
+        } else if self.page == Page::Wifi && self.reading_net {
             if chosen {
                 if let Some(watch) = &self.netinfo {
                     watch.check_again();
@@ -1091,6 +1216,12 @@ impl Menu {
         }
     }
 
+    /// Opens System info over the System page's rows.
+    fn open_sys_info(&mut self) {
+        (self.reading_sys, self.row, self.scroll) = (true, 0, 0);
+        (self.armed, self.note) = (None, None);
+    }
+
     /// Back to the Wi-Fi page's rows, on its Network info row.
     fn close_net_info(&mut self) {
         self.reading_net = false;
@@ -1139,6 +1270,7 @@ impl Menu {
         if self.page != page {
             (self.page, self.row, self.scroll, self.armed, self.note) = (page, 0, 0, None, None);
             (self.forget, self.reading_notes, self.reading_net) = (None, false, false);
+            self.reading_sys = false;
             if page == Page::System {
                 self.reread(|_| true);
                 self.hour12 = nibkit::clock::hour12();
@@ -1324,6 +1456,8 @@ impl Menu {
             | Item::ImportTuning
             | Item::RestartNow
             | Item::Rescan
+            | Item::SystemInfo
+            | Item::Sys(_)
             | Item::Joined
             | Item::Address
             | Item::NetworkInfo
@@ -1496,6 +1630,7 @@ impl Menu {
             (Page::Update, _) => update_title(),
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
             (Page::Game, Some(game)) => game.name().to_owned(),
+            (Page::System, _) if self.reading_sys => self.sys.summary(),
             (Page::System, _) => "DSlot and the device".to_owned(),
             _ if cx.console == Console::Apps => "Every app".to_owned(),
             _ => format!("Every {} game", cx.console.label()),
@@ -1526,6 +1661,7 @@ impl Menu {
             (Page::Update, _) if self.reading_notes => {
                 "A  back to Update   \u{b7}   L / R  page   \u{b7}   B  close".into()
             }
+            (Page::System, Some(Item::Sys(_))) => "L / R  page   \u{b7}   B  back to System".into(),
             (Page::Update, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             _ => format!(
                 "D-pad  change   \u{b7}   {}L / R  page   \u{b7}   B  back",
@@ -1659,7 +1795,136 @@ impl Menu {
                 .update
                 .as_ref()
                 .map(|(s, _)| format!("nibOS {}", s.previous)),
+            Item::Sys(row) => self.sys_value(*row).and_then(|(_, note)| note),
             _ => None,
+        }
+    }
+
+    /// The System info lines the device has a value for, in order.
+    fn sys_rows(&self) -> Vec<SysRow> {
+        let storage = self.sys.volumes.iter().map(|v| SysRow::Storage(v.name));
+        SysRow::FIRST
+            .into_iter()
+            .chain(storage)
+            .chain([SysRow::Battery, SysRow::Display])
+            .filter(|row| self.sys_value(*row).is_some())
+            .collect()
+    }
+
+    /// A System info line's value and the note beside it, or `None` where the device has no
+    /// source for it: then the line isn't shown.
+    fn sys_value(&self, row: SysRow) -> Option<(Value, Option<String>)> {
+        use sysinfo::{mb, of, of_bytes, percent, span};
+        let prompt = |text: String| Value::Prompt {
+            text,
+            warning: false,
+        };
+        let plain = |text: String| Some((prompt(text), None));
+        let sys = &self.sys;
+        let memory = sys.memory.as_ref();
+        match row {
+            SysRow::Board => plain(sys.board.clone()?),
+            SysRow::Nibos => {
+                let r = sys.release.as_ref()?;
+                let mut text = r.version.clone();
+                for part in [&r.edition, &r.channel]
+                    .into_iter()
+                    .filter(|p| !p.is_empty())
+                {
+                    text.push_str(&format!(" \u{b7} {part}"));
+                }
+                let note = (!r.build.is_empty()).then(|| format!("build {}", r.build));
+                Some((prompt(text), note))
+            }
+            SysRow::Kernel => plain(sys.kernel.clone()?),
+            SysRow::Uptime => plain(span(sys.uptime?)),
+            SysRow::Slot => Some((prompt(sys.slot()?.into()), sys.root.clone())),
+            SysRow::Dslot => plain(match option_env!("NIBKIT_VERSION") {
+                Some(v) => format!("{} \u{b7} nibkit {v}", env!("CARGO_PKG_VERSION")),
+                None => env!("CARGO_PKG_VERSION").to_owned(),
+            }),
+            SysRow::Memory => {
+                let m = memory?;
+                Some((
+                    Value::Slider(percent(m.used(), m.total)),
+                    Some(format!("{} in use", of(m.used(), m.total))),
+                ))
+            }
+            SysRow::Available => plain(mb(memory?.available)),
+            SysRow::DslotMemory => plain(format!("{} resident", mb(sys.rss?))),
+            SysRow::Shared => plain(mb(memory?.shared)),
+            SysRow::Cache => plain(mb(memory?.cache)),
+            SysRow::Swap => {
+                let m = memory?;
+                if m.swap_total == 0 {
+                    return plain("None".into());
+                }
+                let on = sys
+                    .swap
+                    .as_ref()
+                    .map_or(String::new(), |dev| format!(" on {dev}"));
+                Some((
+                    Value::Slider(percent(m.swap_used, m.swap_total)),
+                    Some(format!("{} in use{on}", of(m.swap_used, m.swap_total))),
+                ))
+            }
+            SysRow::Cma => {
+                let (used, total) = memory?.cma?;
+                plain(format!("{} in use", of(used, total)))
+            }
+            SysRow::Load => {
+                let [a, b, c] = sys.load?;
+                Some((
+                    prompt(format!("{a:.2} \u{b7} {b:.2} \u{b7} {c:.2}")),
+                    Some("1, 5, 15 min".into()),
+                ))
+            }
+            SysRow::Cpu => {
+                let cores = &sys.cores;
+                let first = *cores.first()?;
+                let text = if cores.iter().all(|&c| c == first) {
+                    format!("{} \u{d7} {} MHz", cores.len(), first / 1000)
+                } else {
+                    let each: Vec<String> = cores.iter().map(|c| (c / 1000).to_string()).collect();
+                    format!("{} MHz", each.join(" \u{b7} "))
+                };
+                Some((prompt(text), sys.governor.clone()))
+            }
+            SysRow::Temperature => {
+                if sys.zones.is_empty() {
+                    return None;
+                }
+                let each: Vec<String> = sys
+                    .zones
+                    .iter()
+                    .map(|z| format!("{} {} \u{b0}C", z.name.to_uppercase(), z.millideg / 1000))
+                    .collect();
+                plain(each.join(" \u{b7} "))
+            }
+            SysRow::Gpu => {
+                let (hz, governor) = sys.gpu.as_ref()?;
+                let note = (!governor.is_empty()).then(|| governor.clone());
+                Some((prompt(format!("{} MHz", hz / 1_000_000)), note))
+            }
+            SysRow::Storage(name) => {
+                let v = sys.volumes.iter().find(|v| v.name == name)?;
+                Some((
+                    Value::Slider(percent(v.used, v.total)),
+                    Some(format!("{} used", of_bytes(v.used, v.total))),
+                ))
+            }
+            SysRow::Battery => plain(self.battery.as_ref()?.0.clone()),
+            SysRow::Display => {
+                if sys.panels.is_empty() {
+                    return None;
+                }
+                let each: Vec<String> = sys
+                    .panels
+                    .iter()
+                    .map(|(connector, mode)| format!("{connector} {}", mode.replace('x', "\u{d7}")))
+                    .collect();
+                plain(each.join(" \u{b7} "))
+            }
         }
     }
 
@@ -1742,6 +2007,17 @@ impl Menu {
                 warning: false,
             },
             Item::Info(row) => self.info_value(*row),
+            Item::SystemInfo => Value::Prompt {
+                text: if r == self.row {
+                    "Press A".into()
+                } else {
+                    String::new()
+                },
+                warning: false,
+            },
+            Item::Sys(row) => self
+                .sys_value(*row)
+                .map_or_else(|| text("\u{2013}"), |(v, _)| v),
             Item::Scan => Value::Prompt {
                 text: if self.radio.wifi.as_ref().is_some_and(|w| w.scanning) {
                     "Looking\u{2026}".into()
@@ -2258,6 +2534,139 @@ mod tests {
         assert_eq!(tab_hit(TABS.0 + 3.5 * TABS.2, TABS.1, 3), None);
         assert_eq!(row_hit(row_y(3) + 10.0), Some(3));
         assert_eq!(row_hit(TOP - ROW_STEP), None);
+    }
+
+    /// System info: A on its row opens it, its rows are those the device has a source for,
+    /// and B goes back to the System page on its row.
+    #[test]
+    fn system_info() {
+        let mut w = world("menu-sysinfo", false);
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Ds,
+            game: None,
+        };
+        let mut menu = Menu::open(false);
+        menu.turn_to(Page::System);
+        let at = menu
+            .items(&cx)
+            .iter()
+            .position(|i| *i == Item::SystemInfo)
+            .unwrap();
+        menu.update(&moved(at as i32), &mut cx);
+        let press = Input {
+            pressed: true,
+            ..Input::default()
+        };
+        menu.update(&press, &mut cx);
+        assert!(menu.reading_sys);
+        assert!(menu.shown(&cx).hint.contains("back to System"));
+
+        // The facts as alpha2 gives them, less a kernel release and a battery.
+        menu.sys = sysinfo::Info {
+            read: true,
+            board: Some("Anbernic RG DS+".into()),
+            release: Some(sysinfo::release(
+                "NIBOS_VERSION=0.1.0-alpha2\nNIBOS_BUILD=b32321d\nNIBOS_EDITION=dslot\n\
+                 NIBOS_CHANNEL=stable\n",
+            )),
+            kernel: None,
+            uptime: Some(918),
+            root: Some("nibos-root-b".into()),
+            memory: Some(sysinfo::Memory {
+                total: 1_008_332,
+                available: 431_228,
+                shared: 216_204,
+                cache: 254_332,
+                swap_total: 1_008_328,
+                swap_used: 0,
+                cma: Some((2176, 32768)),
+            }),
+            swap: Some("zram0".into()),
+            rss: Some(127_564),
+            load: Some([0.59, 0.70, 0.48]),
+            cores: vec![1_416_000; 4],
+            governor: Some("schedutil".into()),
+            zones: vec![sysinfo::Zone {
+                name: "cpu".into(),
+                millideg: 43_125,
+            }],
+            gpu: Some((200_000_000, "simple_ondemand".into())),
+            volumes: vec![sysinfo::Volume {
+                name: "System",
+                used: 1_400_942_592,
+                total: 1_767_247_872,
+            }],
+            panels: vec![("DSI-1".into(), "1024x768".into())],
+        };
+        assert_eq!(
+            labels(&menu, &cx),
+            [
+                "Board",
+                "nibOS",
+                "Up for",
+                "Slot",
+                "DSlot",
+                "Memory",
+                "Available",
+                "DSlot's own",
+                "Shared (GPU)",
+                "File cache",
+                "Swap",
+                "CMA",
+                "Load",
+                "CPU",
+                "Temperature",
+                "GPU",
+                "System",
+                "Display",
+            ]
+        );
+        let shown = menu.shown(&cx);
+        assert_eq!(shown.title, "nibOS 0.1.0-alpha2 on Anbernic RG DS+");
+        let row = |label: &str| shown.rows.iter().find(|r| r.label == label).unwrap();
+        let prompt = |text: &str| Value::Prompt {
+            text: text.into(),
+            warning: false,
+        };
+        assert_eq!(
+            row("nibOS").value,
+            prompt("0.1.0-alpha2 \u{b7} dslot \u{b7} stable")
+        );
+        assert_eq!(row("nibOS").source.as_deref(), Some("build b32321d"));
+        assert_eq!(row("Up for").value, prompt("15 min"));
+        assert_eq!(row("Slot").value, prompt("B"));
+        assert_eq!(row("Memory").value, Value::Slider(57));
+        assert_eq!(
+            row("Memory").source.as_deref(),
+            Some("563 of 984 MB in use")
+        );
+        assert_eq!(row("DSlot's own").value, prompt("124 MB resident"));
+        assert_eq!(row("Swap").value, Value::Slider(0));
+        assert_eq!(
+            row("Swap").source.as_deref(),
+            Some("0 of 984 MB in use on zram0")
+        );
+        assert_eq!(row("CMA").value, prompt("2 of 32 MB in use"));
+        assert_eq!(row("Load").value, prompt("0.59 \u{b7} 0.70 \u{b7} 0.48"));
+        assert_eq!(row("CPU").value, prompt("4 \u{d7} 1416 MHz"));
+        assert_eq!(row("CPU").source.as_deref(), Some("schedutil"));
+        assert_eq!(row("Temperature").value, prompt("CPU 43 \u{b0}C"));
+        assert_eq!(row("GPU").value, prompt("200 MHz"));
+        assert_eq!(row("System").value, Value::Slider(79));
+        assert_eq!(row("System").source.as_deref(), Some("1.3 of 1.6 GB used"));
+        assert_eq!(row("Display").value, prompt("DSI-1 1024\u{d7}768"));
+
+        // B: back to the System page, on the System info row.
+        let close = Input {
+            close: true,
+            ..Input::default()
+        };
+        menu.update(&close, &mut cx);
+        assert!(!menu.reading_sys);
+        assert_eq!(menu.items(&cx)[menu.row], Item::SystemInfo);
     }
 
     /// The Update page's row, in each phase: what it says, and when it warns.

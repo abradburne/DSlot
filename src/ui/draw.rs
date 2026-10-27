@@ -404,8 +404,20 @@ impl<'a> Ui<'a> {
         Some([read(self.top.c)?, read(self.bot.c)?])
     }
 
-    /// The first canvas, as RGBA pixels, with its size.
+    /// Both screens as RGBA pixels, with their size: the one canvas spanning them (a preview),
+    /// or, with a canvas each (nibOS's panels), the top one over the bottom one.
     pub fn read_pixels(&self) -> Result<(u32, u32, Vec<u8>), String> {
+        if let Some([top, bot]) = self.read_screens() {
+            let w = top.w.max(bot.w);
+            let mut px = Vec::with_capacity(w * (top.h + bot.h) * 4);
+            for img in [&top, &bot] {
+                for row in img.px.chunks(img.w * 4) {
+                    px.extend_from_slice(row);
+                    px.resize(px.len() + (w - img.w) * 4, 0);
+                }
+            }
+            return Ok((w as u32, (top.h + bot.h) as u32, px));
+        }
         let (w, h) = self.canvases[0].output_size()?;
         Ok((
             w,

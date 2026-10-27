@@ -96,7 +96,10 @@ target/release/dslot --skeleton-shot skeleton.png
 The nibOS build's files go to the XDG folders of whoever runs it (set `HOME` to keep a preview
 apart); the stock build's go beside the binary.
 
-The headless preview is one window with both screens stacked. `DSLOT_TWO_WINDOWS=1` makes it a
+The headless preview is one window with both screens stacked, and a shot on nibOS stacks its two
+panels the same way, the top one first (through the unit, as DSlot's user can't take the panels
+from a shell: `DSLOT_ARGS=--shot /tmp/x.png --press Tab` in `/etc/default/dslot`, then
+`systemctl restart dslot`). `DSLOT_TWO_WINDOWS=1` makes it a
 window per screen, as on nibOS, where a texture drawn on the wrong screen's renderer fails
 (docs/architecture.md). `tests/picker.rs` runs the system picker from every page that way. A
 key name SDL doesn't know (`wait`) is a frame with nothing pressed, for artwork or a resume

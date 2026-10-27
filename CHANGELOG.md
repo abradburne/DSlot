@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **System info**, on the System page: a read-only page of the device and what it is using,
+  read again every second while it is up. The board and the nibOS release (version, edition,
+  channel, build), the kernel, the uptime, the A/B slot running, DSlot's and nibkit's versions;
+  the memory in use of the total, what is available, DSlot's own resident size, the GPU's
+  shared memory, the file cache, the swap on zram and the kernel's CMA pool; the load, each
+  core's frequency and governor, the temperatures, the GPU's frequency; the system, NIBOS-DATA
+  and TF2 card file systems; the battery; and each panel's mode. A line whose source the
+  device lacks is left out rather than guessed.
+
 ## 0.3.1
 
 - **A game that comes straight back says why.** When an emulator stops at once, with an error

@@ -44,6 +44,20 @@ and the change is logged as refused. **Rescan games** (games copied or deleted w
 runs are noticed by themselves; this looks again at every page), **Start at power-on** and
 **Power off** are there too.
 
+**System info** (its row, or a tap on it) is a read-only page of the device and what it is
+using, for a player asked "what does it say under System info?" and for anyone chasing memory
+on a 1 GB device: the board and the nibOS release (version, edition, channel; its build as a
+note), the kernel, how long it has been up, the A/B slot running (from the root partition's
+label on the kernel's command line), DSlot's version with nibkit's; the memory in use of the
+total (a bar, as `/proc/meminfo` has it), what is available, DSlot's own resident size, the
+GPU's shared memory (`Shmem`), the file cache, the swap in use (on zram) and the kernel's CMA
+pool; the load averages, each core's frequency with the governor, the temperatures of the
+thermal zones, the GPU's frequency; the system, NIBOS-DATA and TF2 card file systems (the
+card only while one is mounted); the battery; and each panel's mode. Read from `/proc` and
+`/sys` on a thread every second while the page is up (`src/ui/sysinfo.rs`); nothing is run,
+nothing needs the network, and a line whose source the device lacks (a desktop preview, the
+stock OS) is left out rather than guessed. **B** goes back to the System page.
+
 ## Screensaver
 
 Left alone on the shelf (or its menu) for the Screensaver setting's time, DSlot dims both

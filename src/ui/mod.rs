@@ -6,6 +6,7 @@
 //! - `draw`: the textures and how each part of the screens is drawn.
 //! - `menu`: the menu's rows on the touch screen.
 //! - `netinfo`: the Wi-Fi page's Network info page, read from the system on a thread.
+//! - `sysinfo`: the System page's System info page, read from /proc and /sys on a thread.
 //! - `layout`: where things are on the screens, in screen units.
 //! - `skeleton`: the shelf's layout with nothing in it, for the first moment at power-on.
 //! - `sound`: the insert and eject clicks.
@@ -23,6 +24,7 @@ mod screens;
 mod shelf;
 mod skeleton;
 mod sound;
+mod sysinfo;
 
 pub use screens::{open, Screens};
 pub use shelf::run;

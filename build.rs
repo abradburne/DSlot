@@ -17,5 +17,16 @@ fn main() {
         // machine, the system's SDL2 is linked as usual.
         println!("cargo:rustc-link-search=native=/opt/homebrew/lib");
     }
+    // nibkit's version, out of Cargo.lock, for the System info page's DSlot line.
+    let lock = std::fs::read_to_string(format!("{dir}/Cargo.lock")).unwrap_or_default();
+    let nibkit = lock
+        .split("[[package]]")
+        .find(|p| p.contains("name = \"nibkit\""))
+        .and_then(|p| p.lines().find_map(|l| l.trim().strip_prefix("version = ")))
+        .map(|v| v.trim_matches('"').to_owned());
+    if let Some(version) = nibkit {
+        println!("cargo:rustc-env=NIBKIT_VERSION={version}");
+    }
+    println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=build.rs");
 }
