@@ -10,6 +10,13 @@
   core's frequency and governor, the temperatures, the GPU's frequency; the system, NIBOS-DATA
   and TF2 card file systems; the battery; and each panel's mode. A line whose source the
   device lacks is left out rather than guessed.
+- **Date and time**, on the System page (nibOS): the time, the date and the time zone, and
+  whether the time was set from the network (on a card that brings Wi-Fi up on demand it can
+  be hours out after a power-off). **Sync now** brings Wi-Fi up if it is off and waits for the
+  time servers; a picker sets the zone (region, then place), which nibOS keeps across updates;
+  **Set by hand** takes the year, month, day, hour and minute with the D-pad and turns network
+  time off until **Use network time** turns it back on. All through nibOS's `nib clock`, as
+  root by sudo; DSlot never sets the clock itself.
 
 ## 0.3.1
 

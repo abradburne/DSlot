@@ -7,12 +7,14 @@
 //! - `menu`: the menu's rows on the touch screen.
 //! - `netinfo`: the Wi-Fi page's Network info page, read from the system on a thread.
 //! - `sysinfo`: the System page's System info page, read from /proc and /sys on a thread.
+//! - `clock`: the System page's Date and time page, through nibOS's `nib clock`.
 //! - `layout`: where things are on the screens, in screen units.
 //! - `skeleton`: the shelf's layout with nothing in it, for the first moment at power-on.
 //! - `sound`: the insert and eject clicks.
 //! - `bouncer`: the screensaver's logo, bouncing round both screens.
 
 mod bouncer;
+mod clock;
 mod draw;
 mod input;
 mod layout;

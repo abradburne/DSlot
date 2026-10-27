@@ -7,7 +7,9 @@
 //!   and how the page is shown.
 //! - **System**: how every page is shown, the clicks, button repeat, the device's volume,
 //!   brightness and Wi-Fi where DSlot can change them, start at power-on, power off, and
-//!   **System info**: a read-only page of the device and what it is using (`sysinfo.rs`).
+//!   **System info**: a read-only page of the device and what it is using (`sysinfo.rs`), and
+//!   **Date and time** (nibOS): the clock, its zone and where the time came from, with Sync
+//!   now, a zone picker and setting it by hand through `nib clock` (`clock.rs`).
 //! - **Wi-Fi** and **Bluetooth** (nibOS): the networks in range, joining one (its passphrase
 //!   typed on nibkit's keyboard), leaving and forgetting; Bluetooth on and off, the paired
 //!   devices to connect and disconnect, forgetting one, and pairing a new one. The work is done
@@ -22,6 +24,7 @@
 //! it is set here; Y resets it to what it inherits. L / R or the tabs change page; up and down
 //! pick a row, left and right or A (or a tap) change it, B closes the menu.
 
+use super::clock;
 use super::netinfo;
 use super::radios::{Ask, Do, Radios, Reply, Snapshot};
 use super::sysinfo;
@@ -81,6 +84,21 @@ pub enum Item {
     RestartNow,
     /// The clock, 12-hour or 24-hour: nibOS's preference, for every app.
     Clock,
+    /// System (nibOS): opens the Date and time page (clock.rs).
+    DateTime,
+    /// A row of the Date and time page.
+    ClockRow(ClockRow),
+    /// The zone picker: a region (or UTC); A opens its places.
+    ZoneRegion(String),
+    /// The zone picker: a place, by its zone's full name; A sets it.
+    Zone {
+        id: String,
+        label: String,
+    },
+    /// Setting the time by hand: a field, stepped with left and right.
+    ClockField(clock::Field),
+    /// Setting the time by hand: A sets the clock to the fields.
+    ClockApply,
     /// Looks in every console's folders again, for games the watch on them missed.
     Rescan,
     /// System: opens the System info page (sysinfo.rs).
@@ -141,6 +159,12 @@ impl Item {
             Item::Battery => "Battery",
             Item::PowerOnStart => "Start at power-on",
             Item::Clock => "Clock",
+            Item::DateTime => "Date and time",
+            Item::ClockRow(row) => row.label(),
+            Item::ZoneRegion(region) => region,
+            Item::Zone { label, .. } => label,
+            Item::ClockField(field) => field.label(),
+            Item::ClockApply => "Set the clock",
             Item::Rescan => "Rescan games",
             Item::SystemInfo => "System info",
             Item::Sys(row) => row.label(),
@@ -299,6 +323,56 @@ impl SysRow {
             SysRow::Display => "Display",
         }
     }
+}
+
+/// The Date and time page's rows, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockRow {
+    Time,
+    Date,
+    Zone,
+    Source,
+    Ntp,
+    Sync,
+    Manual,
+}
+
+impl ClockRow {
+    const ALL: [ClockRow; 7] = [
+        ClockRow::Time,
+        ClockRow::Date,
+        ClockRow::Zone,
+        ClockRow::Source,
+        ClockRow::Ntp,
+        ClockRow::Sync,
+        ClockRow::Manual,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            ClockRow::Time => "Time",
+            ClockRow::Date => "Date",
+            ClockRow::Zone => "Time zone",
+            ClockRow::Source => "Time source",
+            ClockRow::Ntp => "Use network time",
+            ClockRow::Sync => "Sync now",
+            ClockRow::Manual => "Set by hand",
+        }
+    }
+}
+
+/// What the Date and time page shows in place of the System page's rows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ClockView {
+    Closed,
+    /// The page itself.
+    Page,
+    /// The zone picker's regions.
+    Regions,
+    /// The zone picker's places in this region.
+    Places(String),
+    /// Setting the time by hand.
+    Manual,
 }
 
 /// A row's value as shown.
@@ -534,6 +608,17 @@ pub struct Menu {
     net: netinfo::Info,
     /// Network info is open on the Wi-Fi page, in place of its rows.
     reading_net: bool,
+    /// The clock (nibOS): `nib clock status`, read on a thread while the System page is up.
+    clock: Option<clock::Watch>,
+    time: clock::Info,
+    /// What the Date and time page shows, in place of the System page's rows.
+    clock_view: ClockView,
+    /// The zones to choose from, read when the picker first opens.
+    zones: Option<clock::Zones>,
+    /// The time being set by hand.
+    draft: clock::Draft,
+    /// A `nib clock` command running: its row, and its outcome to come.
+    clock_job: Option<(ClockRow, std::sync::mpsc::Receiver<clock::Outcome>)>,
     /// The device's facts, read on a thread while System info is up.
     sysinfo: Option<sysinfo::Watch>,
     sys: sysinfo::Info,
@@ -588,6 +673,12 @@ impl Menu {
             netinfo: None,
             net: netinfo::Info::default(),
             reading_net: false,
+            clock: None,
+            time: clock::Info::default(),
+            clock_view: ClockView::Closed,
+            zones: None,
+            draft: clock::Draft::default(),
+            clock_job: None,
             sysinfo: None,
             sys: sysinfo::Info::default(),
             reading_sys: false,
@@ -708,6 +799,7 @@ impl Menu {
                     items.extend(def::builtin(def::SNES_CART).map(Item::Setting));
                 }
             }
+            Page::System if self.clock_view != ClockView::Closed => self.clock_items(&mut items),
             Page::System if self.reading_sys => {
                 items.extend(self.sys_rows().into_iter().map(Item::Sys));
                 if items.is_empty() {
@@ -740,6 +832,9 @@ impl Menu {
                     items.push(Item::Control(Control::BatteryProtect));
                 }
                 items.push(Item::Clock);
+                if clock::available() {
+                    items.push(Item::DateTime);
+                }
                 items.push(Item::Rescan);
                 items.push(Item::SystemInfo);
                 if self.tuning.is_some() {
@@ -940,6 +1035,23 @@ impl Menu {
         } else if self.sysinfo.take().is_some() {
             self.sys = sysinfo::Info::default();
         }
+        // The clock, while the System page is up (its row shows the time).
+        if self.page == Page::System && clock::available() {
+            if self.clock.is_none() {
+                self.clock = clock::Watch::start();
+            }
+            if let Some(watch) = &self.clock {
+                self.time = watch.now();
+            }
+        } else if self.clock.take().is_some() {
+            self.time = clock::Info::default();
+        }
+        self.clock_job_done(cx);
+        // Date and time: B goes back a level, to the System page at last.
+        if self.clock_view != ClockView::Closed && input.close {
+            self.clock_back(cx);
+            return Done::default();
+        }
         // System info: B goes back to the System page, on its row.
         if self.reading_sys && input.close {
             self.reading_sys = false;
@@ -971,7 +1083,14 @@ impl Menu {
         let chosen = pressed && was == self.row;
         // Y on the Wi-Fi page opens Network info, except on a saved network, where it forgets.
         let forgets = matches!(item, Item::Network(name) if self.known(name));
-        if self.page == Page::System && self.reading_sys {
+        if self.page == Page::System && self.clock_view != ClockView::Closed {
+            let item = item.clone();
+            self.clock_row(&item, chosen, turn, cx);
+        } else if *item == Item::DateTime {
+            if chosen {
+                self.open_clock(cx);
+            }
+        } else if self.page == Page::System && self.reading_sys {
             // Shown only: nothing to press or turn.
         } else if *item == Item::SystemInfo {
             if chosen {
@@ -1271,6 +1390,7 @@ impl Menu {
             (self.page, self.row, self.scroll, self.armed, self.note) = (page, 0, 0, None, None);
             (self.forget, self.reading_notes, self.reading_net) = (None, false, false);
             self.reading_sys = false;
+            self.clock_view = ClockView::Closed;
             if page == Page::System {
                 self.reread(|_| true);
                 self.hour12 = nibkit::clock::hour12();
@@ -1458,6 +1578,12 @@ impl Menu {
             | Item::Rescan
             | Item::SystemInfo
             | Item::Sys(_)
+            | Item::DateTime
+            | Item::ClockRow(_)
+            | Item::ZoneRegion(_)
+            | Item::Zone { .. }
+            | Item::ClockField(_)
+            | Item::ClockApply
             | Item::Joined
             | Item::Address
             | Item::NetworkInfo
@@ -1630,6 +1756,7 @@ impl Menu {
             (Page::Update, _) => update_title(),
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
             (Page::Game, Some(game)) => game.name().to_owned(),
+            (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
             (Page::System, _) if self.reading_sys => self.sys.summary(),
             (Page::System, _) => "DSlot and the device".to_owned(),
             _ if cx.console == Console::Apps => "Every app".to_owned(),
@@ -1660,6 +1787,16 @@ impl Menu {
             (Page::Bluetooth, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             (Page::Update, _) if self.reading_notes => {
                 "A  back to Update   \u{b7}   L / R  page   \u{b7}   B  close".into()
+            }
+            (Page::System, Some(Item::ClockRow(_))) => {
+                "A  choose   \u{b7}   L / R  page   \u{b7}   B  back to System".into()
+            }
+            (Page::System, Some(Item::ZoneRegion(_))) => "A  choose   \u{b7}   B  back".into(),
+            (Page::System, Some(Item::Zone { .. })) => {
+                "A  choose   \u{b7}   Left / Right  jump   \u{b7}   B  back".into()
+            }
+            (Page::System, Some(Item::ClockField(_) | Item::ClockApply)) => {
+                "D-pad  change   \u{b7}   A  set the clock   \u{b7}   B  back".into()
             }
             (Page::System, Some(Item::Sys(_))) => "L / R  page   \u{b7}   B  back to System".into(),
             (Page::Update, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
@@ -1796,6 +1933,10 @@ impl Menu {
                 .as_ref()
                 .map(|(s, _)| format!("nibOS {}", s.previous)),
             Item::Sys(row) => self.sys_value(*row).and_then(|(_, note)| note),
+            Item::ClockRow(ClockRow::Manual) => {
+                Some("network time goes off until turned back on".into())
+            }
+            Item::ClockRow(ClockRow::Sync) => Some("Wi-Fi comes on if it is off".into()),
             _ => None,
         }
     }
@@ -1971,6 +2112,12 @@ impl Menu {
                 None => text("\u{2013}"),
             },
             Item::Clock => text(if self.hour12 { "12-hour" } else { "24-hour" }),
+            Item::DateTime
+            | Item::ClockRow(_)
+            | Item::ZoneRegion(_)
+            | Item::Zone { .. }
+            | Item::ClockField(_)
+            | Item::ClockApply => self.clock_value(item, r),
             Item::Joined => {
                 let wifi = self.radio.wifi.as_ref();
                 match wifi.and_then(|w| w.joined.as_ref()) {
@@ -2220,6 +2367,263 @@ impl Menu {
 /// Whether `def` is an emulator's option, rather than one of DSlot's own settings.
 fn is_option(def: &Def) -> bool {
     def::builtin(&def.key).is_none()
+}
+
+/// The Date and time page (clock.rs).
+impl Menu {
+    /// Its rows, as the view stands.
+    fn clock_items(&self, items: &mut Vec<Item>) {
+        match &self.clock_view {
+            ClockView::Closed => {}
+            ClockView::Page => items.extend(ClockRow::ALL.into_iter().map(Item::ClockRow)),
+            ClockView::Regions => {
+                items.push(Item::ZoneRegion("UTC".into()));
+                if let Some(zones) = &self.zones {
+                    items.extend(
+                        zones
+                            .regions
+                            .iter()
+                            .map(|(r, _)| Item::ZoneRegion(r.clone())),
+                    );
+                }
+            }
+            ClockView::Places(region) => {
+                let places = self.zones.as_ref().map_or(&[][..], |z| z.of(region));
+                items.extend(places.iter().map(|id| Item::Zone {
+                    id: id.clone(),
+                    label: clock::place(id),
+                }));
+                if items.is_empty() {
+                    items.push(Item::ZoneRegion(region.clone()));
+                }
+            }
+            ClockView::Manual => {
+                items.extend(clock::Field::ALL.into_iter().map(Item::ClockField));
+                items.push(Item::ClockApply);
+            }
+        }
+    }
+
+    /// Opens the page over the System page's rows.
+    fn open_clock(&mut self, _cx: &Context) {
+        self.clock_view = ClockView::Page;
+        (self.row, self.scroll, self.armed, self.note) = (0, 0, None, None);
+    }
+
+    /// B: back a level; from the page itself, back to the System page on its row.
+    fn clock_back(&mut self, cx: &Context) {
+        let (view, row) = match &self.clock_view {
+            ClockView::Closed | ClockView::Page => (ClockView::Closed, None),
+            ClockView::Regions => (ClockView::Page, Some(ClockRow::Zone)),
+            ClockView::Places(_) => (ClockView::Regions, None),
+            ClockView::Manual => (ClockView::Page, Some(ClockRow::Manual)),
+        };
+        // Back in the regions, on the one left.
+        let region = match &self.clock_view {
+            ClockView::Places(r) => Some(r.clone()),
+            _ => None,
+        };
+        self.clock_view = view;
+        (self.armed, self.note) = (None, None);
+        let items = self.items(cx);
+        self.row = match (row, region) {
+            (Some(r), _) => items.iter().position(|i| *i == Item::ClockRow(r)),
+            (None, Some(region)) => items
+                .iter()
+                .position(|i| *i == Item::ZoneRegion(region.clone())),
+            (None, None) if self.clock_view == ClockView::Closed => {
+                items.iter().position(|i| *i == Item::DateTime)
+            }
+            _ => Some(0),
+        }
+        .unwrap_or(0)
+        .min(items.len().saturating_sub(1));
+        self.scroll = self.row.saturating_sub(VISIBLE - 1);
+    }
+
+    /// A button on a row of the page: `chosen` A (or a tap), `turn` left or right.
+    fn clock_row(&mut self, item: &Item, chosen: bool, turn: i32, cx: &Context) {
+        match (item, &self.clock_view) {
+            (Item::ClockRow(ClockRow::Zone), _) if chosen => {
+                if self.zones.is_none() {
+                    self.zones = Some(clock::zones());
+                }
+                self.clock_view = ClockView::Regions;
+                (self.row, self.scroll, self.note) = (0, 0, None);
+                // On the region of the zone set, where it is one of them.
+                let region = self.time.zone.split_once('/').map(|(r, _)| r.to_owned());
+                let items = self.items(cx);
+                if let Some(r) = region.and_then(|r| {
+                    items
+                        .iter()
+                        .position(|i| matches!(i, Item::ZoneRegion(x) if *x == r))
+                }) {
+                    self.row = r;
+                    self.scroll = r.saturating_sub(VISIBLE - 1);
+                }
+            }
+            (Item::ClockRow(ClockRow::Ntp), _) if chosen || turn != 0 => {
+                let on = self.time.ntp.unwrap_or(false);
+                self.clock_do(ClockRow::Ntp, clock::Do::Ntp(!on));
+            }
+            (Item::ClockRow(ClockRow::Sync), _) if chosen => {
+                self.clock_do(ClockRow::Sync, clock::Do::Sync)
+            }
+            (Item::ClockRow(ClockRow::Manual), _) if chosen => {
+                self.draft = clock::Draft::from(self.time.local);
+                self.clock_view = ClockView::Manual;
+                (self.row, self.scroll, self.note) = (0, 0, None);
+            }
+            (Item::ZoneRegion(region), ClockView::Regions) if chosen => {
+                if region == "UTC" {
+                    self.clock_view = ClockView::Page;
+                    self.clock_do_on(ClockRow::Zone, clock::Do::Zone("UTC".into()), cx);
+                } else {
+                    self.clock_view = ClockView::Places(region.clone());
+                    (self.row, self.scroll) = (0, 0);
+                    let items = self.items(cx);
+                    let current = items
+                        .iter()
+                        .position(|i| matches!(i, Item::Zone { id, .. } if *id == self.time.zone));
+                    if let Some(r) = current {
+                        self.row = r;
+                        self.scroll = r.saturating_sub(VISIBLE - 1);
+                    }
+                }
+            }
+            (Item::Zone { id, .. }, ClockView::Places(_)) if chosen => {
+                let id = id.clone();
+                self.clock_view = ClockView::Page;
+                self.clock_do_on(ClockRow::Zone, clock::Do::Zone(id), cx);
+            }
+            // Left and right jump through a long list of places.
+            (Item::Zone { .. }, ClockView::Places(_)) if turn != 0 => {
+                let n = self.items(cx).len() as i32;
+                self.row =
+                    (self.row as i32 + turn.signum() * VISIBLE as i32).clamp(0, n - 1) as usize;
+                self.scroll = self
+                    .scroll
+                    .clamp(self.row.saturating_sub(VISIBLE - 1), self.row);
+            }
+            (Item::ClockField(field), ClockView::Manual) if turn != 0 => {
+                self.draft.step(*field, turn.signum())
+            }
+            (Item::ClockApply, ClockView::Manual) if chosen => {
+                let at = self.draft.argument();
+                self.clock_view = ClockView::Page;
+                self.clock_do_on(ClockRow::Manual, clock::Do::Set(at), cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// Runs a command for the row picked, which says "Working…" until it answers. One at a
+    /// time.
+    fn clock_do(&mut self, row: ClockRow, what: clock::Do) {
+        if self.clock_job.is_some() {
+            return;
+        }
+        self.note = Some((self.row, "Working\u{2026}".into()));
+        self.clock_job = Some((row, clock::run(what)));
+    }
+
+    /// The same, back on the page with `row` picked (after the picker or the fields).
+    fn clock_do_on(&mut self, row: ClockRow, what: clock::Do, cx: &Context) {
+        let items = self.items(cx);
+        self.row = items
+            .iter()
+            .position(|i| *i == Item::ClockRow(row))
+            .unwrap_or(0);
+        self.scroll = self.row.saturating_sub(VISIBLE - 1);
+        self.clock_do(row, what);
+    }
+
+    /// The running command's outcome, when it has come: on its row, and the status read again.
+    fn clock_job_done(&mut self, cx: &Context) {
+        let Some((row, rx)) = &self.clock_job else {
+            return;
+        };
+        let Ok(outcome) = rx.try_recv() else { return };
+        let row = *row;
+        self.clock_job = None;
+        if let Some(watch) = &self.clock {
+            watch.poke();
+        }
+        if self.clock_view == ClockView::Page {
+            let at = self
+                .items(cx)
+                .iter()
+                .position(|i| *i == Item::ClockRow(row));
+            self.note = at.map(|r| (r, outcome.to_string()));
+        }
+    }
+
+    /// The title line: where the time came from, or what is being picked.
+    fn clock_title(&self) -> String {
+        match &self.clock_view {
+            ClockView::Closed => String::new(),
+            ClockView::Page if !self.time.read => "The clock".into(),
+            ClockView::Page => self.time.source(self.hour12).0,
+            ClockView::Regions => "Time zone: choose a region".into(),
+            ClockView::Places(region) => format!("Time zone: choose a place in {region}"),
+            ClockView::Manual => "Set the date and time: network time goes off".into(),
+        }
+    }
+
+    /// A row's value on the page, the picker or the fields.
+    fn clock_value(&self, item: &Item, r: usize) -> Value {
+        let prompt = |text: String, warning: bool| Value::Prompt { text, warning };
+        let press = |here: bool| {
+            prompt(
+                if here {
+                    "Press A".into()
+                } else {
+                    String::new()
+                },
+                false,
+            )
+        };
+        let dash = "\u{2013}".to_owned();
+        match item {
+            Item::DateTime => prompt(self.time.glance(self.hour12).unwrap_or_default(), false),
+            Item::ClockRow(ClockRow::Time) => {
+                prompt(self.time.local.map_or(dash, |t| t.time(self.hour12)), false)
+            }
+            Item::ClockRow(ClockRow::Date) => prompt(self.time.date_line().unwrap_or(dash), false),
+            Item::ClockRow(ClockRow::Zone) => prompt(self.time.zone_line(), false),
+            Item::ClockRow(ClockRow::Source) => {
+                let (text, warning) = self.time.source(self.hour12);
+                prompt(text, warning)
+            }
+            Item::ClockRow(ClockRow::Ntp) => Value::Text(
+                match self.time.ntp {
+                    Some(true) => "On",
+                    Some(false) => "Off",
+                    None => "\u{2013}",
+                }
+                .into(),
+            ),
+            Item::ClockRow(ClockRow::Sync | ClockRow::Manual) | Item::ClockApply => {
+                press(r == self.row)
+            }
+            Item::ZoneRegion(region) => {
+                let here =
+                    self.time.zone == *region || self.time.zone.starts_with(&format!("{region}/"));
+                if here {
+                    prompt("Current".into(), false)
+                } else {
+                    press(r == self.row)
+                }
+            }
+            Item::Zone { id, .. } if *id == self.time.zone => Value::Status {
+                text: "Current".into(),
+                glyphs: vec![nibkit::menu::Glyph::Check],
+            },
+            Item::Zone { .. } => press(r == self.row),
+            Item::ClockField(field) => Value::Text(self.draft.show(*field, self.hour12)),
+            _ => prompt(String::new(), false),
+        }
+    }
 }
 
 #[cfg(test)]

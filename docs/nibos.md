@@ -91,6 +91,37 @@ most), so a slow one never holds the page. **B** goes back to the Wi-Fi page. Th
 unit tests fed with the commands' captured output. On the stock OS there is no Wi-Fi page and
 none of this is built in.
 
+## Date and time
+
+The System page's **Date and time** row (nibOS, where `/usr/lib/nibos/nib-clock` is
+installed; never on the stock OS) shows the time and zone at a glance and opens the page
+(`src/ui/clock.rs`): the time to the second (12- or 24-hour as the Clock row says), the date
+in words, the zone with its offset, and **Time source**: "Set from the network (last at
+10:47)", "Not set from the network yet" (a warning: on the DSlot edition Wi-Fi comes up on
+demand, so after a power-off the clock runs from the hardware clock until something brings the
+network up), or "Network time is off: set by hand". The title line says the same. Then:
+
+- **Use network time**: systemd-timesyncd on or off (`nib clock ntp on|off`); turning it on
+  with the network up waits up to 30 s for the servers.
+- **Sync now**: `nib clock sync` brings the network up as `nib bug-report send` does (`nib net
+  up`, `nib wifi on`, up to 20 s for a route), restarts timesyncd and waits up to 30 s for a
+  reply; the row says "Set from the network", "No network: turn Wi-Fi on, or set the time by
+  hand" or "The time servers didn't answer: try again".
+- **Time zone**: a picker, regions first (UTC, Africa, America, Antarctica, Arctic, Asia,
+  Atlantic, Australia, Europe, Indian, Pacific: `timedatectl list-timezones` without the
+  legacy names), then the region's places with the current one ticked; left and right jump ten
+  at a time. A sets it (`nib clock zone`), which nibOS also keeps on its state partition so an
+  update doesn't lose it.
+- **Set by hand**: year, month, day, hour and minute rows stepped with left and right (the day
+  kept within the month), **Set the clock** applies them (`nib clock set`), which turns network
+  time off so it isn't put straight back.
+
+`status` is read as any user on a thread every second while the System page is up; the
+commands run as root through `sudo -n` (nibOS's `sudoers.d/nibos-clock` lets the wheel group)
+on a thread of their own, the row saying "Working…" until they answer; their output goes to
+the journal. nibOS writes the hardware clock after a set or a sync. B goes back a level, then to
+the System page. The parsers, the zone grouping and the fields' stepping have unit tests.
+
 ## Notices from nibOS
 
 Each file under `/run/nibos/notice/` (a tmpfs) is a notice for the shelf: its text, wrapped,
