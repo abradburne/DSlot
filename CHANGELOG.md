@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - **System info**, on the System page: a read-only page of the device and what it is using,
   read again every second while it is up. The board and the nibOS release (version, edition,
