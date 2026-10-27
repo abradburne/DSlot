@@ -29,6 +29,7 @@ pub fn dirs() -> Dirs {
             launch_conf: Some(app.config.join("launch.conf")),
         },
         stats: app.data.join("stats.tsv"),
+        achievements: app.config.join("retroachievements.token"),
         cache: app.cache,
         // Packages', then the administrator's, then the user's own.
         emulators: nibkit::dslot::description_dirs(),

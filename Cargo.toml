@@ -32,6 +32,8 @@ toml = { version = "0.8", default-features = false, features = ["parse", "displa
 # PortMaster ports: their port.json, and the JPEG screenshots many of them have.
 serde_json = "1"
 zune-jpeg = "0.4"
+# The QR code of the RetroAchievements sign-up page, for a phone (achievements.rs).
+qrcodegen = "1.8"
 
 [profile.release]
 opt-level = 3

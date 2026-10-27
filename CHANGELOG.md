@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **RetroAchievements**, an **Achievements** tab in the menu wherever there is `curl`: sign in
+  with the username and password typed on the keyboard, see who is signed in and their points,
+  sign out, and choose softcore (the default) or hardcore. DSlot keeps the token the service
+  answers with (two lines, username and token, mode 0600, beside settings.toml) and never the
+  password, and hands it to every emulator it starts as `RA_TOKEN_FILE`, `RA_USERNAME` and
+  `RA_HARDCORE` in the environment; DSperate reads them. The service has no way to make an
+  account from a device, so **Make an account** shows the sign-up page's address and a QR code
+  of it for a phone. docs/retroachievements.md.
+
 ## 0.3.2
 
 - **System info**, on the System page: a read-only page of the device and what it is using,

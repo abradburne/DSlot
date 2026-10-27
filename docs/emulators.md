@@ -68,7 +68,7 @@ delete = ["{saves}/*.auto.dss"]
 | `priority` | default 0 | Each system's default is the installed emulator with the highest. The stock descriptions use 10 and 20; DSperate, 100. |
 | `[systems]` | required | A command for each system it plays, by the system's `Roms/` folder name: `NDS`, `GBA`, `GB`, `GBC`, `SFC` (SNES), `FC` (NES), `FDS`, `MD`, `SMS`, `SG1000`, `GG`, `PCE`, `PCECD`, `PS`, `LYNX`, `NGP`, `WS`, `GW` (Game & Watch). A system DSlot does not know is skipped. |
 | `requires` | optional | Files that must be there as well as the programs: `["/path/to/core.so"]`. |
-| `[env]` | optional | Environment variables for the emulator. |
+| `[env]` | optional | Environment variables for the emulator. When the player is signed in to RetroAchievements, DSlot adds `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE` to them (docs/retroachievements.md). |
 | `[[seed]]` | optional | Files copied into place before a game starts, when there is none there yet: `from`, `to` (`~/` is the home folder). Never overwritten. |
 | `quit_on_output` | optional | For an emulator that goes back to a menu of its own when a game ends (the stock NNDDSS): a piece of a line of its output that says so. DSlot watches its output for it and asks it to quit (SIGTERM). |
 | `[[options]]` | optional | Options DSlot shows as settings (below). |

@@ -1812,6 +1812,34 @@ impl Ui<'_> {
                 Draw::Picture { .. } => {}
             }
         }
+        // A QR code under the first row: dark modules on a white square with a quiet zone,
+        // as big as the space down to the hint line allows.
+        if let (Some(qr), None) = (&menu.picture, &menu.keyboard) {
+            const QUIET: usize = 4;
+            let top = layout::row_y(1) - layout::ROW_STEP / 2.0 + 8.0;
+            let bottom = layout::HINT_Y - 20.0;
+            let side = qr.size + 2 * QUIET;
+            let px = ((bottom - top) / side as f32).floor().max(1.0);
+            let x0 = ((SW - px * side as f32) / 2.0).floor();
+            let y0 = top.floor();
+            self.white[v.c].set_color_mod(255, 255, 255);
+            self.white[v.c].set_alpha_mod(255);
+            self.canvases[v.c].copy(
+                &self.white[v.c],
+                None,
+                v.rect(x0, y0, px * side as f32, px * side as f32),
+            )?;
+            self.white[v.c].set_color_mod(16, 18, 24);
+            for y in 0..qr.size {
+                for x in 0..qr.size {
+                    if qr.dark(x, y) {
+                        let rx = x0 + (x + QUIET) as f32 * px;
+                        let ry = y0 + (y + QUIET) as f32 * px;
+                        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(rx, ry, px, px))?;
+                    }
+                }
+            }
+        }
         // The radios in the bar too, live as the Wi-Fi and Bluetooth pages change them (not
         // over the keyboard, which takes the whole screen).
         if menu.keyboard.is_none() {

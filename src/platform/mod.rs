@@ -41,6 +41,9 @@ pub struct Dirs {
     pub legacy: Legacy,
     /// `stats.tsv`: play times, favourites and ratings.
     pub stats: PathBuf,
+    /// `retroachievements.token`: the RetroAchievements sign-in, username and token
+    /// (achievements.rs). Mode 0600; never in a log or a bug report.
+    pub achievements: PathBuf,
     /// What each ROM said about itself, and grid covers already scaled. Safe to delete.
     pub cache: PathBuf,
     /// Folders of emulator descriptions, read in order: a file replaces one of the same name

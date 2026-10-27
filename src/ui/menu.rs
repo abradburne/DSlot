@@ -19,6 +19,10 @@
 //! - **Update** (nibOS): the version, the update channel, checking for an update, downloading
 //!   it in the background (paused and resumed), restarting into it, what's new, and going back
 //!   to the version before; the work is nibOS's updater's (`update.rs`).
+//! - **Achievements** (where there is `curl`): the RetroAchievements sign-in, kept for the
+//!   emulators (`achievements.rs`): the username and password typed on the keyboard, who is
+//!   signed in and their points, signing out, hardcore or softcore, and the sign-up page as a
+//!   QR code for a phone, since the service has no way to make an account from here.
 //!
 //! A row that can inherit shows where its value comes from ("from GBA", "from System") or that
 //! it is set here; Y resets it to what it inherits. L / R or the tabs change page; up and down
@@ -28,6 +32,7 @@ use super::clock;
 use super::netinfo;
 use super::radios::{Ask, Do, Radios, Reply, Snapshot};
 use super::sysinfo;
+use crate::achievements::{self, Account, Outcome, Standing};
 use crate::emulator::{Action, Emulator, Emulators};
 use crate::launch;
 use crate::platform::{self, Control};
@@ -60,6 +65,8 @@ pub enum Page {
     Wifi,
     Bluetooth,
     Update,
+    /// RetroAchievements (achievements.rs).
+    Achievements,
 }
 
 /// What a row is.
@@ -142,6 +149,18 @@ pub enum Item {
     WhatsNew,
     /// Restarts into the version before the last update; asks first.
     Rollback,
+    /// Achievements: the username to sign in as; A types it.
+    RaUser,
+    /// Achievements: A asks for the password and signs in.
+    RaSignIn,
+    /// Achievements: who is signed in and their points; shown, not changed.
+    RaAccount,
+    /// Achievements: signs out; asks first.
+    RaSignOut,
+    /// Achievements: opens the sign-up page's address and QR code.
+    RaSignUp,
+    /// The sign-up page's address, over the QR code; shown, not changed.
+    RaLink,
     /// A line of What's new; A goes back to the page.
     NoteLine(String),
     /// A line of the update's message, past what fits on the title line.
@@ -188,6 +207,12 @@ impl Item {
             Item::UpdateState => "Update",
             Item::WhatsNew => "What's new",
             Item::Rollback => "Go back to the previous version",
+            Item::RaUser => "Username",
+            Item::RaSignIn => "Sign in",
+            Item::RaAccount => "Signed in as",
+            Item::RaSignOut => "Sign out",
+            Item::RaSignUp => "Make an account",
+            Item::RaLink => "On a phone",
             Item::NoteLine(line) | Item::Message(line) => line,
         }
     }
@@ -202,6 +227,7 @@ impl Item {
                 | Item::ImportTuning
                 | Item::RestartNow
                 | Item::Rollback
+                | Item::RaSignOut
         )
     }
 }
@@ -420,6 +446,8 @@ pub struct Shown {
     pub hint: String,
     /// The keyboard, over the menu, while something is being typed.
     pub keyboard: Option<Keyboard>,
+    /// A QR code under the rows (the sign-up page's address).
+    pub picture: Option<achievements::Qr>,
 }
 
 /// What a row on a console's or a game's page goes back to when not set there: where from (a
@@ -518,7 +546,7 @@ impl Context<'_> {
     fn chain(&self, page: Page) -> Vec<Scope> {
         match (page, self.game) {
             (Page::Game, Some(game)) => game_chain(game).to_vec(),
-            (Page::System, _) => vec![Scope::System],
+            (Page::System | Page::Achievements, _) => vec![Scope::System],
             _ => console_chain(self.console).to_vec(),
         }
     }
@@ -624,6 +652,19 @@ pub struct Menu {
     sys: sysinfo::Info,
     /// System info is open on the System page, in place of its rows.
     reading_sys: bool,
+    /// RetroAchievements: the sign-in kept (achievements.rs), where it is kept, the username
+    /// typed so far, what the service said of the player, and a sign-in or check running.
+    ra_account: Option<Account>,
+    ra_path: std::path::PathBuf,
+    ra_user: String,
+    ra_standing: Option<Standing>,
+    ra_job: Option<(Item, std::sync::mpsc::Receiver<Outcome>)>,
+    /// The last outcome's line, for the title.
+    ra_said: Option<String>,
+    /// The sign-in kept has been checked with the service this time the menu is open.
+    ra_checked: bool,
+    /// The sign-up page's address and QR code are open, in place of the rows.
+    ra_signup: bool,
 }
 
 /// What the keyboard is typing.
@@ -633,6 +674,10 @@ enum Typing {
     Passphrase(String),
     /// A code a device being paired asked for.
     Code,
+    /// The RetroAchievements username.
+    RaUser,
+    /// The RetroAchievements password, for this username: signs in when typed.
+    RaPassword(String),
 }
 
 impl Menu {
@@ -642,6 +687,7 @@ impl Menu {
             .iter()
             .map(|&c| (c, platform::control(c)))
             .collect();
+        let ra_path = platform::dirs().achievements;
         Menu {
             page: if game { Page::Game } else { Page::Console },
             row: 0,
@@ -682,6 +728,14 @@ impl Menu {
             sysinfo: None,
             sys: sysinfo::Info::default(),
             reading_sys: false,
+            ra_account: Account::load(&ra_path),
+            ra_user: Account::load(&ra_path).map(|a| a.user).unwrap_or_default(),
+            ra_path,
+            ra_standing: None,
+            ra_job: None,
+            ra_said: None,
+            ra_checked: false,
+            ra_signup: false,
         }
     }
 
@@ -737,10 +791,12 @@ impl Menu {
             .is_some()
             .then_some([Page::Wifi, Page::Bluetooth]);
         let updates = update::there().then_some(Page::Update);
+        let achievements = achievements::available().then_some(Page::Achievements);
         game.into_iter()
             .chain([Page::Console, Page::System])
             .chain(radios.into_iter().flatten())
             .chain(updates)
+            .chain(achievements)
             .collect()
     }
 
@@ -899,6 +955,7 @@ impl Menu {
                     items.push(Item::Rollback);
                 }
             }
+            Page::Achievements => self.ra_items(&mut items),
             Page::Bluetooth => {
                 items.push(Item::BluetoothPower);
                 if let Some(bt) = self.radio.bluetooth.as_ref().filter(|b| b.powered) {
@@ -1047,6 +1104,12 @@ impl Menu {
             self.time = clock::Info::default();
         }
         self.clock_job_done(cx);
+        self.ra_job_done(cx);
+        // The sign-up page: B goes back to the Achievements page, on its row.
+        if self.ra_signup && input.close {
+            self.ra_back(cx);
+            return Done::default();
+        }
         // Date and time: B goes back a level, to the System page at last.
         if self.clock_view != ClockView::Closed && input.close {
             self.clock_back(cx);
@@ -1114,6 +1177,9 @@ impl Menu {
         } else if self.page == Page::Update {
             let item = item.clone();
             self.update_row(&item, pressed && was == self.row, turn);
+        } else if self.page == Page::Achievements && !matches!(item, Item::Setting(_)) {
+            let item = item.clone();
+            self.ra_row(&item, chosen);
         } else if *item == Item::Rescan {
             if pressed && was == self.row {
                 done.rescan = true;
@@ -1376,12 +1442,25 @@ impl Menu {
         let Some(typed) = typed else { return };
         let typing = typing.clone();
         self.typing = None;
-        let Some(radios) = &self.radios else { return };
         match (typed, typing) {
-            (Typed::Done(pass), Typing::Passphrase(name)) => radios.ask(Do::Join(name, Some(pass))),
-            (Typed::Done(code), Typing::Code) => radios.reply(Reply::Code(code)),
-            (Typed::Cancel, Typing::Code) => radios.reply(Reply::No),
-            (Typed::Cancel, Typing::Passphrase(_)) => {}
+            (Typed::Done(user), Typing::RaUser) => {
+                self.ra_user = user.trim().to_owned();
+            }
+            (Typed::Done(pass), Typing::RaPassword(user)) if !pass.is_empty() => {
+                self.ra_go(Item::RaSignIn, achievements::sign_in(user, pass));
+            }
+            (_, Typing::RaUser | Typing::RaPassword(_)) => {}
+            (typed, typing) => {
+                let Some(radios) = &self.radios else { return };
+                match (typed, typing) {
+                    (Typed::Done(pass), Typing::Passphrase(name)) => {
+                        radios.ask(Do::Join(name, Some(pass)))
+                    }
+                    (Typed::Done(code), Typing::Code) => radios.reply(Reply::Code(code)),
+                    (Typed::Cancel, Typing::Code) => radios.reply(Reply::No),
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -1391,6 +1470,10 @@ impl Menu {
             (self.forget, self.reading_notes, self.reading_net) = (None, false, false);
             self.reading_sys = false;
             self.clock_view = ClockView::Closed;
+            self.ra_signup = false;
+            if page == Page::Achievements {
+                self.ra_check();
+            }
             if page == Page::System {
                 self.reread(|_| true);
                 self.hour12 = nibkit::clock::hour12();
@@ -1407,7 +1490,7 @@ impl Menu {
     /// What `item` goes back to on this page when not set here; `None` for a row that doesn't
     /// inherit (anything on the System page, and what isn't a setting).
     fn inherits(&self, item: &Item, cx: &Context) -> Option<Inherit> {
-        if self.page == Page::System {
+        if matches!(self.page, Page::System | Page::Achievements) {
             return None;
         }
         let chain = cx.chain(self.page);
@@ -1584,6 +1667,12 @@ impl Menu {
             | Item::Zone { .. }
             | Item::ClockField(_)
             | Item::ClockApply
+            | Item::RaUser
+            | Item::RaSignIn
+            | Item::RaAccount
+            | Item::RaSignOut
+            | Item::RaSignUp
+            | Item::RaLink
             | Item::Joined
             | Item::Address
             | Item::NetworkInfo
@@ -1707,6 +1796,7 @@ impl Menu {
             Page::Wifi => "Wi-Fi".to_owned(),
             Page::Bluetooth => "Bluetooth".to_owned(),
             Page::Update => "Update".to_owned(),
+            Page::Achievements => "Achievements".to_owned(),
         };
         let tabs = pages.iter().map(|&p| (tab(p), p == self.page)).collect();
         let radio_title = || {
@@ -1754,6 +1844,7 @@ impl Menu {
         };
         let title = match (self.page, cx.game) {
             (Page::Update, _) => update_title(),
+            (Page::Achievements, _) => self.ra_title(),
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
@@ -1800,6 +1891,13 @@ impl Menu {
             }
             (Page::System, Some(Item::Sys(_))) => "L / R  page   \u{b7}   B  back to System".into(),
             (Page::Update, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
+            (Page::Achievements, _) if self.ra_signup => {
+                "L / R  page   \u{b7}   B  back to Achievements".into()
+            }
+            (Page::Achievements, Some(Item::Setting(_))) => {
+                "D-pad  change   \u{b7}   L / R  page   \u{b7}   B  back".into()
+            }
+            (Page::Achievements, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             _ => format!(
                 "D-pad  change   \u{b7}   {}L / R  page   \u{b7}   B  back",
                 back.unwrap_or_default()
@@ -1819,6 +1917,9 @@ impl Menu {
             row: self.row,
             hint,
             keyboard: self.typing.as_ref().map(|(kb, _)| kb.clone()),
+            picture: (self.page == Page::Achievements && self.ra_signup)
+                .then(|| achievements::qr(achievements::SIGN_UP))
+                .flatten(),
         }
     }
 
@@ -2279,6 +2380,12 @@ impl Menu {
                 text: String::new(),
                 warning: false,
             },
+            Item::RaUser
+            | Item::RaSignIn
+            | Item::RaAccount
+            | Item::RaSignOut
+            | Item::RaSignUp
+            | Item::RaLink => self.ra_value(item, r),
             Item::SpeakerTuning => text(match self.tuning {
                 Some(nibkit::audio::Tuning::Nibos) => "nibOS",
                 Some(nibkit::audio::Tuning::Official) => "Official",
@@ -2626,6 +2733,219 @@ impl Menu {
     }
 }
 
+/// The Achievements page (achievements.rs).
+impl Menu {
+    /// Its rows: signed out, the username, Sign in, Mode and Make an account; signed in, who,
+    /// Sign out and Mode. The sign-up view has the address alone, over the QR code.
+    fn ra_items(&self, items: &mut Vec<Item>) {
+        if self.ra_signup {
+            items.push(Item::RaLink);
+            return;
+        }
+        let mode = def::builtin(def::ACHIEVEMENTS).map(Item::Setting);
+        match &self.ra_account {
+            Some(_) => {
+                items.extend([Item::RaAccount, Item::RaSignOut]);
+                items.extend(mode);
+            }
+            None => {
+                items.extend([Item::RaUser, Item::RaSignIn]);
+                items.extend(mode);
+                items.push(Item::RaSignUp);
+            }
+        }
+    }
+
+    /// A button on a row of the page: `chosen` A (or a tap).
+    fn ra_row(&mut self, item: &Item, chosen: bool) {
+        if !chosen {
+            return;
+        }
+        match item {
+            Item::RaUser => {
+                let mut kb = Keyboard::new("RetroAchievements username", Purpose::Text, 20);
+                for c in self.ra_user.chars() {
+                    kb.type_char(c);
+                }
+                self.typing = Some((kb, Typing::RaUser));
+            }
+            Item::RaSignIn if self.ra_job.is_some() => {}
+            Item::RaSignIn if self.ra_user.is_empty() => {
+                self.note = Some((self.row, "Type the username first".into()));
+            }
+            Item::RaSignIn => {
+                let user = self.ra_user.clone();
+                let kb = Keyboard::new(format!("Password for {user}"), Purpose::Secret, 64);
+                self.typing = Some((kb, Typing::RaPassword(user)));
+            }
+            Item::RaSignOut if self.armed == Some(self.row) => {
+                self.armed = None;
+                if let Err(e) = Account::clear(&self.ra_path) {
+                    eprintln!("dslot: cannot remove {}: {e}", self.ra_path.display());
+                }
+                eprintln!("dslot: RetroAchievements: signed out");
+                (self.ra_account, self.ra_standing, self.ra_said) = (None, None, None);
+                (self.row, self.scroll) = (0, 0);
+            }
+            Item::RaSignOut => self.armed = Some(self.row),
+            Item::RaSignUp => {
+                self.ra_signup = true;
+                (self.row, self.scroll, self.armed, self.note) = (0, 0, None, None);
+            }
+            _ => {}
+        }
+    }
+
+    /// B from the sign-up view: back to the page, on Make an account.
+    fn ra_back(&mut self, cx: &Context) {
+        self.ra_signup = false;
+        let items = self.items(cx);
+        self.row = items.iter().position(|i| *i == Item::RaSignUp).unwrap_or(0);
+        self.scroll = self.row.saturating_sub(VISIBLE - 1);
+    }
+
+    /// Starts a request for `item`'s row, which says "Signing in…" until it answers. One at
+    /// a time.
+    fn ra_go(&mut self, item: Item, rx: std::sync::mpsc::Receiver<Outcome>) {
+        if self.ra_job.is_some() {
+            return;
+        }
+        self.note = Some((self.row, "Signing in\u{2026}".into()));
+        self.ra_said = None;
+        self.ra_job = Some((item, rx));
+    }
+
+    /// Checks the sign-in kept with the service, once per opening of the menu: whether the
+    /// token is still good, and the player's points now.
+    fn ra_check(&mut self) {
+        if self.ra_checked || self.ra_job.is_some() {
+            return;
+        }
+        self.ra_checked = true;
+        if let Some(account) = &self.ra_account {
+            self.ra_job = Some((Item::RaAccount, achievements::check(account)));
+        }
+    }
+
+    /// The request's outcome, when it has come: a sign-in kept, a refusal or a failure said.
+    fn ra_job_done(&mut self, cx: &Context) {
+        let Some((item, rx)) = &self.ra_job else {
+            return;
+        };
+        let Ok(outcome) = rx.try_recv() else { return };
+        let item = item.clone();
+        self.ra_job = None;
+        let line = match &outcome {
+            Outcome::SignedIn(standing, token) => {
+                let account = Account {
+                    user: standing.user.clone(),
+                    token: token.clone(),
+                };
+                if item == Item::RaSignIn {
+                    match account.save(&self.ra_path) {
+                        Ok(()) => {
+                            eprintln!("dslot: RetroAchievements: signed in as {}", account.user)
+                        }
+                        Err(e) => eprintln!("dslot: cannot write {}: {e}", self.ra_path.display()),
+                    }
+                }
+                self.ra_user = account.user.clone();
+                self.ra_account = Some(account);
+                self.ra_standing = Some(standing.clone());
+                None
+            }
+            Outcome::Refused(why) if item == Item::RaAccount => {
+                // The token no longer stands (the password changed, say): sign in again.
+                eprintln!("dslot: RetroAchievements: the sign-in kept was refused: {why}");
+                if let Err(e) = Account::clear(&self.ra_path) {
+                    eprintln!("dslot: cannot remove {}: {e}", self.ra_path.display());
+                }
+                (self.ra_account, self.ra_standing) = (None, None);
+                Some("The sign-in kept is no longer good: sign in again".to_owned())
+            }
+            Outcome::Refused(why) => {
+                eprintln!("dslot: RetroAchievements: {why}");
+                Some(why.clone())
+            }
+            // Offline: the sign-in kept stands as it is.
+            Outcome::NoNetwork if item == Item::RaAccount => None,
+            other => {
+                eprintln!("dslot: RetroAchievements: {}", other.text());
+                Some(other.text())
+            }
+        };
+        self.ra_said = line.clone();
+        if self.page == Page::Achievements && !self.ra_signup {
+            let items = self.items(cx);
+            // Signed in: on the account row; refused: back on Sign in.
+            let wanted = match &self.ra_account {
+                Some(_) => Item::RaAccount,
+                None => Item::RaSignIn,
+            };
+            if let Some(r) = items.iter().position(|i| *i == wanted) {
+                (self.row, self.scroll) = (r, r.saturating_sub(VISIBLE - 1));
+                self.note = line.map(|l| (r, l));
+            }
+        }
+    }
+
+    /// The title line: who is signed in, or what the service said.
+    fn ra_title(&self) -> String {
+        if self.ra_signup {
+            return "Make an account on a phone: scan the code".into();
+        }
+        match (&self.ra_said, &self.ra_account, &self.ra_job) {
+            (Some(said), ..) => said.clone(),
+            (None, _, Some((Item::RaSignIn, _))) => {
+                "Signing in to RetroAchievements\u{2026}".into()
+            }
+            (None, Some(a), _) => format!("RetroAchievements: signed in as {}", a.user),
+            (None, None, _) => "RetroAchievements: not signed in".into(),
+        }
+    }
+
+    /// A row's value on the page.
+    fn ra_value(&self, item: &Item, r: usize) -> Value {
+        let prompt = |text: String, warning: bool| Value::Prompt { text, warning };
+        let press =
+            |here: bool, what: &str| prompt(if here { what.into() } else { String::new() }, false);
+        match item {
+            Item::RaUser if self.ra_user.is_empty() => press(r == self.row, "Press A to type it"),
+            Item::RaUser => Value::Text(self.ra_user.clone()),
+            Item::RaSignIn if self.ra_job.is_some() => prompt("Signing in\u{2026}".into(), false),
+            Item::RaSignIn => press(r == self.row, "Press A for the password"),
+            Item::RaAccount => {
+                let user = self
+                    .ra_account
+                    .as_ref()
+                    .map_or("\u{2013}", |a| a.user.as_str());
+                match &self.ra_standing {
+                    Some(s) => Value::Status {
+                        text: format!("{user} \u{b7} {}", s.points()),
+                        glyphs: vec![nibkit::menu::Glyph::Check],
+                    },
+                    None if self.ra_job.is_some() => {
+                        prompt(format!("{user} \u{b7} checking\u{2026}"), false)
+                    }
+                    None => prompt(user.to_owned(), false),
+                }
+            }
+            Item::RaSignOut if self.armed == Some(r) => {
+                prompt("Press A again to sign out".into(), true)
+            }
+            Item::RaSignOut => press(r == self.row, "Press A"),
+            Item::RaSignUp => press(r == self.row, "Press A"),
+            Item::RaLink => prompt(
+                achievements::SIGN_UP
+                    .trim_start_matches("https://")
+                    .to_owned(),
+                false,
+            ),
+            _ => prompt(String::new(), false),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2699,12 +3019,167 @@ mod tests {
     }
 
     /// `pages`, and the Wi-Fi and Bluetooth pages where the machine running the tests has iwd
-    /// or BlueZ to talk to (a Linux build machine may).
+    /// or BlueZ to talk to (a Linux build machine may), and Achievements where it has curl.
     fn with_radios(menu: &Menu, mut pages: Vec<Page>) -> Vec<Page> {
         if menu.radios.is_some() {
             pages.extend([Page::Wifi, Page::Bluetooth]);
         }
+        if achievements::available() {
+            pages.push(Page::Achievements);
+        }
         pages
+    }
+
+    /// The Achievements page: signed out, a sign-in (the service's answer injected), the
+    /// token kept for the emulators, signing out, and the sign-up view.
+    #[test]
+    fn achievements_page() {
+        let mut w = world("menu-achievements", false);
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Ds,
+            game: None,
+        };
+        let dir = TempDir::new("menu-achievements-token");
+        let token = dir.path().join("retroachievements.token");
+        let mut menu = Menu::open(false);
+        menu.ra_path = token.clone();
+        (menu.ra_account, menu.ra_user) = (None, String::new());
+        menu.page = Page::Achievements;
+        assert_eq!(
+            labels(&menu, &cx),
+            ["Username", "Sign in", "Mode", "Make an account"]
+        );
+        let shown = menu.shown(&cx);
+        assert_eq!(shown.title, "RetroAchievements: not signed in");
+        assert_eq!(shown.rows[2].value, Value::Text("Softcore".into()));
+        assert!(shown.picture.is_none());
+        let press = Input {
+            pressed: true,
+            ..Input::default()
+        };
+        // Sign in with no username: told so.
+        menu.row = 1;
+        menu.update(&press, &mut cx);
+        assert_eq!(
+            menu.shown(&cx).rows[1].value,
+            Value::Text("Type the username first".into())
+        );
+        // A on Username opens the keyboard; what is typed is kept on the row.
+        menu.row = 0;
+        menu.update(&press, &mut cx);
+        assert!(menu.typing());
+        menu.typing = None;
+        menu.ra_user = "alan".into();
+        assert_eq!(menu.shown(&cx).rows[0].value, Value::Text("alan".into()));
+        // A on Sign in asks for the password; the request is then on its way.
+        menu.row = 1;
+        menu.update(&press, &mut cx);
+        assert!(matches!(
+            menu.typing.as_ref().map(|(_, t)| t),
+            Some(Typing::RaPassword(u)) if u == "alan"
+        ));
+        menu.typing = None;
+        let (tx, rx) = std::sync::mpsc::channel();
+        menu.ra_go(Item::RaSignIn, rx);
+        assert_eq!(
+            menu.shown(&cx).rows[1].value,
+            Value::Text("Signing in\u{2026}".into())
+        );
+        // The service answers: signed in, the token kept, the rows change.
+        let standing = Standing {
+            user: "Alan".into(),
+            score: 1200,
+            softcore: 0,
+            messages: 0,
+        };
+        tx.send(Outcome::SignedIn(standing, "t0k3n".into()))
+            .unwrap();
+        menu.update(&Input::default(), &mut cx);
+        assert_eq!(labels(&menu, &cx), ["Signed in as", "Sign out", "Mode"]);
+        assert_eq!(
+            menu.shown(&cx).title,
+            "RetroAchievements: signed in as Alan"
+        );
+        assert_eq!(
+            menu.shown(&cx).rows[0].value,
+            Value::Status {
+                text: "Alan \u{b7} 1,200 points".into(),
+                glyphs: vec![nibkit::menu::Glyph::Check]
+            }
+        );
+        assert_eq!(std::fs::read_to_string(&token).unwrap(), "Alan\nt0k3n\n");
+        assert_eq!(
+            achievements::env(&token, cx.settings.hardcore()),
+            [
+                ("RA_TOKEN_FILE".to_owned(), token.display().to_string()),
+                ("RA_USERNAME".to_owned(), "Alan".to_owned()),
+                ("RA_HARDCORE".to_owned(), "0".to_owned()),
+            ]
+        );
+        // Mode steps to hardcore, a System setting.
+        menu.row = 2;
+        let turn = Input {
+            turn: 1,
+            ..Input::default()
+        };
+        assert!(menu.update(&turn, &mut cx).changed);
+        assert!(cx.settings.hardcore());
+        assert_eq!(achievements::env(&token, true)[2].1, "1");
+        // Sign out asks, then removes the token; the username stays typed.
+        menu.row = 1;
+        menu.update(&press, &mut cx);
+        assert_eq!(
+            menu.shown(&cx).rows[1].value,
+            Value::Prompt {
+                text: "Press A again to sign out".into(),
+                warning: true
+            }
+        );
+        menu.update(&press, &mut cx);
+        assert_eq!(
+            labels(&menu, &cx),
+            ["Username", "Sign in", "Mode", "Make an account"]
+        );
+        assert!(!token.exists());
+        assert_eq!(menu.shown(&cx).rows[0].value, Value::Text("Alan".into()));
+        // A refusal on sign-in stays on the Sign in row, with the reason.
+        let (tx, rx) = std::sync::mpsc::channel();
+        menu.row = 1;
+        menu.ra_go(Item::RaSignIn, rx);
+        tx.send(Outcome::Refused(
+            "Invalid user/password combination.".into(),
+        ))
+        .unwrap();
+        menu.update(&Input::default(), &mut cx);
+        assert_eq!(menu.items(&cx)[menu.row], Item::RaSignIn);
+        assert_eq!(
+            menu.shown(&cx).rows[1].value,
+            Value::Text("Invalid user/password combination.".into())
+        );
+        assert_eq!(menu.shown(&cx).title, "Invalid user/password combination.");
+        // Make an account: the address and the code; B comes back to its row.
+        menu.row = 3;
+        menu.update(&press, &mut cx);
+        assert_eq!(labels(&menu, &cx), ["On a phone"]);
+        let shown = menu.shown(&cx);
+        assert_eq!(
+            shown.rows[0].value,
+            Value::Prompt {
+                text: "retroachievements.org/createaccount.php".into(),
+                warning: false
+            }
+        );
+        assert!(shown.picture.is_some());
+        assert!(shown.hint.contains("back to Achievements"));
+        let close = Input {
+            close: true,
+            ..Input::default()
+        };
+        assert!(!menu.update(&close, &mut cx).closed);
+        assert_eq!(menu.items(&cx)[menu.row], Item::RaSignUp);
     }
 
     fn labels(menu: &Menu, cx: &Context) -> Vec<String> {

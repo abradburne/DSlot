@@ -25,6 +25,7 @@ pub fn dirs() -> Dirs {
             launch_conf: None,
         },
         stats: here.join("stats.tsv"),
+        achievements: here.join("retroachievements.token"),
         cache: here.join("cache"),
         emulators: vec![here.join("emulators")],
     }

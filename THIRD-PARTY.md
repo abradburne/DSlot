@@ -62,7 +62,7 @@ SDL2 is not built in: DSlot links to the system's libSDL2 (zlib licence).
 | memchr | 2.8.3 | Unlicense OR MIT | nibos, stock |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | nibos, stock |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | nibos, stock |
-| nibkit | 0.1.0 | MIT AND OFL-1.1 | nibos, stock |
+| nibkit | 0.1.1 | MIT AND OFL-1.1 | nibos, stock |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | nibos |
 | ordered-stream | 0.2.0 | MIT OR Apache-2.0 | nibos |
 | parking | 2.2.1 | Apache-2.0 OR MIT | nibos |
@@ -72,6 +72,7 @@ SDL2 is not built in: DSlot links to the system's libSDL2 (zlib licence).
 | polling | 3.11.0 | Apache-2.0 OR MIT | nibos |
 | proc-macro-crate | 3.5.0 | MIT OR Apache-2.0 | nibos |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | nibos, stock |
+| qrcodegen | 1.8.0 | MIT | nibos, stock |
 | quote | 1.0.47 | MIT OR Apache-2.0 | nibos, stock |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | nibos |
 | sdl2 | 0.38.0 | MIT | nibos, stock |
@@ -3062,7 +3063,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### nibkit 0.1.0 (LICENSE-MIT)
+### nibkit 0.1.1 (LICENSE-MIT)
 
 ```
 MIT License
@@ -4004,6 +4005,7 @@ Apache License
 
 ## Crates that ship no licence file
 
+- qrcodegen 1.8.0: MIT, https://github.com/nayuki/QR-Code-generator
 - sdl2-sys 0.38.0: MIT AND Zlib, https://github.com/rust-sdl2/rust-sdl2
 - zune-core 0.4.12: MIT OR Apache-2.0 OR Zlib
 - zune-jpeg 0.4.21: MIT OR Apache-2.0 OR Zlib, https://github.com/etemesi254/zune-image/tree/dev/crates/zune-jpeg

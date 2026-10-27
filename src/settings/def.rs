@@ -81,6 +81,16 @@ choice! {
 }
 
 choice! {
+    /// RetroAchievements: hardcore (no save states, rewinds or cheats; the achievements
+    /// count for the site's main leaderboards) or softcore. The emulator decides what it can
+    /// honour: one with no hardcore support plays softcore whatever is set.
+    Achievements {
+        Softcore = "softcore", "Softcore";
+        Hardcore = "hardcore", "Hardcore";
+    }
+}
+
+choice! {
     /// How soon a held D-pad starts repeating, and how fast.
     Repeat {
         Slow = "slow", "Slow";
@@ -213,6 +223,12 @@ pub fn builtin(key: &str) -> Option<Def> {
             Levels::SYSTEM,
             SaverLook::Animated.key(),
         ),
+        ACHIEVEMENTS => def(
+            "Mode",
+            Achievements::choices(),
+            Levels::SYSTEM,
+            Achievements::Softcore.key(),
+        ),
         SOUNDS => Def {
             default: Some(Value::Boolean(true)),
             ..def("Sounds", Kind::Toggle, Levels::SYSTEM, "")
@@ -241,6 +257,8 @@ pub const SOUNDS: &str = "sounds";
 pub const SHOW_EMPTY: &str = "show_empty_systems";
 pub const SAVER: &str = "screensaver";
 pub const SAVER_LOOK: &str = "screensaver_look";
+/// RetroAchievements: hardcore or softcore (achievements.rs).
+pub const ACHIEVEMENTS: &str = "achievements";
 /// The emulator a console's or a game's games start in, by its id.
 pub const EMULATOR: &str = "emulator";
 /// Words added to an emulator's command line, under the emulator's id: `dsperate.args`.

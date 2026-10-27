@@ -2,6 +2,7 @@
 //! over a slot on the touch screen; pushing a cart in starts the game in its emulator, and
 //! leaving the game brings the shelf back. docs/architecture.md has the map of the code.
 
+mod achievements;
 mod art;
 mod bugreport;
 mod device;
@@ -364,7 +365,7 @@ fn run() -> Result<(), String> {
                 let played = if game.is_app() {
                     start_app(game, &apps, &power).map(|ended| (ended, None))
                 } else {
-                    play(game, &emulators, &settings, &power)
+                    play(game, &emulators, &settings, &dirs.achievements, &power)
                 };
                 // Why it came straight back, if it did: the shelf says so when it is up again.
                 let (put_away, notice) = match played {
@@ -426,6 +427,7 @@ fn play(
     game: &Game,
     emulators: &Emulators,
     settings: &Settings,
+    token: &Path,
     power: &Requests,
 ) -> Result<(Ended, Option<String>), String> {
     let emulator = launch::emulator_for(emulators, settings, game).ok_or_else(|| {
@@ -435,7 +437,12 @@ fn play(
         )
     })?;
     let options = launch::options(settings, emulator, game);
-    let launch = Launch::new(emulator, game, &options, platform::saves().as_deref())?;
+    let mut launch = Launch::new(emulator, game, &options, platform::saves().as_deref())?;
+    // Signed in to RetroAchievements: the emulator is told where the token is (never the
+    // password), and whether hardcore was chosen.
+    launch
+        .env
+        .extend(achievements::env(token, settings.hardcore()));
     let began = Instant::now();
     let ended = launch
         .run(|| power.take())
@@ -506,7 +513,13 @@ fn launch_one(rom: &Path, dirs: &platform::Dirs) -> Result<(), String> {
         std::slice::from_ref(&game),
         &emulators,
     );
-    let (ended, _) = play(&game, &emulators, &settings, &nibkit::power::watch())?;
+    let (ended, _) = play(
+        &game,
+        &emulators,
+        &settings,
+        &dirs.achievements,
+        &nibkit::power::watch(),
+    )?;
     std::process::exit(ended.status.code().unwrap_or(1));
 }
 

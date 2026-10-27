@@ -223,6 +223,15 @@ impl Settings {
             .unwrap_or(true)
     }
 
+    /// RetroAchievements: hardcore was chosen (softcore by default).
+    pub fn hardcore(&self) -> bool {
+        let def = def::builtin(def::ACHIEVEMENTS)
+            .unwrap_or_else(|| unreachable!("achievements is a built-in setting"));
+        self.value(&[Scope::System], &def)
+            .and_then(|v| v.as_str().and_then(def::Achievements::parse))
+            == Some(def::Achievements::Hardcore)
+    }
+
     /// The emulator chosen along `chain`, by id (whether or not it is installed).
     pub fn emulator<'a>(&'a self, chain: &[Scope]) -> Option<&'a str> {
         self.resolve(chain, def::EMULATOR)
