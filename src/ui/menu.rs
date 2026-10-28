@@ -2778,13 +2778,16 @@ impl Menu {
 /// The Achievements page (achievements.rs).
 impl Menu {
     /// Its rows: signed out, the username, Sign in, Mode and Make an account; signed in, who,
-    /// Sign out and Mode. The sign-up view has the address alone, over the QR code.
+    /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED).
+    /// The sign-up view has the address alone, over the QR code.
     fn ra_items(&self, items: &mut Vec<Item>) {
         if self.ra_signup {
             items.push(Item::RaLink);
             return;
         }
-        let mode = def::builtin(def::ACHIEVEMENTS).map(Item::Setting);
+        let mode = def::builtin(def::ACHIEVEMENTS)
+            .filter(|_| achievements::HARDCORE_OFFERED)
+            .map(Item::Setting);
         match &self.ra_account {
             Some(_) => {
                 items.extend([Item::RaAccount, Item::RaSignOut]);
@@ -3154,11 +3157,10 @@ mod tests {
         menu.page = Page::Achievements;
         assert_eq!(
             labels(&menu, &cx),
-            ["Username", "Sign in", "Mode", "Make an account"]
+            ["Username", "Sign in", "Make an account"]
         );
         let shown = menu.shown(&cx);
         assert_eq!(shown.title, "RetroAchievements: not signed in");
-        assert_eq!(shown.rows[2].value, Value::Text("Softcore".into()));
         assert!(shown.picture.is_none());
         let press = Input {
             pressed: true,
@@ -3202,7 +3204,7 @@ mod tests {
         tx.send(Outcome::SignedIn(standing, "t0k3n".into()))
             .unwrap();
         menu.update(&Input::default(), &mut cx);
-        assert_eq!(labels(&menu, &cx), ["Signed in as", "Sign out", "Mode"]);
+        assert_eq!(labels(&menu, &cx), ["Signed in as", "Sign out"]);
         assert_eq!(
             menu.shown(&cx).title,
             "RetroAchievements: signed in as Alan"
@@ -3223,15 +3225,11 @@ mod tests {
                 ("RA_HARDCORE".to_owned(), "0".to_owned()),
             ]
         );
-        // Mode steps to hardcore, a System setting.
-        menu.row = 2;
-        let turn = Input {
-            turn: 1,
-            ..Input::default()
-        };
-        assert!(menu.update(&turn, &mut cx).changed);
-        assert!(cx.settings.hardcore());
-        assert_eq!(achievements::env(&token, true)[2].1, "1");
+        // Hardcore is not offered yet: no Mode row, and one set by hand in settings.toml
+        // still starts games softcore.
+        cx.settings
+            .set(Scope::System, def::ACHIEVEMENTS, Toml::from("hardcore"));
+        assert!(!cx.settings.hardcore());
         // Sign out asks, then removes the token; the username stays typed.
         menu.row = 1;
         menu.update(&press, &mut cx);
@@ -3245,7 +3243,7 @@ mod tests {
         menu.update(&press, &mut cx);
         assert_eq!(
             labels(&menu, &cx),
-            ["Username", "Sign in", "Mode", "Make an account"]
+            ["Username", "Sign in", "Make an account"]
         );
         assert!(!token.exists());
         assert_eq!(menu.shown(&cx).rows[0].value, Value::Text("Alan".into()));
@@ -3265,7 +3263,7 @@ mod tests {
         );
         assert_eq!(menu.shown(&cx).title, "Invalid user/password combination.");
         // Make an account: the address and the code; B comes back to its row.
-        menu.row = 3;
+        menu.row = 2;
         menu.update(&press, &mut cx);
         assert_eq!(labels(&menu, &cx), ["On a phone"]);
         let shown = menu.shown(&cx);

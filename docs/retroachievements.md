@@ -14,7 +14,7 @@ Signed out:
 |---|---|
 | Username | A types it on the keyboard (nibkit's, the one the Wi-Fi page uses). |
 | Sign in | A asks for the password (shown as dots; Y shows it), then signs in. The row says *Signing in…*, then the title line says who is signed in, or why not: the service's own words for a wrong password, *No network* when it can't be reached. |
-| Mode | Softcore (the default) or Hardcore: a System setting, `achievements` in settings.toml. See below. |
+| Mode | Softcore (the default) or Hardcore: a System setting, `achievements` in settings.toml. Not shown yet: see [Hardcore, not yet](#hardcore-not-yet). |
 | Make an account | The sign-up page's address and a QR code of it, for a phone. B comes back. |
 
 Signed in:
@@ -23,7 +23,18 @@ Signed in:
 |---|---|
 | Signed in as | The username as the service spells it, with the points the service reported (hardcore, and softcore when there are any). |
 | Sign out | A, and A again to confirm: the token file is removed. The username stays typed for next time. |
-| Mode | As above. |
+| Mode | As above (not shown yet). |
+
+## Hardcore, not yet
+
+Hardcore unlocks count only from emulators the service has approved, and it approves an
+emulator only once it has been public for six months and enforces the hardcore rules (no state
+loads, rewind, slow motion, frame advance or cheats; a resume drops to softcore; switching to
+hardcore resets the game). See the service's
+[hardcore compliance requirements](https://docs.retroachievements.org/general/hardcore-compliance-requirements.html).
+Until ours are approved, DSlot offers softcore alone: `HARDCORE_OFFERED` in
+`src/achievements/mod.rs` is off, so the Mode row is hidden and `RA_HARDCORE` is always `0`,
+even with `achievements = "hardcore"` in settings.toml. Turning it on brings both back.
 
 Each time the menu turns to the tab with a sign-in kept, DSlot asks the service once whether the
 token still stands (the same request, with the token in place of the password) and shows the
@@ -115,7 +126,7 @@ its emulator (`[env]` in the emulator's description is kept as well):
 |---|---|
 | `RA_TOKEN_FILE` | The token file's path. |
 | `RA_USERNAME` | The username, for an emulator that reads a one-line token file. |
-| `RA_HARDCORE` | `1` when Hardcore is set, else `0`. |
+| `RA_HARDCORE` | `1` when Hardcore is set and offered, else `0` (always `0` for now). |
 
 Signed out, none of them is set. An emulator that knows nothing of them is unaffected. The
 emulator reads the file itself, signs in with the token (`login2` with `t=`, or rcheevos'

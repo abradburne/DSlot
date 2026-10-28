@@ -4,7 +4,8 @@
 
 - **RetroAchievements**, an **Achievements** tab in the menu wherever there is `curl`: sign in
   with the username and password typed on the keyboard, see who is signed in and their points,
-  sign out, and choose softcore (the default) or hardcore. DSlot keeps the token the service
+  and sign out. Achievements are softcore for now: hardcore (a Mode row) stays hidden until the
+  service approves our emulators for it. DSlot keeps the token the service
   answers with (two lines, username and token, mode 0600, beside settings.toml) and never the
   password, and hands it to every emulator it starts as `RA_TOKEN_FILE`, `RA_USERNAME` and
   `RA_HARDCORE` in the environment; DSperate reads them. The service has no way to make an

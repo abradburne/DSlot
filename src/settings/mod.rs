@@ -223,8 +223,11 @@ impl Settings {
             .unwrap_or(true)
     }
 
-    /// RetroAchievements: hardcore was chosen (softcore by default).
+    /// RetroAchievements: hardcore was chosen (softcore by default), and is offered at all.
     pub fn hardcore(&self) -> bool {
+        if !crate::achievements::HARDCORE_OFFERED {
+            return false;
+        }
         let def = def::builtin(def::ACHIEVEMENTS)
             .unwrap_or_else(|| unreachable!("achievements is a built-in setting"));
         self.value(&[Scope::System], &def)

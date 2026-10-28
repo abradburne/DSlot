@@ -23,7 +23,7 @@ is its default. Each setting can be set at some of the levels:
 | Button repeat (a held D-pad) | ✓ | | | Normal |
 | Screensaver (off, or after 1, 2, 5 or 10 minutes left alone) | ✓ | | | 2 min |
 | Screensaver style (Animated: the logo drifting, drawn a few times a second; Still: moved once a minute; Screens off: the backlights off) | ✓ | | | Animated |
-| Mode (RetroAchievements: softcore or hardcore; the Achievements page, docs/retroachievements.md) | ✓ | | | Softcore |
+| Mode (RetroAchievements: softcore or hardcore; the Achievements page, docs/retroachievements.md; hidden until hardcore is offered) | ✓ | | | Softcore |
 | Emulator | | ✓ | ✓ | the console's highest-priority one |
 | An emulator's options (docs/emulators.md) | | ✓ | ✓ | the emulator's own (not passed) |
 

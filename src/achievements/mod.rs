@@ -38,6 +38,12 @@ pub const ENV_TOKEN_FILE: &str = "RA_TOKEN_FILE";
 pub const ENV_USERNAME: &str = "RA_USERNAME";
 pub const ENV_HARDCORE: &str = "RA_HARDCORE";
 
+/// Whether hardcore is offered: the Mode row on the Achievements page, and `RA_HARDCORE=1`
+/// for a game. Off until the service approves our emulators for hardcore unlocks
+/// (docs/retroachievements.md); until then every game plays softcore, whatever settings.toml
+/// says.
+pub const HARDCORE_OFFERED: bool = false;
+
 /// Whether the page is offered: `curl` is there to talk to the service.
 pub fn available() -> bool {
     let path = std::env::var_os("PATH").unwrap_or_default();
