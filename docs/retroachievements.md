@@ -35,6 +35,10 @@ hardcore resets the game). See the service's
 Until ours are approved, DSlot offers softcore alone: `HARDCORE_OFFERED` in
 `src/achievements/mod.rs` is off, so the Mode row is hidden and `RA_HARDCORE` is always `0`,
 even with `achievements = "hardcore"` in settings.toml. Turning it on brings both back.
+Meanwhile the service adds a *Warning: Unknown Emulator* entry ("Hardcore unlocks cannot be
+earned using this emulator", id 101000001 and up, earned already) to every set it sends us;
+DSlot leaves it out of the list and the count, as DSperate and inkdot leave it out of their
+notices.
 
 Each time the menu turns to the tab with a sign-in kept, DSlot asks the service once whether the
 token still stands (the same request, with the token in place of the password) and shows the

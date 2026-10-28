@@ -20,6 +20,11 @@ pub const MEDIA: &str = "https://media.retroachievements.org";
 const FRESH: Duration = Duration::from_secs(6 * 60 * 60);
 /// `Flags` of an achievement in the set proper; others are unofficial, not shown.
 const CORE: u64 = 3;
+/// The first id of the service's own "Warning: Unknown Emulator" entries ("Hardcore unlocks
+/// cannot be earned using this emulator"), which it puts in the set of an emulator it doesn't
+/// know, earned already. Not achievements: never shown or counted, as DSperate and inkdot
+/// leave them out too, while hardcore isn't offered (achievements::HARDCORE_OFFERED).
+const WARNING_ID: u32 = 101_000_001;
 
 /// One achievement, as the shelf shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,7 +172,12 @@ impl Store {
     /// What is kept for the hash, however old.
     fn cached(&self, hash: &str) -> Option<Cached> {
         let text = std::fs::read_to_string(self.file(hash)).ok()?;
-        serde_json::from_str(&text).ok()
+        let mut cached: Cached = serde_json::from_str(&text).ok()?;
+        // Kept before the warning entries were left out.
+        if let Some(set) = &mut cached.set {
+            set.achievements.retain(|a| a.id < WARNING_ID);
+        }
+        Some(cached)
     }
 
     fn keep(&self, hash: &str, cached: &Cached) {
@@ -332,6 +342,7 @@ pub fn parse_patch(body: &str) -> Result<Option<Set>, Fail> {
                     unlocked: false,
                     unlocked_at: None,
                 })
+                .filter(|a| a.id < WARNING_ID)
                 .collect()
         })
         .unwrap_or_default();
@@ -372,7 +383,8 @@ mod tests {
     const PATCH: &str = r#"{"Success":true,"PatchData":{"ID":12345,"Title":"Advance Wars: Days of Ruin","ConsoleID":18,"ImageIcon":"/Images/000001.png","Achievements":[
       {"ID":1,"Title":"First Blood","Description":"Win a battle","Points":5,"Flags":3,"BadgeName":"00001","MemAddr":"0x1=1"},
       {"ID":2,"Title":"Test only","Description":"Unofficial","Points":1,"Flags":5,"BadgeName":"00002","MemAddr":"0x1=1"},
-      {"ID":3,"Title":"Veteran","Description":"Win ten","Points":25,"Flags":3,"BadgeName":"00003","MemAddr":"0x1=1"}
+      {"ID":3,"Title":"Veteran","Description":"Win ten","Points":25,"Flags":3,"BadgeName":"00003","MemAddr":"0x1=1"},
+      {"ID":101000001,"Title":"Warning: Unknown Emulator","Description":"Hardcore unlocks cannot be earned using this emulator.","Points":0,"Flags":3,"BadgeName":"00000","MemAddr":"0=1"}
     ],"Leaderboards":[]}}"#;
 
     #[test]
@@ -471,8 +483,27 @@ mod tests {
         assert_eq!(store.cached(&hash).unwrap().fetched, 0);
         assert_eq!(
             store.look_up(None, Console::Gba, &rom),
-            Some(Found::Set(set.unwrap()))
+            Some(Found::Set(set.clone().unwrap()))
         );
+        // A set kept with the service's warning entry in it loads without it.
+        let mut warned = set.clone().unwrap();
+        warned.achievements.push(Achievement {
+            id: WARNING_ID,
+            title: "Warning: Unknown Emulator".into(),
+            description: String::new(),
+            points: 0,
+            badge: "00000".into(),
+            unlocked: true,
+            unlocked_at: None,
+        });
+        store.keep(
+            &hash,
+            &Cached {
+                fetched: unix_now(),
+                set: Some(warned),
+            },
+        );
+        assert_eq!(store.cached(&hash).unwrap().set, set);
         store.keep(
             &hash,
             &Cached {

@@ -20,7 +20,9 @@
   again after the game is played), so it works offline and the service isn't asked on every
   selection; the badges are kept in `~/.cache/retroachievements/badges`, shared with the
   emulators. An achievement found earned that an earlier lookup found not is kept with when
-  (`unlocked_at`), for showing the latest later.
+  (`unlocked_at`), for showing the latest later. The service's *Warning: Unknown Emulator*
+  entry, which it adds to every set for an emulator it doesn't know, is left out of the list
+  and the count.
 
 ## 0.3.2
 
