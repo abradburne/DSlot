@@ -123,6 +123,19 @@ impl Stats {
         }
     }
 
+    /// How many times a game has been played.
+    pub fn session_count(&self, rom: &Path) -> u32 {
+        self.get(rom).sessions
+    }
+
+    /// The longest any game has been played, in seconds, and the most times: what a game's
+    /// own is measured against on its card.
+    pub fn most(&self) -> (u64, u32) {
+        self.map.values().fold((0, 0), |(secs, sessions), s| {
+            (secs.max(s.secs), sessions.max(s.sessions))
+        })
+    }
+
     pub fn sessions(&self, rom: &Path) -> String {
         self.get(rom).sessions.to_string()
     }

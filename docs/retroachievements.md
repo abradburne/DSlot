@@ -61,9 +61,13 @@ one still being looked up, *Looking up…*. Signed out, nothing is shown: not ev
 for the last player. A sign-in the service no longer takes (refused on a lookup, with nothing
 fresh kept for the game) says *Sign in again in the menu*.
 
-To read the list, the menu's **Game** page has an **Achievements** row (the same line as its
-value): A browses the list on the top screen, in the details' place: each achievement's badge,
-title, points and description, the highlighted one moved by up and down, B back to the row.
+To see them all, X opens the game page: the touch screen has the set's badges in a grid under
+its buttons, the ones earned rimmed in gold, the rest dimmed, with the standing above them. The
+D-pad (or a tap) picks one, and it goes on the back of the box on the top screen as a gold
+sticker: its badge, title, points, whether it is earned, and its description. With no set to
+show, the grid's place says why (*Looking up achievements…*, *Not on RetroAchievements*), or
+offers **Sign in to RetroAchievements**, which opens the menu's Achievements page. The badges
+are made into textures for both screens.
 
 How it is known, all off the shelf's thread, by a worker of its own (`achievements/lookup.rs`).
 It looks up the game asked about last first: browsing quickly past a row of games looks up the

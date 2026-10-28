@@ -5,6 +5,7 @@
 
 use super::bouncer::{self, Bouncer};
 use super::draw::{Beside, Blade, Page, Ui, Yours, DIM, THUMBS, WHITE};
+use super::game::{self, GamePage};
 use super::input::{self, Input, Key, Reader};
 use super::layout::*;
 use super::menu::{self, Menu};
@@ -190,6 +191,8 @@ struct State {
     /// The D-pad (or stick) held: it repeats, on the shelf, the grid and the menus.
     repeat: nibkit::input::Repeat<Key>,
     menu: Option<Menu>,
+    /// The selected game's page (X): under the menu, when that is opened from it.
+    game_page: Option<GamePage>,
     /// The power menu, over everything else.
     power: Option<PowerMenu>,
     /// Why the game just left came straight back, over the shelf until any button is pressed.
@@ -556,6 +559,22 @@ fn blade(games: &[Game], stats: &Stats, console: Console) -> Blade {
 
 /// What a system's card says of the player's own games for it: how many are on the cards, how
 /// long they have been played in all, and the one played longest.
+/// What the game page works on for game `g`: its play stats, and its achievements as far as
+/// they have been looked up.
+fn page_context<'a>(
+    stats: &'a mut Stats,
+    ui: &Ui,
+    games: &'a [Game],
+    g: usize,
+) -> game::Context<'a> {
+    game::Context {
+        stats,
+        game: &games[g],
+        g,
+        cheevos: ui.cheevos_answer(&games[g].path),
+    }
+}
+
 /// Where `game`'s resume point is, by the emulator it starts in, if that is one whose resume
 /// points DSlot can read (resume.rs) and DSlot gives it its saves folder.
 fn resume_of(shelf: &Shelf, settings: &Settings, game: &Game) -> Option<crate::resume::Wanted> {
@@ -695,6 +714,7 @@ impl State {
             // After an update (or one that didn't start), its notice, on the Update page.
             menu: (put_away.is_none() && crate::update::notice())
                 .then(|| Menu::open_update(game, ra)),
+            game_page: None,
             power: put_away.map(|g| PowerMenu::open(Some(g))),
             notice,
             kept: [None; Console::COUNT],
@@ -1419,15 +1439,33 @@ fn show(
                     Key::B | Key::X | Key::Start | Key::Back => menu_input.close = true,
                     Key::Select => {}
                 },
+                // The game page: the D-pad moves, A presses, Back opens the menu over it.
+                Some(Input::Press(key)) if state.game_page.is_some() => match key {
+                    Key::Up | Key::Down => menu_input.moved += state.hold(key),
+                    Key::Left | Key::Right => menu_input.turn += state.hold(key),
+                    Key::A => menu_input.pressed = true,
+                    Key::B | Key::X => menu_input.close = true,
+                    Key::Back => {
+                        state.menu = Some(Menu::open(true, shelf.ra));
+                        state.repeat.stop();
+                    }
+                    Key::Y | Key::L | Key::R | Key::Start | Key::Select => {}
+                },
                 // Select alone: the system picker, on this page's blade.
                 Some(Input::Press(Key::Select)) => {
                     let at = state.pages.iter().position(|&p| p == console).unwrap_or(0);
                     state.picker = Some(Picker::on(at));
                     state.repeat.stop();
                 }
-                // Back (or X, until X has a page of its own): the menu.
-                Some(Input::Press(Key::Back | Key::X)) if !games.is_empty() => {
+                Some(Input::Press(Key::Back)) if !games.is_empty() => {
                     state.menu = Some(Menu::open(state.order.get(state.sel).is_some(), shelf.ra))
+                }
+                // X: the selected game's page.
+                Some(Input::Press(Key::X)) if state.order.get(state.sel).is_some() => {
+                    let game = &games[state.order[state.sel]];
+                    state.game_page = Some(GamePage::open(game, shelf.ra.account().is_some()));
+                    ui.open_back(game);
+                    state.repeat.stop();
                 }
                 // Start: how the page is shown, on the top screen over the shelf it changes.
                 Some(Input::Press(Key::Start)) if !games.is_empty() => {
@@ -1446,7 +1484,7 @@ fn show(
             let vertical = matches!(key, Key::Up | Key::Down);
             if state.power.is_some() {
                 power_moved += if vertical { d } else { 0 };
-            } else if state.menu.is_some() {
+            } else if state.menu.is_some() || state.game_page.is_some() {
                 if vertical {
                     menu_input.moved += d;
                 } else {
@@ -1522,8 +1560,6 @@ fn show(
                 emulators,
                 console,
                 game: current,
-                // The selected game's achievements, for the Game page's row and its list.
-                cheevos: current.and_then(|g| ui.cheevos_set(&g.path)),
             };
             let done = open.update(&menu_input, &mut cx);
             if done.account {
@@ -1551,6 +1587,40 @@ fn show(
                 state.menu = None;
                 // A resume point may have been cleared there.
                 ui.forget_resumes();
+            }
+        } else if let Some(page) = state.game_page.as_mut() {
+            state.drag = None;
+            menu_input.taps = pointers
+                .drain(..)
+                .filter_map(|p| match p {
+                    Pointer::Down(x, y) => Some((x, y)),
+                    _ => None,
+                })
+                .collect();
+            match state.order.get(state.sel).copied() {
+                Some(g) => {
+                    let mut cx = page_context(&mut *stats, &ui, games, g);
+                    let done = page.update(&menu_input, &mut cx);
+                    relist |= done.changed;
+                    if done.settings || done.sign_in {
+                        state.menu = Some(match done.sign_in {
+                            true => Menu::open_achievements(true, shelf.ra),
+                            false => Menu::open(true, shelf.ra),
+                        });
+                    }
+                    if done.play {
+                        (state.insert, state.fling) = (Some(0.0), None);
+                    }
+                    if done.play || done.closed {
+                        state.game_page = None;
+                        ui.close_back();
+                    }
+                }
+                // Its game gone (a card taken out): the page with it.
+                None => {
+                    state.game_page = None;
+                    ui.close_back();
+                }
             }
         }
         // The system picker: A, or a tap on a blade, turns to that page; B, Select, or a tap off
@@ -1754,13 +1824,19 @@ fn show(
                 .menu
                 .as_ref()
                 .is_some_and(|m| m.page == menu::Page::View);
+            // The game page, while no menu is over it, has both screens.
+            let paged = match (&state.game_page, current) {
+                (Some(page), Some(g)) if state.menu.is_none() => Some((page, g)),
+                _ => None,
+            };
             match current {
+                _ if paged.is_some() => {}
                 Some(g) => {
                     let resume = resume_of(shelf, settings, &games[g]);
-                    let beside = match state.menu.as_ref().and_then(|m| m.cheevos_list) {
-                        _ if viewing => Beside::Sheet,
-                        Some(list) => Beside::Cheevos(list),
-                        None => Beside::Details,
+                    let beside = if viewing {
+                        Beside::Sheet
+                    } else {
+                        Beside::Details
                     };
                     ui.draw_top(games, g, stats, resume.as_ref(), fade, beside)?
                 }
@@ -1798,8 +1874,12 @@ fn show(
             };
             // The View sheet leaves the shelf on the touch screen, to be seen changing.
             let sheet = state.menu.as_ref().filter(|m| m.page == menu::Page::View);
-            match &state.menu {
-                Some(open) if sheet.is_none() => {
+            match (&state.menu, paged) {
+                (_, Some((page, g))) => {
+                    let cx = page_context(&mut *stats, &ui, games, g);
+                    ui.draw_game_page(page, &cx)?;
+                }
+                (Some(open), _) if sheet.is_none() => {
                     let game = current.map(|g| &games[g]);
                     let cx = menu::Context {
                         stats: &mut *stats,
@@ -1807,7 +1887,6 @@ fn show(
                         emulators,
                         console,
                         game,
-                        cheevos: game.and_then(|g| ui.cheevos_set(&g.path)),
                     };
                     ui.draw_menu(&open.shown(&cx), console)?;
                 }
@@ -1827,11 +1906,10 @@ fn show(
                     emulators,
                     console,
                     game,
-                    cheevos: None,
                 };
                 soft("the View sheet", ui.draw_sheet(&open.shown(&cx)));
             }
-            if state.menu.is_none() || sheet.is_some() {
+            if (state.menu.is_none() && state.game_page.is_none()) || sheet.is_some() {
                 ui.tab(console, &state.pages, &strip)?;
             }
         }

@@ -7,6 +7,8 @@
 //! - `cheevos`: the selected game's achievements on the top screen, and their list.
 //! - `ra`: the menu's Achievements page, the RetroAchievements sign-in.
 //! - `menu`: the menu's rows on the touch screen.
+//! - `game`: the game page (X): its buttons and the game's badges on the touch screen.
+//! - `back`: the back of the game's box, on the top screen while its page is open.
 //! - `sheet`: the View sheet (Start), the menu's View page drawn on the top screen.
 //! - `netinfo`: the Wi-Fi page's Network info page, read from the system on a thread.
 //! - `sysinfo`: the System page's System info page, read from /proc and /sys on a thread.
@@ -16,10 +18,12 @@
 //! - `sound`: the insert and eject clicks.
 //! - `bouncer`: the screensaver's logo, bouncing round both screens.
 
+mod back;
 mod bouncer;
 mod cheevos;
 mod clock;
 mod draw;
+mod game;
 mod input;
 mod layout;
 mod menu;

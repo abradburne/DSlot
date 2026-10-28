@@ -16,13 +16,25 @@
   note is made from the installed descriptions.
 
 - **Back opens the menu.** The DS+'s Back key, beside Menu, opens the menu from the shelf and
-  goes back in it as B does; X still opens it too until X has the game page. Back is a key of
+  goes back in it as B does. Back is a key of
   its own, not a gamepad button: SDL3 calls it AC Back, and sdl2-compat passes it to SDL2
   programs as Sleep, so DSlot takes both.
 - **Start opens the View sheet**: how the page is shown (View, Sort by, Show, Game case), on
   the top screen in the game's details' place, so the shelf on the touch screen changes as each
   row does. They are the console page's settings, as in the menu, with Y back to what they
   inherit; Start, B, Back or a touch closes it. Start no longer plays: A does.
+- **X opens the game page**, and the box on the top screen turns round to its **back**: the
+  title on a band in the system's colour with your rating and favourite heart (and a ribbon on
+  your most played game), its title screen and a screenshot in play in white borders at an
+  angle, a blurb, your own play as the points down the bottom, and a barcode. The year,
+  developer, publisher, genre and blurb are from Wikipedia and Wikidata, the screenshots from
+  libretro's thumbnails; they are looked up only when a game's page is opened, by `curl` on a
+  thread of its own, and kept in the cache (`details/`), so the page shows them at once after,
+  network or not (`src/details.rs`). The touch screen has Play, Favourite, Rating and Settings
+  for this game (the menu, on its Game page; Back opens it too), and under them the game's
+  achievement badges in a grid, the ones earned rimmed in gold; the one chosen goes on the box
+  as a gold sticker with its points and description. With no set, the grid's place says why,
+  or offers a sign-in. The menu's Game page no longer has the Achievements row.
 
 ## 0.4.1
 

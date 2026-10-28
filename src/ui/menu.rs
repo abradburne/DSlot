@@ -28,13 +28,11 @@
 //! it is set here; Y resets it to what it inherits. L / R or the tabs change page; up and down
 //! pick a row, left and right or A (or a tap) change it, B closes the menu.
 
-use super::cheevos::ListView;
 use super::clock;
 use super::netinfo;
 use super::ra::RaPage;
 use super::radios::{Ask, Do, Radios, Reply, Snapshot};
 use super::sysinfo;
-use crate::achievements::set::Set;
 use crate::achievements::{self, Ra};
 use crate::emulator::{Action, Emulator, Emulators};
 use crate::launch;
@@ -45,7 +43,6 @@ use crate::settings::{console_chain, game_chain, Scope, Settings};
 use crate::stats::Stats;
 use crate::update::{self, Status};
 use nibkit::menu::keyboard::{self, Keyboard, Purpose, Typed};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use toml::Value as Toml;
 
@@ -168,8 +165,6 @@ pub enum Item {
     RaSignUp,
     /// The sign-up page's address, over the QR code; shown, not changed.
     RaLink,
-    /// Game: the game's achievements, browsed on the top screen (the shelf draws them).
-    RaList,
     /// A line of What's new; A goes back to the page.
     NoteLine(String),
     /// A line of the update's message, past what fits on the title line.
@@ -222,7 +217,6 @@ impl Item {
             Item::RaSignOut => "Sign out",
             Item::RaSignUp => "Make an account",
             Item::RaLink => "On a phone",
-            Item::RaList => "Achievements",
             Item::NoteLine(line) | Item::Message(line) => line,
         }
     }
@@ -552,9 +546,6 @@ pub struct Context<'a> {
     pub console: Console,
     /// The selected game, if there is one.
     pub game: Option<&'a Game>,
-    /// The selected game's achievements, once the shelf has them: the Game page offers their
-    /// list then.
-    pub cheevos: Option<Arc<Set>>,
 }
 
 impl Context<'_> {
@@ -672,9 +663,6 @@ pub struct Menu {
     ra: RaPage,
     /// The player signed in or out since the shelf last heard (`Done::account`).
     account_changed: bool,
-    /// The selected game's achievements are browsed on the top screen, the menu's buttons
-    /// moving along them (cheevos.rs draws them): where the list is, or none while it isn't.
-    pub cheevos_list: Option<ListView>,
 }
 
 /// What the keyboard is typing.
@@ -696,6 +684,15 @@ impl Menu {
     pub fn open(game: bool, ra: &Ra) -> Menu {
         let page = if game { Page::Game } else { Page::Console };
         Menu::on(page, ra, Radios::start())
+    }
+
+    /// Opens on the Achievements page, where there is one: the game page's Sign in.
+    pub fn open_achievements(game: bool, ra: &Ra) -> Menu {
+        let mut menu = Menu::open(game, ra);
+        if achievements::available() {
+            menu.turn_to(Page::Achievements);
+        }
+        menu
     }
 
     /// The View page alone (Start): no radios asked about for it.
@@ -750,7 +747,6 @@ impl Menu {
             reading_sys: false,
             ra: RaPage::new(ra),
             account_changed: false,
-            cheevos_list: None,
         }
     }
 
@@ -839,9 +835,6 @@ impl Menu {
         match self.page {
             Page::Game => {
                 items.extend([Item::Favourite, Item::Rating]);
-                if cx.cheevos.is_some() {
-                    items.push(Item::RaList);
-                }
                 if choice {
                     items.push(Item::Emulator);
                 }
@@ -1134,16 +1127,6 @@ impl Menu {
         }
         self.clock_job_done(cx);
         self.ra_heard(cx);
-        // The achievements list on the top screen: up and down move along it, B leaves it.
-        if let Some(list) = self.cheevos_list.as_mut() {
-            if input.close {
-                self.cheevos_list = None;
-            } else if input.moved != 0 {
-                let n = cx.cheevos.as_ref().map_or(0, |s| s.achievements.len());
-                list.move_by(input.moved, n);
-            }
-            return Done::default();
-        }
         // The sign-up page: B goes back to the Achievements page, on its row.
         if self.ra.signing_up() && input.close {
             self.ra_back(cx);
@@ -1219,10 +1202,6 @@ impl Menu {
         } else if self.page == Page::Achievements && !matches!(item, Item::Setting(_)) {
             let item = item.clone();
             self.ra_row(&item, chosen);
-        } else if *item == Item::RaList {
-            if pressed && was == self.row {
-                self.cheevos_list = Some(ListView::default());
-            }
         } else if *item == Item::Rescan {
             if pressed && was == self.row {
                 done.rescan = true;
@@ -1510,7 +1489,6 @@ impl Menu {
             self.reading_sys = false;
             self.clock_view = ClockView::Closed;
             self.ra.leave();
-            self.cheevos_list = None;
             if page == Page::Achievements {
                 self.ra.check();
             }
@@ -1713,7 +1691,6 @@ impl Menu {
             | Item::RaSignOut
             | Item::RaSignUp
             | Item::RaLink
-            | Item::RaList
             | Item::Joined
             | Item::Address
             | Item::NetworkInfo
@@ -1888,9 +1865,6 @@ impl Menu {
             (Page::Update, _) => update_title(),
             (Page::Achievements, _) => self.ra.title(),
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
-            (Page::Game, Some(game)) if self.cheevos_list.is_some() => {
-                format!("{}: achievements, on the top screen", game.name())
-            }
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
             (Page::System, _) if self.reading_sys => self.sys.summary(),
@@ -1908,12 +1882,6 @@ impl Menu {
             .filter(|i| i.set_here)
             .map(|i| format!("Y  use {}   \u{b7}   ", i.from));
         let hint = match (self.page, items.get(self.row)) {
-            (Page::Game, _) if self.cheevos_list.is_some() => {
-                "Up / Down  move along the list   \u{b7}   B  back".into()
-            }
-            (Page::Game, Some(Item::RaList)) => {
-                "A  browse on the top screen   \u{b7}   L / R  page   \u{b7}   B  back".into()
-            }
             (Page::Wifi, Some(Item::Info(_))) => {
                 "A  check again   \u{b7}   L / R  page   \u{b7}   B  back to Wi-Fi".into()
             }
@@ -2443,10 +2411,6 @@ impl Menu {
             | Item::RaSignOut
             | Item::RaSignUp
             | Item::RaLink => self.ra.value(item, r == self.row, self.armed == Some(r)),
-            Item::RaList => Value::Prompt {
-                text: cx.cheevos.as_ref().map(|s| s.summary()).unwrap_or_default(),
-                warning: false,
-            },
             Item::SpeakerTuning => text(match self.tuning {
                 Some(nibkit::audio::Tuning::Nibos) => "nibOS",
                 Some(nibkit::audio::Tuning::Official) => "Official",
@@ -2959,81 +2923,6 @@ mod tests {
         pages
     }
 
-    /// A set of `n` achievements, the first earned.
-    fn cheevos(n: u32) -> Arc<Set> {
-        let one = |id: u32| achievements::set::Achievement {
-            id,
-            title: format!("Achievement {id}"),
-            description: String::new(),
-            points: 5,
-            badge: String::new(),
-            unlocked: id == 1,
-            unlocked_at: None,
-        };
-        Arc::new(Set {
-            id: 1,
-            title: "Golden Sun".into(),
-            achievements: (1..=n).map(one).collect(),
-        })
-    }
-
-    /// The Game page offers the achievements list once the shelf has the game's set: A browses
-    /// it on the top screen, up and down move along it within the set, B comes back to the row.
-    #[test]
-    fn achievements_list_in_the_game_page() {
-        let mut w = world("menu-achievements-list", true);
-        let game = w.game.clone();
-        let mut cx = Context {
-            stats: &mut w.stats,
-            settings: &mut w.settings,
-            emulators: &w.emulators,
-            console: Console::Ds,
-            game: Some(&game),
-            cheevos: None,
-        };
-        let mut menu = Menu::open(true, &w.ra);
-        assert!(!labels(&menu, &cx).contains(&"Achievements".to_owned()));
-        cx.cheevos = Some(cheevos(8));
-        let items = labels(&menu, &cx);
-        assert_eq!(items[2], "Achievements");
-        assert_eq!(
-            menu.shown(&cx).rows[2].value,
-            Value::Prompt {
-                text: "1 of 8 \u{b7} 5 of 40 points".into(),
-                warning: false
-            }
-        );
-        let press = Input {
-            pressed: true,
-            ..Input::default()
-        };
-        menu.row = 2;
-        menu.update(&press, &mut cx);
-        assert_eq!(menu.cheevos_list, Some(ListView::default()));
-        assert!(menu
-            .shown(&cx)
-            .title
-            .ends_with("achievements, on the top screen"));
-        assert!(menu.shown(&cx).hint.starts_with("Up / Down"));
-        menu.update(&moved(3), &mut cx);
-        assert_eq!(menu.cheevos_list.map(|l| l.at), Some(3));
-        // Past the end: on the last, the rows shown following it.
-        menu.update(&moved(20), &mut cx);
-        assert_eq!(menu.cheevos_list, Some(ListView { at: 7, first: 2 }));
-        menu.update(&moved(-20), &mut cx);
-        assert_eq!(menu.cheevos_list, Some(ListView { at: 0, first: 0 }));
-        // While browsing, A does nothing to the rows under it.
-        menu.update(&press, &mut cx);
-        assert_eq!(menu.row, 2);
-        let close = Input {
-            close: true,
-            ..Input::default()
-        };
-        assert!(!menu.update(&close, &mut cx).closed);
-        assert_eq!(menu.cheevos_list, None);
-        assert_eq!(labels(&menu, &cx)[menu.row], "Achievements");
-    }
-
     /// The Achievements page: signed out, a sign-in (the service's answer injected, the token
     /// kept by the request as it is), signing out, and the sign-up view. Each sign-in and out
     /// is told to the shelf.
@@ -3048,7 +2937,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
-            cheevos: None,
         };
         let token = w.ra.token.clone();
         let mut menu = Menu::open(false, &w.ra);
@@ -3203,7 +3091,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
-            cheevos: None,
         };
         let account = achievements::Account {
             user: "Alan".into(),
@@ -3255,7 +3142,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: Some(&game),
-            cheevos: None,
         };
         let mut menu = Menu::open(true, &w.ra);
         // One emulator: no Emulator row. Its option for DS; its action and the saves' deletion
@@ -3297,7 +3183,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Gba,
             game: None,
-            cheevos: None,
         };
         let menu = Menu::open(false, &w.ra);
         assert_eq!(menu.page, Page::Console);
@@ -3321,7 +3206,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: Some(&game),
-            cheevos: None,
         };
         let mut menu = Menu::open(true, &w.ra);
         let res = 2; // 3D resolution, on the Game page
@@ -3390,7 +3274,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Gba,
             game: Some(&game),
-            cheevos: None,
         };
         let mut menu = Menu::open_view(&w.ra);
         assert_eq!(menu.pages(&cx), [Page::View]);
@@ -3442,7 +3325,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
-            cheevos: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         menu.turn_to(Page::System);
@@ -3488,7 +3370,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
-            cheevos: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         menu.turn_to(Page::System);
@@ -3533,7 +3414,6 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
-            cheevos: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         menu.turn_to(Page::System);

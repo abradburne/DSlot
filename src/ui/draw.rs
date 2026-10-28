@@ -3,8 +3,9 @@
 //! screen. Artwork is composed off this thread (loader.rs) and arrives here as images to make
 //! into textures; text is rendered once per string and size and kept.
 
+use super::back::Back;
 use super::bouncer::{self, Bouncer};
-use super::cheevos::{Cheevos, ListView};
+use super::cheevos::Cheevos;
 use super::layout::*;
 use super::menu::{Shown, Value};
 use super::power;
@@ -47,8 +48,6 @@ const fn rgb([r, g, b]: colour::Rgb) -> Color {
 pub enum Beside {
     /// Its name and details, and its achievements' line.
     Details,
-    /// The menu browsing its achievements: their list in the details' place (cheevos.rs).
-    Cheevos(ListView),
     /// Nothing: the View sheet is drawn there after (sheet.rs).
     Sheet,
 }
@@ -159,6 +158,8 @@ pub struct Ui<'a> {
     /// The games' achievements (achievements/), looked up by a worker and drawn on the top
     /// screen (cheevos.rs).
     pub(super) cheevos: Cheevos,
+    /// The back of the box the game page shows (back.rs): the game's details from the web.
+    pub(super) back: Back,
     /// Where the status bar's Wi-Fi and Bluetooth icons were drawn (`true` Bluetooth's), for
     /// a tap on one.
     radio_boxes: Vec<(bool, (f32, f32, f32, f32))>,
@@ -278,6 +279,7 @@ impl<'a> Ui<'a> {
             photos: HashMap::new(),
             resumes: Resumes::start(scope),
             cheevos: Cheevos::start(ra),
+            back: Back::new(cache.clone()),
             radio_boxes: Vec::new(),
             glyphs: HashMap::new(),
         })
@@ -758,11 +760,10 @@ impl Ui<'_> {
             self.draw_resume(g, size, saved)?;
         }
 
-        let cheevos_list = match beside {
-            Beside::Details => None,
-            Beside::Cheevos(list) => Some(list),
+        match beside {
+            Beside::Details => {}
             Beside::Sheet => return self.shade(v, fade),
-        };
+        }
         let (x, width) = (580.0, 400.0);
         let size = self.fonts.fit(game.name(), 58.0, 28.0, width, true);
         let mut y = 228.0;
@@ -792,21 +793,44 @@ impl Ui<'_> {
             ("Last played", stats.last_played(&game.path)),
             ("Sessions", stats.sessions(&game.path)),
         ];
-        let y_list = y.max(380.0) + 20.0;
         let mut y = y.max(380.0) + 70.0;
-        // Browsing the achievements: their list takes the details' place.
-        if cheevos_list.is_none() {
-            for (label, value) in rows {
-                self.text(v, label, (22.0, false), (x, y), 0.0, DIM)?;
-                self.text(v, &value, (22.0, true), (x + 150.0, y), 0.0, WHITE)?;
-                y += 36.0;
-            }
-            self.text(v, "Rating", (22.0, false), (x, y), 0.0, DIM)?;
-            self.stars(v, x + 150.0, y + 2.0, stats.rating(&game.path))?;
+        for (label, value) in rows {
+            self.text(v, label, (22.0, false), (x, y), 0.0, DIM)?;
+            self.text(v, &value, (22.0, true), (x + 150.0, y), 0.0, WHITE)?;
+            y += 36.0;
         }
+        self.text(v, "Rating", (22.0, false), (x, y), 0.0, DIM)?;
+        self.stars(v, x + 150.0, y + 2.0, stats.rating(&game.path))?;
         let game = game.clone();
-        self.draw_cheevos(&game, cheevos_list, (x, y + 52.0), y_list)?;
+        self.draw_cheevos(&game, (x, y + 52.0))?;
         self.shade(v, fade)
+    }
+
+    /// Game `g`'s box, as large as fits in `(x, y, w, h)` and centred there: the full-size art
+    /// once it is in, its grid cover until then. Whether there was one to draw.
+    pub(super) fn draw_box_in(
+        &mut self,
+        g: usize,
+        console: Console,
+        (x, y, w, h): (f32, f32, f32, f32),
+    ) -> Result<bool, String> {
+        let v = self.top;
+        let size = art::box_size(console);
+        let cover = self
+            .arts
+            .get_mut(&g)
+            .map(|a| &mut a.cover)
+            .or(self.thumbs.get_mut(&g).map(|ts| &mut ts[v.c]));
+        let Some(cover) = cover else {
+            return Ok(false);
+        };
+        let k = (w / size.0 as f32).min(h / size.1 as f32);
+        let (bw, bh) = (size.0 as f32 * k, size.1 as f32 * k);
+        let dst = v.rect(x + (w - bw) / 2.0, y + (h - bh) / 2.0, bw, bh);
+        cover.set_color_mod(255, 255, 255);
+        cover.set_alpha_mod(255);
+        self.canvases[v.c].copy(cover, None, dst)?;
+        Ok(true)
     }
 
     /// The resume point `wanted` says to show for game `g`, when it was saved, if it has one
@@ -855,7 +879,10 @@ impl Ui<'_> {
     /// Whether artwork, a resume point or achievements are still to come in: they want
     /// drawing when they do.
     pub fn waiting(&self) -> bool {
-        !self.loader.idle() || !self.resumes.asked.is_empty() || self.cheevos.waiting()
+        !self.loader.idle()
+            || !self.resumes.asked.is_empty()
+            || self.cheevos.waiting()
+            || self.back.waiting()
     }
 
     /// What the status bar shows that changes by itself: the clock, the battery and the
@@ -2083,7 +2110,7 @@ pub struct Yours {
 }
 
 /// `c` darkened to `k` of itself.
-fn dim_by(c: Color, k: f32) -> Color {
+pub(super) fn dim_by(c: Color, k: f32) -> Color {
     Color::RGB(
         (c.r as f32 * k) as u8,
         (c.g as f32 * k) as u8,
@@ -2092,7 +2119,7 @@ fn dim_by(c: Color, k: f32) -> Color {
 }
 
 /// A system's colour: the field its blade's art sits on, and all a blade shows without art.
-fn console_colour(console: Console) -> Color {
+pub(super) fn console_colour(console: Console) -> Color {
     match console {
         Console::Ds => Color::RGB(58, 68, 92),
         Console::Gba => Color::RGB(76, 58, 128),

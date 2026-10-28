@@ -58,6 +58,9 @@ main ─── platform (stock | nibos) ── where things are, start-up, power
 | `ui/shelf.rs` | The frame loop and the shelf's `State`: input, touches, the carts' motion, the slot, artwork wanted, drawing. |
 | `ui/input.rs` | SDL's events as the DS+'s buttons by their printed labels, the keyboard's stand-ins, the mouse as the touch screen. |
 | `ui/menu.rs` | The menu's pages (Game, console, System), their rows, where each value comes from, and what each row does. |
+| `ui/game.rs` | The game page (X): its buttons and the game's achievement badges on the touch screen, and moving between them. |
+| `ui/back.rs` | The back of the game's box, on the top screen while its page is open: screenshots, what it is, the player's play, a barcode, the chosen achievement as a sticker. |
+| `details.rs` | A game's details from the web for the box's back: libretro's thumbnails, Wikipedia and Wikidata, by `curl` on a thread, kept in the cache. |
 | `ui/sheet.rs` | The View sheet (Start): the menu's View page alone, drawn on the top screen so the shelf it changes stays in sight. |
 | `ui/draw.rs` | The textures and how each part of the screens is drawn: the shelf, grid and lists, the top screen (with the resume inset), the system picker, the cards, the status bar (battery, Wi-Fi, Bluetooth from `nibkit::net`, the clock). |
 | `ui/layout.rs` | Where things are, in units of a 1024 × 768 screen, and hit tests. |

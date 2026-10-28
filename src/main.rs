@@ -5,6 +5,7 @@
 mod achievements;
 mod art;
 mod bugreport;
+mod details;
 mod device;
 mod emulator;
 mod folders;

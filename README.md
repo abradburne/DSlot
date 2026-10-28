@@ -180,6 +180,17 @@ chip, memory and screens, its system and build date, the battery (and battery pr
 room on each card, how long it has been on, the time played in all and the game played most.
 How cards are made, and how to add a system: [docs/system-cards.md](docs/system-cards.md).
 
+On a game's page (X), the top screen is the **back of its box**: its title screen and a
+screenshot in play, the year, developer, publisher and genre, a blurb, your play time, sessions
+and achievements, and a barcode; the achievement badge chosen on the touch screen goes on it as
+a sticker. The details come from the web when the page is opened, and only then, by `curl`:
+the screenshots from libretro's thumbnails (thumbnails.libretro.com, by the ROM's file name,
+so a ROM named as No-Intro names it finds them), what the game is from Wikipedia's search and
+summary (en.wikipedia.org, the blurb credited on the box, CC BY-SA) and Wikidata
+(www.wikidata.org). Nothing else is sent: the game's name and system, and DSlot's version in
+the User-Agent. They are kept in the cache, `details/<system>/<ROM name>/`, and asked for again
+after 90 days (a week for what wasn't found); with no network the page shows what was kept.
+
 ## The status bar
 
 At the bottom of the touch screen: the battery (charge, and a bolt or plug), Wi-Fi (off,
@@ -233,7 +244,8 @@ scripts too. How to make one: [docs/apps.md](docs/apps.md).
 | Tap a cover in the grid or a name in a list, then tap it again | Pick it, then play it |
 | Flick the grid or a list | It keeps scrolling and slows to a stop, as on a phone; touch it to stop it |
 | Y | Mark or unmark the game as a favourite |
-| Back (beside Menu) | Open the menu (X too, for now) |
+| Back (beside Menu) | Open the menu |
+| X | The game page: the box turns round to its back on the top screen (screenshots, what the game is, your play); Play, Favourite, Rating, Settings and the game's achievement badges on the touch screen. The D-pad moves, A (or a tap) presses or picks a badge, B or X closes it, Back opens the menu over it |
 | Start | The View sheet: how this page is shown (View, Sort by, Show, Game case) on the top screen, the shelf below changing as you go. Up / down picks a row, left / right changes it, Y goes back to what it inherits, Start, B or a touch closes it |
 | Select + Start | Leave DSlot (on the stock OS, Menu too) |
 | Hold power (nibOS) | The power menu: Sleep, Restart, Power off, Cancel. During a game, the game is saved and put away first; Cancel carries on with it |
@@ -242,7 +254,7 @@ On nibOS Menu does nothing on the shelf: it is the button that brings you back f
 
 ## Menu
 
-Back (or X) opens the menu on the touch screen, with a page for each level of settings: **Game** (the
+Back opens the menu on the touch screen, with a page for each level of settings: **Game** (the
 selected game), its **console** (DS, GBA, ...) and **System**. L / R or a tap on a tab changes
 page; D-pad up / down picks a row, left / right (or A, or a tap on the row) changes it, Y
 resets it to what it inherits, B or Back closes the menu.
@@ -271,7 +283,7 @@ installed), or in the one picked for the console or the game in the menu. How to
 | Play times, favourites, ratings (`stats.tsv`) | `Roms/APPS/dslot/` | `~/.local/share/dslot/` |
 | Settings, for the system, each console and each game (`settings.toml`) | `Roms/APPS/dslot/` | `~/.config/dslot/` |
 | Emulator descriptions | `Roms/APPS/dslot/emulators/` | `/usr/share/dslot/emulators/`, `/etc/dslot/emulators/`, `~/.config/dslot/emulators/` |
-| Cache: what each ROM said, grid covers | `Roms/APPS/dslot/cache/` | `~/.cache/dslot/` |
+| Cache: what each ROM said, grid covers, the game pages' details and screenshots | `Roms/APPS/dslot/cache/` | `~/.cache/dslot/` |
 | Game saves, and resume points | the emulators' own | `/mnt/roms/Saves/<system>/<ROM name>/` |
 | Apps installed with the system | — | `/usr/share/dslot/apps/` |
 | The system cards' photo credits | — | `/usr/share/doc/dslot/photo-credits.md` |
