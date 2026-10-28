@@ -2778,8 +2778,9 @@ impl Menu {
 /// The Achievements page (achievements.rs).
 impl Menu {
     /// Its rows: signed out, the username, Sign in, Mode and Make an account; signed in, who,
-    /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED).
-    /// The sign-up view has the address alone, over the QR code.
+    /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED);
+    /// until then the page ends with a note that achievements are Casual for now. The sign-up
+    /// view has the address alone, over the QR code.
     fn ra_items(&self, items: &mut Vec<Item>) {
         if self.ra_signup {
             items.push(Item::RaLink);
@@ -2798,6 +2799,13 @@ impl Menu {
                 items.extend(mode);
                 items.push(Item::RaSignUp);
             }
+        }
+        if !achievements::HARDCORE_OFFERED {
+            items.extend(
+                update::wrap(achievements::CASUAL_ONLY, NOTES_WIDTH)
+                    .into_iter()
+                    .map(Item::Message),
+            );
         }
     }
 
@@ -3155,10 +3163,13 @@ mod tests {
         menu.ra_path = token.clone();
         (menu.ra_account, menu.ra_user) = (None, String::new());
         menu.page = Page::Achievements;
-        assert_eq!(
-            labels(&menu, &cx),
-            ["Username", "Sign in", "Make an account"]
-        );
+        // Hardcore is not offered yet: the page ends with the note saying so.
+        let casual = [
+            "Achievements are Casual for now: RetroAchievements hasn't",
+            "approved our emulators for Hardcore yet.",
+        ];
+        let signed_out = [&["Username", "Sign in", "Make an account"][..], &casual].concat();
+        assert_eq!(labels(&menu, &cx), signed_out);
         let shown = menu.shown(&cx);
         assert_eq!(shown.title, "RetroAchievements: not signed in");
         assert!(shown.picture.is_none());
@@ -3204,7 +3215,10 @@ mod tests {
         tx.send(Outcome::SignedIn(standing, "t0k3n".into()))
             .unwrap();
         menu.update(&Input::default(), &mut cx);
-        assert_eq!(labels(&menu, &cx), ["Signed in as", "Sign out"]);
+        assert_eq!(
+            labels(&menu, &cx),
+            [&["Signed in as", "Sign out"][..], &casual].concat()
+        );
         assert_eq!(
             menu.shown(&cx).title,
             "RetroAchievements: signed in as Alan"
@@ -3241,10 +3255,7 @@ mod tests {
             }
         );
         menu.update(&press, &mut cx);
-        assert_eq!(
-            labels(&menu, &cx),
-            ["Username", "Sign in", "Make an account"]
-        );
+        assert_eq!(labels(&menu, &cx), signed_out);
         assert!(!token.exists());
         assert_eq!(menu.shown(&cx).rows[0].value, Value::Text("Alan".into()));
         // A refusal on sign-in stays on the Sign in row, with the reason.

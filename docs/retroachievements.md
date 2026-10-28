@@ -33,7 +33,8 @@ loads, rewind, slow motion, frame advance or cheats; a resume drops to softcore;
 hardcore resets the game). See the service's
 [hardcore compliance requirements](https://docs.retroachievements.org/general/hardcore-compliance-requirements.html).
 Until ours are approved, DSlot offers softcore alone: `HARDCORE_OFFERED` in
-`src/achievements/mod.rs` is off, so the Mode row is hidden and `RA_HARDCORE` is always `0`,
+`src/achievements/mod.rs` is off, so the Mode row is hidden (the page ends with a note that
+achievements are Casual, the service's name for softcore, for now) and `RA_HARDCORE` is always `0`,
 even with `achievements = "hardcore"` in settings.toml. Turning it on brings both back.
 Meanwhile the service adds a *Warning: Unknown Emulator* entry ("Hardcore unlocks cannot be
 earned using this emulator", id 101000001 and up, earned already) to every set it sends us;

@@ -43,6 +43,10 @@ pub const ENV_HARDCORE: &str = "RA_HARDCORE";
 /// (docs/retroachievements.md); until then every game plays softcore, whatever settings.toml
 /// says.
 pub const HARDCORE_OFFERED: bool = false;
+/// What the Achievements page says while hardcore isn't offered: Casual is the service's name
+/// for softcore.
+pub const CASUAL_ONLY: &str = "Achievements are Casual for now: RetroAchievements hasn't \
+     approved our emulators for Hardcore yet.";
 
 /// Whether the page is offered: `curl` is there to talk to the service.
 pub fn available() -> bool {
