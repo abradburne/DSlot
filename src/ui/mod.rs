@@ -36,6 +36,7 @@ mod screens;
 mod sheet;
 mod shelf;
 mod skeleton;
+mod sleepoff;
 mod sound;
 mod sysinfo;
 

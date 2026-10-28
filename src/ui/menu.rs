@@ -32,6 +32,7 @@ use super::clock;
 use super::netinfo;
 use super::ra::RaPage;
 use super::radios::{Ask, Do, Radios, Reply, Snapshot};
+use super::sleepoff;
 use super::sysinfo;
 use crate::achievements::{self, Ra};
 use crate::emulator::{Action, Emulator, Emulators};
@@ -93,6 +94,8 @@ pub enum Item {
     ImportTuning,
     /// Restarts, for a change that applies then; asks first.
     RestartNow,
+    /// How long the device sleeps on battery before it powers off (nibOS, sleepoff.rs).
+    SleepOff,
     /// The clock, 12-hour or 24-hour: nibOS's preference, for every app.
     Clock,
     /// System (nibOS): opens the Date and time page (clock.rs).
@@ -197,6 +200,7 @@ impl Item {
             Item::SpeakerTuning => "Speaker tuning",
             Item::ImportTuning => "Import official tuning",
             Item::RestartNow => "Restart now",
+            Item::SleepOff => "Power off when asleep",
             Item::Joined => "Joined",
             Item::Address => "Address",
             Item::NetworkInfo => "Network info",
@@ -614,6 +618,9 @@ pub struct Menu {
     moving: Option<Control>,
     /// The speaker amps' tuning, read when the System page is shown (it takes a command).
     tuning: Option<nibkit::audio::Tuning>,
+    /// `nib sleep`'s off-after (minutes, or never), read when the System page is shown; `None`
+    /// where there is no such setting.
+    sleep_off: Option<Option<u32>>,
     /// A command running for a row (importing the tuning): the row, and its answer to come.
     job: Option<(Item, std::sync::mpsc::Receiver<std::io::Result<String>>)>,
     /// A change made that applies at the next restart: "Restart now" is offered.
@@ -722,6 +729,7 @@ impl Menu {
             moving: None,
             hour12: nibkit::clock::hour12(),
             tuning: None,
+            sleep_off: None,
             job: None,
             restart: false,
             radios,
@@ -913,6 +921,9 @@ impl Menu {
                 }
                 if self.at_boot.is_some() {
                     items.push(Item::PowerOnStart);
+                }
+                if self.sleep_off.is_some() {
+                    items.push(Item::SleepOff);
                 }
                 if self.restart {
                     items.push(Item::RestartNow);
@@ -1496,6 +1507,7 @@ impl Menu {
                 self.reread(|_| true);
                 self.hour12 = nibkit::clock::hour12();
                 self.tuning = nibkit::audio::tuning();
+                self.sleep_off = sleepoff::read();
             }
         }
     }
@@ -1652,6 +1664,21 @@ impl Menu {
                 let official = self.tuning != Some(nibkit::audio::Tuning::Official);
                 self.run(Item::SpeakerTuning, move || {
                     nibkit::audio::set_tuning(official)
+                });
+                return false;
+            }
+            Item::SleepOff => {
+                let Some(now) = self.sleep_off else {
+                    return false;
+                };
+                let next = sleepoff::step(now, dir);
+                self.sleep_off = Some(next);
+                // Quick, but a sudo all the same: off the menu's thread. A failure is logged, and
+                // the page shows what is set when it is opened again.
+                std::thread::spawn(move || {
+                    if let Err(e) = sleepoff::set(next) {
+                        eprintln!("dslot: power off when asleep: {e}");
+                    }
                 });
                 return false;
             }
@@ -2238,6 +2265,7 @@ impl Menu {
                 None => text("\u{2013}"),
             },
             Item::Clock => text(if self.hour12 { "12-hour" } else { "24-hour" }),
+            Item::SleepOff => text(&sleepoff::label(self.sleep_off.flatten())),
             Item::DateTime
             | Item::ClockRow(_)
             | Item::ZoneRegion(_)
