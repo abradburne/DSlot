@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
+- **Which systems earn achievements**, on the Achievements page under the Casual note: DS, Game
+  Boy and Game Boy Color for now (DSperate and inkdot), with more coming. The shelf shows a set
+  for any system RetroAchievements has, GBA's too; the note says where playing earns them.
 - **The buttons come back when the gamepad does.** On nibOS the device's gamepad is
   nibos-input's, and a restart of it (an update of nibos-hw, or after a crash) makes a new one;
   the shelf kept the old one and heard nothing but the power key until DSlot itself restarted.

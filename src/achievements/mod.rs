@@ -55,6 +55,11 @@ pub const HARDCORE_OFFERED: bool = false;
 /// for softcore.
 pub const CASUAL_ONLY: &str = "Achievements are Casual for now: RetroAchievements hasn't \
      approved our emulators for Hardcore yet.";
+/// Which systems earn achievements, as the Achievements page says it: the ones an emulator here
+/// plays with RetroAchievements on (DSperate for DS, inkdot for GB and GBC). The shelf shows a
+/// set for any system the service has (GBA too); this says where playing earns them.
+pub const EARNED_IN: &str = "Earned in DS, Game Boy and Game Boy Color games for now; more \
+     systems are coming.";
 
 /// Whether the page is offered: `curl` is there to talk to the service. Looked for along
 /// `PATH` once a run.

@@ -3027,10 +3027,13 @@ mod tests {
         let token = w.ra.token.clone();
         let mut menu = Menu::open(false, &w.ra);
         menu.page = Page::Achievements;
-        // Hardcore is not offered yet: the page ends with the note saying so.
+        // Hardcore is not offered yet: the page ends with the note saying so, then which systems
+        // earn achievements.
         let casual = [
             "Achievements are Casual for now: RetroAchievements hasn't",
             "approved our emulators for Hardcore yet.",
+            "Earned in DS, Game Boy and Game Boy Color games for now; more",
+            "systems are coming.",
         ];
         let signed_out = [&["Username", "Sign in", "Make an account"][..], &casual].concat();
         assert_eq!(labels(&menu, &cx), signed_out);
