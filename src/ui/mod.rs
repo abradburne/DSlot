@@ -4,6 +4,8 @@
 //! - `shelf`: the shelf itself, a frame at a time: input, motion, artwork, drawing.
 //! - `input`: SDL's events as the DS+'s buttons and the touch panel's pointers.
 //! - `draw`: the textures and how each part of the screens is drawn.
+//! - `cheevos`: the selected game's achievements on the top screen, and their list.
+//! - `ra`: the menu's Achievements page, the RetroAchievements sign-in.
 //! - `menu`: the menu's rows on the touch screen.
 //! - `netinfo`: the Wi-Fi page's Network info page, read from the system on a thread.
 //! - `sysinfo`: the System page's System info page, read from /proc and /sys on a thread.
@@ -14,6 +16,7 @@
 //! - `bouncer`: the screensaver's logo, bouncing round both screens.
 
 mod bouncer;
+mod cheevos;
 mod clock;
 mod draw;
 mod input;
@@ -21,6 +24,7 @@ mod layout;
 mod menu;
 mod netinfo;
 mod power;
+mod ra;
 mod radios;
 mod screens;
 mod shelf;
@@ -98,4 +102,6 @@ pub struct Shelf<'a> {
     pub power: &'a nibkit::power::Requests,
     /// Games copied onto the cards or deleted from them, noticed as the shelf is up.
     pub rescan: &'a Rescan,
+    /// RetroAchievements: where the sign-in and the lookups are kept.
+    pub ra: &'a crate::achievements::Ra,
 }

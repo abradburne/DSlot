@@ -4,10 +4,11 @@
 //! into textures; text is rendered once per string and size and kept.
 
 use super::bouncer::{self, Bouncer};
+use super::cheevos::{Cheevos, ListView};
 use super::layout::*;
 use super::menu::{Shown, Value};
 use super::power;
-use crate::achievements::{self, set as cheevos};
+use crate::achievements::Ra;
 use crate::art::{self, Shell, Slot};
 use crate::device::About;
 use crate::gfx::{self, Fonts, Img};
@@ -16,6 +17,7 @@ use crate::resume::{Resume, Wanted};
 use crate::rom::{Console, Game};
 use crate::stats::{self, Stats};
 use crate::systems::Card;
+use nibkit::menu::colour;
 use nibkit::net::{Bluetooth, Wifi};
 use sdl2::pixels::{Color, PixelFormatEnum};
 use sdl2::rect::Rect;
@@ -28,12 +30,17 @@ use std::sync::OnceLock;
 use std::thread::Scope;
 use std::time::Instant;
 
-pub const DIM: Color = Color::RGB(154, 163, 184);
-pub const FAINT: Color = Color::RGB(98, 106, 128);
-pub const WHITE: Color = Color::RGB(241, 243, 248);
-pub const GOLD: Color = Color::RGB(255, 196, 60);
-pub const RED: Color = Color::RGB(236, 72, 92);
-pub const PANEL: Color = Color::RGB(28, 33, 44);
+// nibkit's menu colours, so that the shelf and the menu are one palette.
+pub const DIM: Color = rgb(colour::DIM);
+pub const FAINT: Color = rgb(colour::FAINT);
+pub const WHITE: Color = rgb(colour::WHITE);
+pub const GOLD: Color = rgb(colour::GOLD);
+pub const RED: Color = rgb(colour::RED);
+pub const PANEL: Color = rgb(colour::PANEL);
+
+const fn rgb([r, g, b]: colour::Rgb) -> Color {
+    Color::RGB(r, g, b)
+}
 
 /// What the touch screen's hint line says on the shelf.
 pub const HINT: &str = "A  insert  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \u{b7}  Select  systems  \u{b7}  X  menu  \u{b7}  Y  favourite  \u{b7}  Select + Start  exit";
@@ -108,8 +115,8 @@ pub struct Ui<'a> {
     /// One window spanning both screens, or one window for each. A texture only draws on the
     /// canvas it was made for.
     pub canvases: Vec<WindowCanvas>,
-    creators: Vec<TextureCreator<WindowContext>>,
-    fonts: &'a Fonts,
+    pub(super) creators: Vec<TextureCreator<WindowContext>>,
+    pub(super) fonts: &'a Fonts,
     /// The look (Game case, SNES cart shape) the artwork was made for.
     pub looks: art::Looks,
     loader: Loader,
@@ -121,7 +128,7 @@ pub struct Ui<'a> {
     /// Lines of text, with their width and height.
     texts: HashMap<TextKey, (Texture, u32, u32)>,
     /// A white pixel for each canvas, stretched and tinted for panels and highlights.
-    white: Vec<Texture>,
+    pub(super) white: Vec<Texture>,
     /// The status bar with the DS slot, and with the slot-2 opening, by `Slot as usize`.
     /// The status bar with the slot in it: the DS's, then slot-2's opening sized for each
     /// console's carts (`bar_for`).
@@ -138,9 +145,9 @@ pub struct Ui<'a> {
     radios: Option<(RadioIcons, Texture, Texture)>,
     /// Games' resume points, read on a thread of their own as each game is shown.
     resumes: Resumes,
-    /// The games' achievements (achievements/set.rs), looked up by a worker and drawn on the
-    /// top screen.
-    cheevos: Cheevos,
+    /// The games' achievements (achievements/), looked up by a worker and drawn on the top
+    /// screen (cheevos.rs).
+    pub(super) cheevos: Cheevos,
     /// Where the status bar's Wi-Fi and Bluetooth icons were drawn (`true` Bluetooth's), for
     /// a tap on one.
     radio_boxes: Vec<(bool, (f32, f32, f32, f32))>,
@@ -197,293 +204,7 @@ impl Resumes {
     }
 }
 
-/// What the achievements worker tells: a game's set (or that there is none to show), and the
-/// badges, one by one as they are read or fetched.
-enum Told {
-    Set(usize, Option<cheevos::Found>),
-    Badge(String, Img),
-}
-
-/// The games' achievements, by a worker of their own: the ROM's hash, the set and the player's
-/// unlocks from the service or the cache, then the badges. Kept by game while the shelf is up.
-struct Cheevos {
-    ask: Sender<(usize, Console, PathBuf)>,
-    told: Receiver<Told>,
-    /// What was found for each game asked about: None once told there is nothing to show.
-    found: HashMap<usize, Option<cheevos::Found>>,
-    asked: HashSet<usize>,
-    badges: HashMap<String, Texture>,
-    /// The first row on the top screen while the list is browsed.
-    first: usize,
-}
-
-/// Rows the browsed list shows at once.
-const LIST_ROWS: usize = 6;
-
-impl Cheevos {
-    fn start<'scope>(scope: &'scope Scope<'scope, '_>, store: cheevos::Store) -> Cheevos {
-        let (ask, asked) = channel::<(usize, Console, PathBuf)>();
-        let (tell, told) = channel();
-        scope.spawn(move || {
-            let token = crate::platform::dirs().achievements;
-            let mut sent: HashSet<String> = HashSet::new();
-            let mut todo: std::collections::VecDeque<String> = Default::default();
-            loop {
-                // The latest game asked about comes first; the badges wait for it.
-                let next = match todo.is_empty() {
-                    true => asked.recv().ok(),
-                    false => asked.try_iter().last(),
-                };
-                let next = next.map(|first| asked.try_iter().last().unwrap_or(first));
-                if let Some((g, console, path)) = next {
-                    let account = achievements::Account::load(&token);
-                    let found = store.look_up(account.as_ref(), console, &path);
-                    if let Some(cheevos::Found::Set(set)) = &found {
-                        // The badges this game needs, soonest first; the others after.
-                        let wanted: Vec<_> = set
-                            .achievements
-                            .iter()
-                            .map(|a| a.badge.clone())
-                            .filter(|b| !sent.contains(b))
-                            .collect();
-                        todo.retain(|b| !wanted.contains(b));
-                        for b in wanted.into_iter().rev() {
-                            todo.push_front(b);
-                        }
-                    }
-                    if tell.send(Told::Set(g, found)).is_err() {
-                        return;
-                    }
-                    continue;
-                }
-                let Some(name) = todo.pop_front() else {
-                    return;
-                };
-                if sent.contains(&name) {
-                    continue;
-                }
-                let img = store.badge(&name).and_then(|file| gfx::load_png(&file));
-                sent.insert(name.clone());
-                if let Some(img) = img {
-                    if tell.send(Told::Badge(name, img)).is_err() {
-                        return;
-                    }
-                }
-            }
-        });
-        Cheevos {
-            ask,
-            told,
-            found: HashMap::new(),
-            asked: HashSet::new(),
-            badges: HashMap::new(),
-            first: 0,
-        }
-    }
-
-    fn set(&self, g: usize) -> Option<&cheevos::Set> {
-        match self.found.get(&g)? {
-            Some(cheevos::Found::Set(set)) => Some(set),
-            _ => None,
-        }
-    }
-}
-
 impl<'a> Ui<'a> {
-    /// The selected game's achievements in a line, for the menu's Game page, once known.
-    pub fn cheevos_summary(&self, g: usize) -> Option<String> {
-        self.cheevos.set(g).map(cheevos::Set::summary)
-    }
-
-    /// How many achievements the game has to browse.
-    pub fn cheevos_count(&self, g: usize) -> usize {
-        self.cheevos.set(g).map_or(0, |s| s.achievements.len())
-    }
-
-    /// Takes in what the worker found, and asks about game `g` the first time it is shown.
-    fn cheevos_poll(&mut self, g: usize, game: &Game) -> Result<(), String> {
-        for told in self.cheevos.told.try_iter().collect::<Vec<_>>() {
-            match told {
-                Told::Set(g, found) => {
-                    self.cheevos.found.insert(g, found);
-                }
-                Told::Badge(name, img) => {
-                    let t = texture(&self.creators[self.top.c], &img)?;
-                    if let Some(old) = self.cheevos.badges.insert(name, t) {
-                        destroy(old);
-                    }
-                }
-            }
-        }
-        if !self.cheevos.asked.contains(&g)
-            && achievements::hash::supported(game.console)
-            && self
-                .cheevos
-                .ask
-                .send((g, game.console, game.path.clone()))
-                .is_ok()
-        {
-            self.cheevos.asked.insert(g);
-        }
-        Ok(())
-    }
-
-    /// One badge, `side` units square at (x, y): dimmed while locked.
-    fn badge(
-        &mut self,
-        v: View,
-        name: &str,
-        unlocked: bool,
-        (x, y, side): (f32, f32, f32),
-    ) -> Result<(), String> {
-        let Some(t) = self.cheevos.badges.get_mut(name) else {
-            // Not in yet: its place, faintly.
-            self.white[v.c].set_color_mod(255, 255, 255);
-            self.white[v.c].set_alpha_mod(if unlocked { 40 } else { 18 });
-            return self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, side, side));
-        };
-        if unlocked {
-            t.set_color_mod(255, 255, 255);
-            t.set_alpha_mod(255);
-        } else {
-            t.set_color_mod(110, 110, 110);
-            t.set_alpha_mod(140);
-        }
-        self.canvases[v.c].copy(t, None, v.rect(x, y, side, side))
-    }
-
-    /// The game's achievements on the top screen, under its details at `(x, y)`: a line
-    /// counting them and a bar of how far through the set the player is; or, while the menu browses them (`list` is the row highlighted), the list itself,
-    /// from `y_list` down, each with its badge, title, points and description.
-    fn draw_cheevos(
-        &mut self,
-        g: usize,
-        game: &Game,
-        list: Option<usize>,
-        (x, y): (f32, f32),
-        y_list: f32,
-    ) -> Result<(), String> {
-        self.cheevos_poll(g, game)?;
-        let v = self.top;
-        let width = SW - 40.0 - x;
-        let found = match self.cheevos.found.get(&g) {
-            Some(found) => found.clone(),
-            None if self.cheevos.asked.contains(&g) => {
-                if list.is_none() {
-                    self.text(v, "Achievements", (22.0, false), (x, y), 0.0, DIM)?;
-                    self.text(
-                        v,
-                        "Looking up\u{2026}",
-                        (22.0, false),
-                        (x, y + 30.0),
-                        0.0,
-                        FAINT,
-                    )?;
-                }
-                return Ok(());
-            }
-            None => return Ok(()),
-        };
-        let Some(cheevos::Found::Set(set)) = found else {
-            if found.is_some() && list.is_none() {
-                self.text(v, "Achievements", (22.0, false), (x, y), 0.0, DIM)?;
-                self.text(
-                    v,
-                    "Not on RetroAchievements",
-                    (22.0, false),
-                    (x, y + 30.0),
-                    0.0,
-                    FAINT,
-                )?;
-            }
-            return Ok(());
-        };
-        let n = set.achievements.len();
-        if let Some(at) = list {
-            let at = at.min(n.saturating_sub(1));
-            let first = &mut self.cheevos.first;
-            if at < *first {
-                *first = at;
-            } else if at >= *first + LIST_ROWS {
-                *first = at + 1 - LIST_ROWS;
-            }
-            *first = (*first).min(n.saturating_sub(LIST_ROWS));
-            let first = *first;
-            let (x, y) = (x, y_list);
-            // The menu's title says these are the achievements: the standing alone here.
-            self.text(v, &set.summary(), (22.0, true), (x, y), 0.0, WHITE)?;
-            let (row_h, side) = (54.0, 44.0);
-            let mut ry = y + 40.0;
-            for (i, a) in set
-                .achievements
-                .iter()
-                .enumerate()
-                .skip(first)
-                .take(LIST_ROWS)
-            {
-                if i == at {
-                    self.white[v.c].set_color_mod(255, 255, 255);
-                    self.white[v.c].set_alpha_mod(28);
-                    self.canvases[v.c].copy(
-                        &self.white[v.c],
-                        None,
-                        v.rect(x - 8.0, ry - 4.0, width + 16.0, row_h - 2.0),
-                    )?;
-                }
-                let a = a.clone();
-                self.badge(v, &a.badge, a.unlocked, (x, ry, side))?;
-                let tx = x + side + 14.0;
-                let points = format!("{}", a.points);
-                let pw = self.fonts.width(&points, 20.0, true) + 12.0;
-                let colour = if a.unlocked { WHITE } else { DIM };
-                let size = self
-                    .fonts
-                    .fit(&a.title, 22.0, 18.0, width - side - 14.0 - pw, true);
-                self.text(v, &a.title, (size, true), (tx, ry - 2.0), 0.0, colour)?;
-                self.text(
-                    v,
-                    &points,
-                    (20.0, true),
-                    (x + width, ry),
-                    1.0,
-                    if a.unlocked { GOLD } else { FAINT },
-                )?;
-                let desc = self
-                    .fonts
-                    .wrap(&a.description, 17.0, false, width - side - 14.0, 1);
-                if let Some(line) = desc.first() {
-                    self.text(v, line, (17.0, false), (tx, ry + 26.0), 0.0, FAINT)?;
-                }
-                ry += row_h;
-            }
-            if n > LIST_ROWS {
-                let where_ = format!("{}\u{2013}{} of {n}", first + 1, (first + LIST_ROWS).min(n));
-                self.text(v, &where_, (18.0, false), (x + width, y + 4.0), 1.0, FAINT)?;
-            }
-            return Ok(());
-        }
-        self.text(v, "Achievements", (22.0, false), (x, y), 0.0, DIM)?;
-        self.text(v, &set.summary(), (22.0, true), (x, y + 28.0), 0.0, WHITE)?;
-        // How far through the set, by count: a faint track and the part earned in gold.
-        let (bar_y, bar_h) = (y + 66.0, 6.0);
-        let done = if n == 0 {
-            0.0
-        } else {
-            set.unlocked() as f32 / n as f32
-        };
-        let white = &mut self.white[v.c];
-        white.set_color_mod(255, 255, 255);
-        white.set_alpha_mod(28);
-        self.canvases[v.c].copy(white, None, v.rect(x, bar_y, width, bar_h))?;
-        if done > 0.0 {
-            white.set_color_mod(GOLD.r, GOLD.g, GOLD.b);
-            white.set_alpha_mod(255);
-            self.canvases[v.c].copy(white, None, v.rect(x, bar_y, width * done, bar_h))?;
-            white.set_color_mod(255, 255, 255);
-        }
-        Ok(())
-    }
-
     /// The textures that do not change, and the artwork workers, which stop with `scope`.
     pub fn new<'scope>(
         scope: &'scope Scope<'scope, 'a>,
@@ -491,6 +212,7 @@ impl<'a> Ui<'a> {
         (top, bot): (View, View),
         source: (&'a Fonts, &'a Shell, &'a PathBuf),
         looks: art::Looks,
+        ra: &Ra,
     ) -> Result<Ui<'a>, String> {
         let (fonts, shell, cache) = source;
         let creators: Vec<_> = canvases.iter().map(|c| c.texture_creator()).collect();
@@ -544,7 +266,7 @@ impl<'a> Ui<'a> {
             radios: None,
             photos: HashMap::new(),
             resumes: Resumes::start(scope),
-            cheevos: Cheevos::start(scope, cheevos::Store::new(cache)),
+            cheevos: Cheevos::start(ra),
             radio_boxes: Vec::new(),
             glyphs: HashMap::new(),
         })
@@ -993,7 +715,7 @@ impl Ui<'_> {
         stats: &Stats,
         resume: Option<&Wanted>,
         fade: f32,
-        cheevos_list: Option<usize>,
+        cheevos_list: Option<ListView>,
     ) -> Result<(), String> {
         let v = self.top;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
@@ -1066,7 +788,7 @@ impl Ui<'_> {
             self.stars(v, x + 150.0, y + 2.0, stats.rating(&game.path))?;
         }
         let game = game.clone();
-        self.draw_cheevos(g, &game, cheevos_list, (x, y + 52.0), y_list)?;
+        self.draw_cheevos(&game, cheevos_list, (x, y + 52.0), y_list)?;
         self.shade(v, fade)
     }
 
@@ -1113,9 +835,10 @@ impl Ui<'_> {
             .map(|&(bluetooth, _)| bluetooth)
     }
 
-    /// Whether artwork or a resume point is still to come in: it wants drawing when it does.
+    /// Whether artwork, a resume point or achievements are still to come in: they want
+    /// drawing when they do.
     pub fn waiting(&self) -> bool {
-        !self.loader.idle() || !self.resumes.asked.is_empty()
+        !self.loader.idle() || !self.resumes.asked.is_empty() || self.cheevos.waiting()
     }
 
     /// What the status bar shows that changes by itself: the clock, the battery and the
@@ -2396,12 +2119,12 @@ pub struct Page<'a> {
 
 /// Lets go of a texture. The `unsafe_textures` build of SDL2 leaves that to DSlot, which
 /// makes them for one renderer and drops them before it.
-fn destroy(t: Texture) {
+pub(super) fn destroy(t: Texture) {
     // SAFETY: every texture is destroyed once, before the renderer it was made by.
     unsafe { t.destroy() }
 }
 
-fn texture(tc: &TextureCreator<WindowContext>, img: &Img) -> Result<Texture, String> {
+pub(super) fn texture(tc: &TextureCreator<WindowContext>, img: &Img) -> Result<Texture, String> {
     let mut t = tc
         .create_texture_static(PixelFormatEnum::ABGR8888, img.w as u32, img.h as u32)
         .map_err(|e| e.to_string())?;

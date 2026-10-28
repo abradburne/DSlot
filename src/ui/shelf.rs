@@ -82,6 +82,7 @@ pub fn run(
             (top, bot),
             (fonts, shell, &opts.cache),
             settings.look(settings.page),
+            shelf.ra,
         )?;
         let screens = Frame {
             sdl: screens.sdl,
@@ -647,6 +648,7 @@ impl State {
         settings: &mut Settings,
         back: Option<Back>,
         searched: &[Vec<PathBuf>; Console::COUNT],
+        ra: &crate::achievements::Ra,
     ) -> State {
         let back_from = back.as_ref().map(|b| b.game);
         let put_away = back.as_ref().filter(|b| b.put_away).map(|b| b.game);
@@ -688,7 +690,8 @@ impl State {
                 nibkit::input::Repeat::new(first, next)
             },
             // After an update (or one that didn't start), its notice, on the Update page.
-            menu: (put_away.is_none() && crate::update::notice()).then(|| Menu::open_update(game)),
+            menu: (put_away.is_none() && crate::update::notice())
+                .then(|| Menu::open_update(game, ra)),
             power: put_away.map(|g| PowerMenu::open(Some(g))),
             notice,
             kept: [None; Console::COUNT],
@@ -1170,7 +1173,7 @@ fn show(
     let mut panel = if dual { Panel::open() } else { None };
     crate::mark("touch panel ready");
 
-    let mut state = State::new(games, stats, settings, back, &shelf.opts.searched);
+    let mut state = State::new(games, stats, settings, back, &shelf.opts.searched, shelf.ra);
     let mut reader = Reader::default();
     let mut events = sdl.event_pump()?;
     crate::mark("shelf set up");
@@ -1414,7 +1417,7 @@ fn show(
                     state.repeat.stop();
                 }
                 Some(Input::Press(Key::X)) if !games.is_empty() => {
-                    state.menu = Some(Menu::open(state.order.get(state.sel).is_some()))
+                    state.menu = Some(Menu::open(state.order.get(state.sel).is_some(), shelf.ra))
                 }
                 Some(Input::Press(Key::L)) => flip = Some(state.beside(console, -1)),
                 Some(Input::Press(Key::R)) => flip = Some(state.beside(console, 1)),
@@ -1496,13 +1499,13 @@ fn show(
                 emulators,
                 console,
                 game: current,
+                // The selected game's achievements, for the Game page's row and its list.
+                cheevos: current.and_then(|g| ui.cheevos_set(&g.path)),
             };
-            // The selected game's achievements, for the Game page's row and its list.
-            let selected = state.order.get(state.sel).copied();
-            open.ra_set = selected.and_then(|g| ui.cheevos_summary(g));
             let done = open.update(&menu_input, &mut cx);
-            if let (Some(at), Some(g)) = (open.ra_list, selected) {
-                open.ra_list = Some(at.min(ui.cheevos_count(g).saturating_sub(1)));
+            if done.account {
+                // Signed in or out: what was found was the last player's.
+                ui.forget_cheevos();
             }
             if done.power_off {
                 return Ok(Outcome::PowerOff);
@@ -1614,7 +1617,7 @@ fn show(
             });
             if let Some(bluetooth) = hit {
                 let game = state.order.get(state.sel).is_some();
-                state.menu = Some(Menu::open_radio(game, bluetooth));
+                state.menu = Some(Menu::open_radio(game, bluetooth, shelf.ra));
                 pointers.clear();
             }
         }
@@ -1727,7 +1730,7 @@ fn show(
             match current {
                 Some(g) => {
                     let resume = resume_of(shelf, settings, &games[g]);
-                    let browsing = state.menu.as_ref().and_then(|m| m.ra_list);
+                    let browsing = state.menu.as_ref().and_then(|m| m.cheevos_list);
                     ui.draw_top(games, g, stats, resume.as_ref(), fade, browsing)?
                 }
                 None => {
@@ -1769,6 +1772,7 @@ fn show(
                         emulators,
                         console,
                         game,
+                        cheevos: game.and_then(|g| ui.cheevos_set(&g.path)),
                     };
                     ui.draw_menu(&open.shown(&cx), console)?;
                 }

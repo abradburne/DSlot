@@ -257,7 +257,7 @@ pub const SOUNDS: &str = "sounds";
 pub const SHOW_EMPTY: &str = "show_empty_systems";
 pub const SAVER: &str = "screensaver";
 pub const SAVER_LOOK: &str = "screensaver_look";
-/// RetroAchievements: hardcore or softcore (achievements.rs).
+/// RetroAchievements: hardcore or softcore (achievements/).
 pub const ACHIEVEMENTS: &str = "achievements";
 /// The emulator a console's or a game's games start in, by its id.
 pub const EMULATOR: &str = "emulator";

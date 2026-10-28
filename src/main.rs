@@ -276,6 +276,8 @@ fn run() -> Result<(), String> {
     let mut stats = stats::Stats::load(dirs.stats.clone());
     let mut settings = Settings::load(dirs.settings.clone(), &dirs.legacy, &games, &emulators);
     mark("stats and settings loaded");
+    // RetroAchievements: the sign-in kept, and the lookups' cache.
+    let ra = achievements::Ra::new(dirs.achievements.clone(), &opts.cache);
 
     let mut back: Option<ui::Back> = None;
     let mut refresh = false;
@@ -331,6 +333,7 @@ fn run() -> Result<(), String> {
             opts: &opts,
             power: &power,
             rescan: &rescan,
+            ra: &ra,
         };
         // The windows are dropped before the game starts and made again when it exits.
         let open = match screens.take() {
@@ -365,7 +368,7 @@ fn run() -> Result<(), String> {
                 let played = if game.is_app() {
                     start_app(game, &apps, &power).map(|ended| (ended, None))
                 } else {
-                    play(game, &emulators, &settings, &dirs.achievements, &power)
+                    play(game, &emulators, &settings, &ra, &power)
                 };
                 // Why it came straight back, if it did: the shelf says so when it is up again.
                 let (put_away, notice) = match played {
@@ -378,7 +381,7 @@ fn run() -> Result<(), String> {
                 mark("game exited");
                 // Its achievements are asked about again: the game may have earned some.
                 if !game.is_app() {
-                    achievements::set::Store::new(&dirs.cache).played(game.console, &game.path);
+                    ra.played(&game.path);
                 }
                 // And until the shelf's first frame again.
                 hold_last_frame(&opts);
@@ -431,7 +434,7 @@ fn play(
     game: &Game,
     emulators: &Emulators,
     settings: &Settings,
-    token: &Path,
+    ra: &achievements::Ra,
     power: &Requests,
 ) -> Result<(Ended, Option<String>), String> {
     let emulator = launch::emulator_for(emulators, settings, game).ok_or_else(|| {
@@ -444,9 +447,7 @@ fn play(
     let mut launch = Launch::new(emulator, game, &options, platform::saves().as_deref())?;
     // Signed in to RetroAchievements: the emulator is told where the token is (never the
     // password), and whether hardcore was chosen.
-    launch
-        .env
-        .extend(achievements::env(token, settings.hardcore()));
+    launch.env.extend(ra.env(settings.hardcore_chosen()));
     let began = Instant::now();
     let ended = launch
         .run(|| power.take())
@@ -521,7 +522,7 @@ fn launch_one(rom: &Path, dirs: &platform::Dirs) -> Result<(), String> {
         &game,
         &emulators,
         &settings,
-        &dirs.achievements,
+        &achievements::Ra::new(dirs.achievements.clone(), &dirs.cache),
         &nibkit::power::watch(),
     )?;
     std::process::exit(ended.status.code().unwrap_or(1));

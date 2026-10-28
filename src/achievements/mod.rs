@@ -7,7 +7,7 @@
 //! anywhere. The token is kept in a file of its own (`retroachievements.token`, beside
 //! settings.toml, readable by DSlot's user only), two lines, `username` then `token`: the
 //! format DSperate's `--cheevos-token` reads. An emulator gets it through its environment when
-//! a game starts ([`env`]): `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE`; never the
+//! a game starts ([`Ra::env`]): `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE`; never the
 //! password, never a word of it on the command line.
 //!
 //! The requests go through `curl`, on a thread, as nibOS's own tools do (`nib update`,
@@ -17,21 +17,29 @@
 //! The service has no way to make an account from a device: its public API reads data only,
 //! and rcheevos' endpoints sign in, start sessions and award. So the page shows the sign-up
 //! page's address and a QR code of it, for a phone ([`SIGN_UP`], [`qr`]).
+//!
+//! - `hash`: the identity the service gives a ROM.
+//! - `service`: the requests, and how every answer is checked.
+//! - `set`: a game's set and the player's unlocks, kept on disk per player.
+//! - `lookup`: the shelf's worker, looking games up off the shelf's thread.
+//!
+//! [`Ra`] holds where the sign-in and the lookups are kept; main makes it and hands it down.
 
-use std::io::Write;
-use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::mpsc::{channel, Receiver};
-
-/// The service, and the request its clients make.
 pub mod hash;
+pub mod lookup;
+pub mod service;
 pub mod set;
 
-pub const HOST: &str = "https://retroachievements.org";
+pub use service::Error;
+
+use set::Store;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::OnceLock;
+
 /// Where an account is made, on a phone or a computer.
 pub const SIGN_UP: &str = "https://retroachievements.org/createaccount.php";
-/// How long a sign-in waits for the service.
-const TIMEOUT_SECS: u32 = 20;
 
 /// The environment an emulator reads the sign-in from (docs/emulators.md).
 pub const ENV_TOKEN_FILE: &str = "RA_TOKEN_FILE";
@@ -41,19 +49,164 @@ pub const ENV_HARDCORE: &str = "RA_HARDCORE";
 /// Whether hardcore is offered: the Mode row on the Achievements page, and `RA_HARDCORE=1`
 /// for a game. Off until the service approves our emulators for hardcore unlocks
 /// (docs/retroachievements.md); until then every game plays softcore, whatever settings.toml
-/// says.
+/// says ([`Ra::env`]).
 pub const HARDCORE_OFFERED: bool = false;
 /// What the Achievements page says while hardcore isn't offered: Casual is the service's name
 /// for softcore.
 pub const CASUAL_ONLY: &str = "Achievements are Casual for now: RetroAchievements hasn't \
      approved our emulators for Hardcore yet.";
 
-/// Whether the page is offered: `curl` is there to talk to the service.
+/// Whether the page is offered: `curl` is there to talk to the service. Looked for along
+/// `PATH` once a run.
 pub fn available() -> bool {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
-        .chain([std::path::PathBuf::from("/usr/bin")])
-        .any(|dir| dir.join("curl").is_file())
+    static CURL: OnceLock<bool> = OnceLock::new();
+    *CURL.get_or_init(|| {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::split_paths(&path)
+            .chain([PathBuf::from("/usr/bin")])
+            .any(|dir| dir.join("curl").is_file())
+    })
+}
+
+/// RetroAchievements as DSlot keeps it: where the sign-in is kept (the token file), and
+/// where lookups keep what they found. Made once, in main, from the platform's folders, and
+/// handed to whatever needs either.
+#[derive(Clone, Debug)]
+pub struct Ra {
+    /// `retroachievements.token`, beside settings.toml (platform::Dirs::achievements).
+    pub token: PathBuf,
+    pub store: Store,
+}
+
+/// What a sign-in, or a check of the one kept, came to: the sign-in kept and the player's
+/// standing, or why not.
+pub type SignedIn = Result<(Account, Standing), Error>;
+
+impl Ra {
+    /// The token file at `token`, the lookups under DSlot's cache folder `cache`.
+    pub fn new(token: PathBuf, cache: &Path) -> Ra {
+        Ra {
+            token,
+            store: Store::new(cache),
+        }
+    }
+
+    /// Who is signed in, read from the token file now.
+    pub fn account(&self) -> Option<Account> {
+        Account::load(&self.token)
+    }
+
+    /// Signs in with a password: the service answers with the token, which is kept before the
+    /// receiver hears of it, on the request's own thread, so that a sign-in stands even if
+    /// the menu that asked has gone. The password goes to `curl` on its standard input, never
+    /// in an argument, and is written nowhere.
+    pub fn sign_in(&self, user: &str, password: &str) -> Receiver<SignedIn> {
+        let form = service::password_form(user, password);
+        let token = self.token.clone();
+        request(move || keep_sign_in(&token, service::login(&form)))
+    }
+
+    /// Signs in again with the token kept: whether it still stands, and the standing now. A
+    /// token the service refuses is dropped (on the request's thread, as a sign-in is kept),
+    /// unless the file has been changed since.
+    pub fn check(&self, account: Account) -> Receiver<SignedIn> {
+        let token = self.token.clone();
+        request(move || {
+            let form = service::token_form(&account);
+            checked(&token, &account, service::login(&form))
+        })
+    }
+
+    /// Signs out: the token file is removed.
+    pub fn sign_out(&self) {
+        match Account::clear(&self.token) {
+            Ok(()) => eprintln!("dslot: RetroAchievements: signed out"),
+            Err(e) => eprintln!("dslot: cannot remove {}: {e}", self.token.display()),
+        }
+    }
+
+    /// The game at `path` was just played: what is kept of it for the player signed in is
+    /// asked about again. From the hashes index alone, never a read of the ROM: this is on
+    /// the main thread, between the game and the shelf.
+    pub fn played(&self, path: &Path) {
+        if let Some(account) = self.account() {
+            self.store.played(&account.user, path);
+        }
+    }
+
+    /// The environment a game starts with when the player is signed in: where the token file
+    /// is, who it signs in as, and `RA_HARDCORE`: `1` when hardcore was `chosen` (settings.toml)
+    /// and is offered at all ([`HARDCORE_OFFERED`]), else `0`.
+    pub fn env(&self, chosen: bool) -> Vec<(String, String)> {
+        let Some(account) = self.account() else {
+            return Vec::new();
+        };
+        let hardcore = chosen && HARDCORE_OFFERED;
+        vec![
+            (
+                ENV_TOKEN_FILE.into(),
+                self.token.to_string_lossy().into_owned(),
+            ),
+            (ENV_USERNAME.into(), account.user),
+            (ENV_HARDCORE.into(), if hardcore { "1" } else { "0" }.into()),
+        ]
+    }
+}
+
+/// Runs `work` on a thread; what it comes to arrives on the receiver.
+fn request(work: impl FnOnce() -> SignedIn + Send + 'static) -> Receiver<SignedIn> {
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(work());
+    });
+    rx
+}
+
+/// A sign-in's answer, kept: the token written to `path` before anyone is told. A sign-in the
+/// file can't take is no sign-in.
+fn keep_sign_in(path: &Path, answer: Result<(Standing, String), Error>) -> SignedIn {
+    let (standing, token) = answer?;
+    let account = Account {
+        user: standing.user.clone(),
+        token,
+    };
+    account.save(path).map_err(|e| {
+        eprintln!("dslot: cannot write {}: {e}", path.display());
+        Error::Failed(format!("the sign-in couldn't be kept: {e}"))
+    })?;
+    eprintln!("dslot: RetroAchievements: signed in as {}", account.user);
+    Ok((account, standing))
+}
+
+/// A check's answer: the token kept still stands (kept again if the service has given a new
+/// one), or it was refused and is dropped. Either only while the file still holds `kept`: a
+/// sign-out or another sign-in since is left alone.
+fn checked(path: &Path, kept: &Account, answer: Result<(Standing, String), Error>) -> SignedIn {
+    let unchanged = || Account::load(path).as_ref() == Some(kept);
+    match answer {
+        Ok((standing, token)) => {
+            let account = Account {
+                user: standing.user.clone(),
+                token,
+            };
+            if account != *kept && unchanged() {
+                if let Err(e) = account.save(path) {
+                    eprintln!("dslot: cannot write {}: {e}", path.display());
+                }
+            }
+            Ok((account, standing))
+        }
+        Err(Error::Refused(why)) => {
+            eprintln!("dslot: RetroAchievements: the sign-in kept was refused: {why}");
+            if unchanged() {
+                if let Err(e) = Account::clear(path) {
+                    eprintln!("dslot: cannot remove {}: {e}", path.display());
+                }
+            }
+            Err(Error::Refused(why))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// The sign-in kept: who, and the token that stands for them.
@@ -74,27 +227,36 @@ impl Account {
         Some(Account { user, token })
     }
 
-    /// Writes the token file, readable by DSlot's user only.
+    /// Writes the token file, readable by DSlot's user only, whole or not at all: to a file
+    /// beside it first, then renamed over it, so that a crash never leaves half a sign-in.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(path)?;
-        #[cfg(unix)]
-        {
-            // A file from before keeps its mode through truncation: set it again.
-            use std::os::unix::fs::PermissionsExt;
-            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        }
-        write!(file, "{}\n{}\n", self.user, self.token)?;
-        file.sync_all()
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let part = path.with_file_name(format!(".{name}.part"));
+        let write = || -> std::io::Result<()> {
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options.open(&part)?;
+            #[cfg(unix)]
+            {
+                // One left from before keeps its mode through truncation: set it again.
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            }
+            write!(file, "{}\n{}\n", self.user, self.token)?;
+            file.sync_all()?;
+            std::fs::rename(&part, path)
+        };
+        write().inspect_err(|_| {
+            let _ = std::fs::remove_file(&part);
+        })
     }
 
     /// Removes the token file: signed out.
@@ -119,239 +281,28 @@ pub struct Standing {
 }
 
 impl Standing {
-    /// "1,234 points", "softcore 56", both, or "No points yet".
+    /// "1,234 points", "56 softcore points", both, or "No points yet".
     pub fn points(&self) -> String {
-        let n = |v: u64| {
-            let s = v.to_string();
-            let mut out = String::new();
-            for (i, c) in s.chars().enumerate() {
-                if i > 0 && (s.len() - i).is_multiple_of(3) {
-                    out.push(',');
-                }
-                out.push(c);
-            }
-            out
-        };
         match (self.score, self.softcore) {
             (0, 0) => "No points yet".into(),
-            (h, 0) => format!("{} points", n(h)),
-            (0, s) => format!("{} softcore points", n(s)),
-            (h, s) => format!("{} points \u{b7} {} softcore", n(h), n(s)),
+            (h, 0) => format!("{} points", grouped(h)),
+            (0, s) => format!("{} softcore points", grouped(s)),
+            (h, s) => format!("{} points \u{b7} {} softcore", grouped(h), grouped(s)),
         }
     }
 }
 
-/// How a request came out.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    /// Signed in: the player's standing and the token to keep.
-    SignedIn(Standing, String),
-    /// The service said no: wrong password, an unknown user, a token no longer good.
-    Refused(String),
-    /// The service couldn't be reached: no network, or it didn't answer in time.
-    NoNetwork,
-    /// Something else went wrong (an odd answer, `curl` missing).
-    Failed(String),
-}
-
-impl Outcome {
-    /// A line for the row or the title.
-    pub fn text(&self) -> String {
-        match self {
-            Outcome::SignedIn(s, _) => format!("Signed in as {}", s.user),
-            Outcome::Refused(why) => why.clone(),
-            Outcome::NoNetwork => "No network: turn Wi-Fi on and try again".into(),
-            Outcome::Failed(why) => format!("Didn't work: {why}"),
+/// A count in thousands: "1,234,567".
+pub fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
         }
-    }
-}
-
-/// Signs in with a password: the service answers with the token to keep. The password
-/// goes to `curl` on its standard input, never in an argument.
-pub fn sign_in(user: String, password: String) -> Receiver<Outcome> {
-    let form = format!("r=login2&u={}&p={}", urlencode(&user), urlencode(&password));
-    request(form)
-}
-
-/// Signs in again with the token kept: whether it is still good, and the standing now.
-pub fn check(account: &Account) -> Receiver<Outcome> {
-    let form = format!(
-        "r=login2&u={}&t={}",
-        urlencode(&account.user),
-        urlencode(&account.token)
-    );
-    request(form)
-}
-
-/// Posts `form` to the service on a thread; the outcome arrives on the receiver.
-fn request(form: String) -> Receiver<Outcome> {
-    let (tx, rx) = channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(post(&form));
-    });
-    rx
-}
-
-/// `curl`, the form on its standard input, the answer parsed.
-fn post(form: &str) -> Outcome {
-    match call(form) {
-        Ok(body) => parse(Some(0), &body, ""),
-        Err(Fail::NoNetwork) => Outcome::NoNetwork,
-        Err(Fail::Failed(why)) => Outcome::Failed(why),
-    }
-}
-
-/// Why a request got no answer: the service couldn't be reached, or something else, said.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Fail {
-    NoNetwork,
-    Failed(String),
-}
-
-/// Posts `form` to the service's emulator API by `curl`, the form on its standard input
-/// (never in an argument: the token is in it), and gives back the body of the answer.
-pub(crate) fn call(form: &str) -> Result<String, Fail> {
-    let mut child = curl()
-        .args([
-            "-H",
-            "Content-Type: application/x-www-form-urlencoded",
-            "--data-binary",
-            "@-",
-            &format!("{HOST}/dorequest.php"),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| Fail::Failed(format!("curl: {e}")))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(form.as_bytes());
-    }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| Fail::Failed(format!("curl: {e}")))?;
-    exit(out.status.code(), &String::from_utf8_lossy(&out.stderr))?;
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
-}
-
-/// Fetches `url` into `to` by `curl`: written beside it first, so a half-fetched file is
-/// never where a whole one is looked for. A 404 (a badge the service hasn't got) fails.
-pub(crate) fn fetch(url: &str, to: &Path) -> Result<(), Fail> {
-    if let Some(dir) = to.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| Fail::Failed(e.to_string()))?;
-    }
-    let part = to.with_extension("part");
-    let out = curl()
-        .args(["-f", "-o"])
-        .arg(&part)
-        .arg(url)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| Fail::Failed(format!("curl: {e}")))?;
-    let done = exit(out.status.code(), &String::from_utf8_lossy(&out.stderr));
-    if done.is_err() {
-        let _ = std::fs::remove_file(&part);
-    }
-    done?;
-    std::fs::rename(&part, to).map_err(|e| Fail::Failed(e.to_string()))
-}
-
-/// `curl` as DSlot runs it: quiet but for errors, a time limit, DSlot's user agent.
-fn curl() -> Command {
-    let mut c = Command::new("curl");
-    c.args([
-        "-sS",
-        "--max-time",
-        &TIMEOUT_SECS.to_string(),
-        "-A",
-        &format!("DSlot/{}", env!("CARGO_PKG_VERSION")),
-    ]);
-    c
-}
-
-/// `curl`'s exit code as a failure: couldn't resolve, couldn't connect, timed out and SSL
-/// couldn't connect are no network; anything else but 0 is what it said.
-fn exit(code: Option<i32>, stderr: &str) -> Result<(), Fail> {
-    match code {
-        Some(0) => Ok(()),
-        Some(6 | 7 | 28 | 35) => Err(Fail::NoNetwork),
-        Some(c) => {
-            let why = stderr.lines().next().unwrap_or("").trim();
-            Err(Fail::Failed(if why.is_empty() {
-                format!("curl exited with {c}")
-            } else {
-                why.to_owned()
-            }))
-        }
-        None => Err(Fail::Failed("curl was killed".into())),
-    }
-}
-
-/// `curl`'s exit code and output, as an outcome. Nothing of the request is in it.
-pub fn parse(code: Option<i32>, body: &str, stderr: &str) -> Outcome {
-    match exit(code, stderr) {
-        Ok(()) => {}
-        Err(Fail::NoNetwork) => return Outcome::NoNetwork,
-        Err(Fail::Failed(why)) => return Outcome::Failed(why),
-    }
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
-        return Outcome::Failed("the service answered with something other than JSON".into());
-    };
-    let text = |key: &str| json.get(key).and_then(|v| v.as_str()).map(str::to_owned);
-    let num = |key: &str| json.get(key).and_then(|v| v.as_u64()).unwrap_or(0);
-    if json.get("Success").and_then(|v| v.as_bool()) != Some(true) {
-        let why = text("Error").unwrap_or_else(|| "The service said no".into());
-        return Outcome::Refused(plain(&why));
-    }
-    match (text("User"), text("Token")) {
-        (Some(user), Some(token)) if !user.is_empty() && !token.is_empty() => Outcome::SignedIn(
-            Standing {
-                user,
-                score: num("Score"),
-                softcore: num("SoftcoreScore"),
-                messages: num("Messages"),
-            },
-            token,
-        ),
-        _ => Outcome::Failed("the service's answer had no token in it".into()),
-    }
-}
-
-/// The service's error messages, without their HTML escapes and trailing exhortations.
-fn plain(why: &str) -> String {
-    let why = why.replace("\\/", "/");
-    let why = why.trim_end_matches(" Please try again.").trim();
-    why.to_owned()
-}
-
-/// application/x-www-form-urlencoded: letters, digits and `-_.~` as they are, the rest as
-/// `%XX` of their UTF-8 bytes.
-pub fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
+        out.push(c);
     }
     out
-}
-
-/// The environment a game starts with when the player is signed in: where the token file
-/// is, who it signs in as, and whether they chose hardcore (`1`) or softcore (`0`).
-pub fn env(token: &Path, hardcore: bool) -> Vec<(String, String)> {
-    let Some(account) = Account::load(token) else {
-        return Vec::new();
-    };
-    vec![
-        (ENV_TOKEN_FILE.into(), token.to_string_lossy().into_owned()),
-        (ENV_USERNAME.into(), account.user),
-        (ENV_HARDCORE.into(), if hardcore { "1" } else { "0" }.into()),
-    ]
 }
 
 /// A QR code, for the sign-up page's address: `size` modules a side, row by row, dark ones true.
@@ -388,48 +339,12 @@ mod tests {
     use super::*;
     use crate::testing::TempDir;
 
-    #[test]
-    fn a_sign_in_is_parsed() {
-        let body = r#"{"Success":true,"User":"Alan","Token":"abc123","Score":1234,"SoftcoreScore":5,"Messages":0,"AvatarUrl":"x"}"#;
-        assert_eq!(
-            parse(Some(0), body, ""),
-            Outcome::SignedIn(
-                Standing {
-                    user: "Alan".into(),
-                    score: 1234,
-                    softcore: 5,
-                    messages: 0,
-                },
-                "abc123".into()
-            )
-        );
-    }
-
-    #[test]
-    fn a_refusal_and_the_rest() {
-        let body = r#"{"Success":false,"Status":401,"Code":"invalid_credentials","Error":"Invalid user\/password combination. Please try again."}"#;
-        assert_eq!(
-            parse(Some(0), body, ""),
-            Outcome::Refused("Invalid user/password combination.".into())
-        );
-        assert_eq!(
-            parse(Some(6), "", "curl: (6) Could not resolve host"),
-            Outcome::NoNetwork
-        );
-        assert_eq!(parse(Some(28), "", ""), Outcome::NoNetwork);
-        assert!(matches!(parse(Some(0), "<html>", ""), Outcome::Failed(_)));
-        assert!(matches!(
-            parse(Some(0), r#"{"Success":true,"User":"x"}"#, ""),
-            Outcome::Failed(_)
-        ));
-        assert_eq!(
-            parse(
-                Some(22),
-                "",
-                "curl: (22) The requested URL returned error: 500"
-            ),
-            Outcome::Failed("curl: (22) The requested URL returned error: 500".into())
-        );
+    fn standing(user: &str) -> Standing {
+        Standing {
+            user: user.into(),
+            score: 1,
+            ..Standing::default()
+        }
     }
 
     #[test]
@@ -443,12 +358,9 @@ mod tests {
         assert_eq!(s(1234567, 0).points(), "1,234,567 points");
         assert_eq!(s(0, 56).points(), "56 softcore points");
         assert_eq!(s(1000, 999).points(), "1,000 points \u{b7} 999 softcore");
-    }
-
-    #[test]
-    fn the_form_is_encoded() {
-        assert_eq!(urlencode("Al-an_.~"), "Al-an_.~");
-        assert_eq!(urlencode("p&ss w=rd/é"), "p%26ss%20w%3Drd%2F%C3%A9");
+        assert_eq!(grouped(0), "0");
+        assert_eq!(grouped(100), "100");
+        assert_eq!(grouped(1000), "1,000");
     }
 
     #[test]
@@ -473,18 +385,95 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
-        let vars = env(&path, true);
-        assert_eq!(vars[0].0, "RA_TOKEN_FILE");
-        assert_eq!(vars[1], ("RA_USERNAME".to_owned(), "Alan".to_owned()));
-        assert_eq!(vars[2], ("RA_HARDCORE".to_owned(), "1".to_owned()));
-        assert_eq!(vars.len(), 3);
+        // Written beside it and renamed: nothing else is left in the folder.
+        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["retroachievements.token"]);
         // A half file is no sign-in.
         std::fs::write(&path, "Alan\n").unwrap();
         assert_eq!(Account::load(&path), None);
-        assert!(env(&path, false).is_empty());
         Account::clear(&path).unwrap();
         Account::clear(&path).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_game_gets_the_sign_in_and_hardcore_only_where_it_is_offered() {
+        let dir = TempDir::new("ra-env");
+        let ra = Ra::new(dir.path().join("retroachievements.token"), dir.path());
+        assert!(ra.env(true).is_empty(), "signed out: nothing");
+        Account {
+            user: "Alan".into(),
+            token: "t0k3n".into(),
+        }
+        .save(&ra.token)
+        .unwrap();
+        let vars = ra.env(true);
+        assert_eq!(
+            vars[0],
+            (
+                "RA_TOKEN_FILE".to_owned(),
+                ra.token.to_string_lossy().into_owned()
+            )
+        );
+        assert_eq!(vars[1], ("RA_USERNAME".to_owned(), "Alan".to_owned()));
+        let hardcore = if HARDCORE_OFFERED { "1" } else { "0" };
+        assert_eq!(vars[2], ("RA_HARDCORE".to_owned(), hardcore.to_owned()));
+        assert_eq!(vars.len(), 3);
+        assert_eq!(ra.env(false)[2].1, "0");
+    }
+
+    #[test]
+    fn a_sign_in_is_kept_before_anyone_hears_of_it() {
+        let dir = TempDir::new("ra-sign-in");
+        let path = dir.path().join("retroachievements.token");
+        let got = keep_sign_in(&path, Ok((standing("Alan"), "t0k3n".into())));
+        let account = Account {
+            user: "Alan".into(),
+            token: "t0k3n".into(),
+        };
+        assert_eq!(got, Ok((account.clone(), standing("Alan"))));
+        assert_eq!(Account::load(&path), Some(account));
+        // Refused: nothing written, the service's words passed on.
+        let other = dir.path().join("other.token");
+        let refused = keep_sign_in(&other, Err(Error::Refused("Invalid".into())));
+        assert_eq!(refused, Err(Error::Refused("Invalid".into())));
+        assert!(!other.exists());
+    }
+
+    #[test]
+    fn a_refused_check_drops_the_token_unless_it_changed_since() {
+        let dir = TempDir::new("ra-check");
+        let path = dir.path().join("retroachievements.token");
+        let alan = Account {
+            user: "Alan".into(),
+            token: "old".into(),
+        };
+        alan.save(&path).unwrap();
+        // Still good, with a new token: the new one is kept.
+        let got = checked(&path, &alan, Ok((standing("Alan"), "new".into())));
+        let renewed = Account {
+            user: "Alan".into(),
+            token: "new".into(),
+        };
+        assert_eq!(got.unwrap().0, renewed);
+        assert_eq!(Account::load(&path), Some(renewed.clone()));
+        // Refused, but someone else signed in meanwhile: theirs stands.
+        let refused = || Err(Error::Refused("Expired".into()));
+        assert!(checked(&path, &alan, refused()).is_err());
+        assert_eq!(Account::load(&path), Some(renewed.clone()));
+        // Refused, the file as it was checked: dropped.
+        assert!(checked(&path, &renewed, refused()).is_err());
+        assert!(!path.exists());
+        // No network: the sign-in kept stands as it is.
+        renewed.save(&path).unwrap();
+        assert_eq!(
+            checked(&path, &renewed, Err(Error::NoNetwork)),
+            Err(Error::NoNetwork)
+        );
+        assert!(path.exists());
     }
 
     #[test]

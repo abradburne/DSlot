@@ -2,29 +2,26 @@
 //! the player has, looked up by the ROM's hash (hash.rs) and kept on disk, so that the shelf
 //! shows them without the network and doesn't ask the service each time a game is selected.
 //!
-//! Two requests of the emulator API, with the sign-in kept: `patch` (the set, by the hash:
-//! each achievement's title, description, points and badge name) and `unlocks` (the ids the
-//! player has, softcore then hardcore). The badges are small PNGs from the service's media
-//! host, kept in a folder DSperate shares, by name.
+//! What is kept is the signed-in player's: `achievements/<user>/<hash>.json`, so that another
+//! account's unlocks are never shown, nor taken for what changed since. The hashes index
+//! (`achievements/hashes.tsv`, a ROM's path, size and date against its hash) is anyone's. The
+//! badges are small PNGs from the service's media host, kept in a folder DSperate shares, by
+//! name.
 
-use super::{call, fetch, hash, urlencode, Account, Fail};
+use super::service::{self, Error, WARNING_ID};
+use super::{hash, Account};
 use crate::rom::Console;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-/// The media host the badges come from.
-pub const MEDIA: &str = "https://media.retroachievements.org";
 /// How long a lookup stands before the service is asked again; a game just played is asked
 /// about again at once (`played`).
 const FRESH: Duration = Duration::from_secs(6 * 60 * 60);
-/// `Flags` of an achievement in the set proper; others are unofficial, not shown.
-const CORE: u64 = 3;
-/// The first id of the service's own "Warning: Unknown Emulator" entries ("Hardcore unlocks
-/// cannot be earned using this emulator"), which it puts in the set of an emulator it doesn't
-/// know, earned already. Not achievements: never shown or counted, as DSperate and inkdot
-/// leave them out too, while hardcore isn't offered (achievements::HARDCORE_OFFERED).
-const WARNING_ID: u32 = 101_000_001;
+/// The hashes index, in the cache folder.
+const INDEX: &str = "hashes.tsv";
 
 /// One achievement, as the shelf shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,23 +61,32 @@ impl Set {
         })
     }
 
-    /// "12 of 40 · 150 of 400 points"
+    /// "12 of 40 · 150 of 400 points", "1,000 of 1,250 points" grouped as the standing is.
     pub fn summary(&self) -> String {
         let (got, all) = self.points();
         format!(
-            "{} of {} \u{b7} {got} of {all} points",
-            self.unlocked(),
-            self.achievements.len()
+            "{} of {} \u{b7} {} of {} points",
+            super::grouped(self.unlocked() as u64),
+            super::grouped(self.achievements.len() as u64),
+            super::grouped(got.into()),
+            super::grouped(all.into()),
         )
     }
 }
 
-/// What a lookup found.
+/// What a lookup comes to, for the shelf.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Found {
+pub enum Answer {
+    /// Nothing to show: signed out, a console the service's hash isn't reproduced for, a ROM
+    /// that can't be read, or no network with nothing kept.
+    Nothing,
     /// The service doesn't know this ROM.
     Unknown,
-    Set(Set),
+    /// The set, and the player's standing in it. Shared, not copied, by whoever shows it.
+    Set(Arc<Set>),
+    /// The service refused the sign-in kept (a token revoked by a password change, say), and
+    /// nothing fresh is kept: the player is to sign in again.
+    Refused,
 }
 
 /// What is kept for a hash: when it was fetched, and what.
@@ -90,10 +96,19 @@ struct Cached {
     set: Option<Set>,
 }
 
+impl Cached {
+    fn answer(&self) -> Answer {
+        match &self.set {
+            Some(s) => Answer::Set(Arc::new(s.clone())),
+            None => Answer::Unknown,
+        }
+    }
+}
+
 /// Where lookups keep what they found.
 #[derive(Clone, Debug)]
 pub struct Store {
-    /// DSlot's cache: `achievements/<hash>.json` and the hashes index.
+    /// DSlot's cache: `achievements/<user>/<hash>.json` and the hashes index.
     pub cache: PathBuf,
     /// The badges, shared with the emulators: `~/.cache/retroachievements/badges/<name>.png`.
     pub badges: PathBuf,
@@ -114,8 +129,21 @@ impl Store {
         }
     }
 
-    fn file(&self, hash: &str) -> PathBuf {
-        self.cache.join(format!("{hash}.json"))
+    /// The player's own folder: their name as the service spells it, anything but letters,
+    /// digits, `-` and `_` made `_`, so that no name reaches outside the cache.
+    fn folder(&self, user: &str) -> PathBuf {
+        let name: String = user
+            .chars()
+            .map(|c| match c {
+                'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => c,
+                _ => '_',
+            })
+            .collect();
+        self.cache.join(if name.is_empty() { "_" } else { &name })
+    }
+
+    fn file(&self, user: &str, hash: &str) -> PathBuf {
+        self.folder(user).join(format!("{hash}.json"))
     }
 
     /// The badge's file, fetched when it isn't there yet. None when it can't be had.
@@ -127,51 +155,45 @@ impl Store {
         if file.is_file() {
             return Some(file);
         }
-        match fetch(&format!("{MEDIA}/Badge/{name}.png"), &file) {
-            Ok(()) => Some(file),
-            Err(_) => None,
-        }
+        service::badge(name, &file).ok().map(|()| file)
+    }
+
+    /// The hash the index has for the ROM as it is now (its size and date unchanged), without
+    /// reading the ROM: for the main thread, which mustn't wait on a read of a whole game.
+    pub fn indexed(&self, path: &Path) -> Option<String> {
+        let (key, stamp) = index_key(path)?;
+        let known = std::fs::read_to_string(self.cache.join(INDEX)).ok()?;
+        find(&known, &key, &stamp)
     }
 
     /// The hash of a ROM, from the index when the file hasn't changed since, else worked out
-    /// and remembered: a DS ROM's takes a read of a few megabytes.
+    /// and remembered: a DS ROM's takes a read of a few megabytes, a GBA ROM's all of it.
     pub fn hash(&self, console: Console, path: &Path) -> Option<String> {
-        let index = self.cache.join("hashes.tsv");
-        let meta = std::fs::metadata(path).ok()?;
-        let stamp = format!(
-            "{}\t{}",
-            meta.len(),
-            meta.modified()
-                .ok()
-                .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs())
-        );
-        let key = path.to_string_lossy();
+        let index = self.cache.join(INDEX);
+        let Some((key, stamp)) = index_key(path) else {
+            // A path the index can't hold (a tab or a newline in it): worked out every time.
+            return hash::of(console, path);
+        };
         let known = std::fs::read_to_string(&index).unwrap_or_default();
-        for line in known.lines() {
-            let mut f = line.rsplitn(2, '\t');
-            let (hash, rest) = (f.next()?, f.next()?);
-            if let Some(p) = rest.strip_suffix(&format!("\t{stamp}")) {
-                if p == key {
-                    return Some(hash.to_owned());
-                }
-            }
+        if let Some(hash) = find(&known, &key, &stamp) {
+            return Some(hash);
         }
         let hash = hash::of(console, path)?;
-        let _ = std::fs::create_dir_all(&self.cache);
         let mut lines: Vec<&str> = known
             .lines()
-            .filter(|l| !l.starts_with(&format!("{key}\t")))
+            .filter(|l| !l.is_empty() && !l.starts_with(&format!("{key}\t")))
             .collect();
         let line = format!("{key}\t{stamp}\t{hash}");
         lines.push(&line);
-        let _ = std::fs::write(&index, lines.join("\n") + "\n");
+        if let Err(e) = write_whole(&index, &(lines.join("\n") + "\n")) {
+            eprintln!("dslot: cannot write {}: {e}", index.display());
+        }
         Some(hash)
     }
 
-    /// What is kept for the hash, however old.
-    fn cached(&self, hash: &str) -> Option<Cached> {
-        let text = std::fs::read_to_string(self.file(hash)).ok()?;
+    /// What is kept for the player and the hash, however old.
+    fn cached(&self, user: &str, hash: &str) -> Option<Cached> {
+        let text = std::fs::read_to_string(self.file(user, hash)).ok()?;
         let mut cached: Cached = serde_json::from_str(&text).ok()?;
         // Kept before the warning entries were left out.
         if let Some(set) = &mut cached.set {
@@ -180,66 +202,120 @@ impl Store {
         Some(cached)
     }
 
-    fn keep(&self, hash: &str, cached: &Cached) {
-        let _ = std::fs::create_dir_all(&self.cache);
+    fn keep(&self, user: &str, hash: &str, cached: &Cached) {
         if let Ok(text) = serde_json::to_string(cached) {
-            let _ = std::fs::write(self.file(hash), text);
+            let _ = write_whole(&self.file(user, hash), &text);
         }
     }
 
-    /// The game was just played: what is kept for it is asked about again next time.
-    pub fn played(&self, console: Console, path: &Path) {
-        let Some(hash) = self.hash(console, path) else {
+    /// The game was just played: what is kept of it for the player is asked about again next
+    /// time. From the index alone: a ROM never looked up has nothing kept to make stale.
+    pub fn played(&self, user: &str, path: &Path) {
+        let Some(hash) = self.indexed(path) else {
             return;
         };
-        if let Some(mut cached) = self.cached(&hash) {
+        if let Some(mut cached) = self.cached(user, &hash) {
             cached.fetched = 0;
-            self.keep(&hash, &cached);
+            self.keep(user, &hash, &cached);
         }
     }
 
-    /// A game's achievements: from the cache while it's fresh, else from the service, which
-    /// needs the sign-in; with no network, whatever is kept. None when nothing is known.
-    pub fn look_up(
+    /// A game's achievements for the player signed in: from the cache while it's fresh, else
+    /// from the service; with no network, or the service failing, whatever is kept. Signed
+    /// out, nothing: what is kept is the last player's, not for anyone.
+    pub fn look_up(&self, account: Option<&Account>, console: Console, path: &Path) -> Answer {
+        self.look_up_by(account, console, path, service::set)
+    }
+
+    /// `look_up`, with the request that fetches a set given (the service's, or a test's).
+    fn look_up_by(
         &self,
         account: Option<&Account>,
         console: Console,
         path: &Path,
-    ) -> Option<Found> {
-        let hash = self.hash(console, path)?;
-        let kept = self.cached(&hash);
+        fetch: impl FnOnce(&Account, &str) -> Result<Option<Set>, Error>,
+    ) -> Answer {
+        let Some(account) = account else {
+            return Answer::Nothing;
+        };
+        let Some(hash) = self.hash(console, path) else {
+            return Answer::Nothing;
+        };
+        let user = account.user.as_str();
+        let kept = self.cached(user, &hash);
         let now = unix_now();
         if let Some(c) = &kept {
             if c.fetched + FRESH.as_secs() > now {
-                return Some(found(&c.set));
+                return c.answer();
             }
         }
-        let Some(account) = account else {
-            return kept.map(|c| found(&c.set));
-        };
-        match fetch_set(account, &hash) {
+        match fetch(account, &hash) {
             Ok(set) => {
                 let before = kept.and_then(|c| c.set);
                 let set = set.map(|s| dated(s, before.as_ref(), now));
                 let cached = Cached { fetched: now, set };
-                self.keep(&hash, &cached);
-                Some(found(&cached.set))
+                self.keep(user, &hash, &cached);
+                cached.answer()
+            }
+            Err(Error::Refused(why)) => {
+                eprintln!("dslot: RetroAchievements: the sign-in kept was refused: {why}");
+                Answer::Refused
             }
             Err(why) => {
-                if let Fail::Failed(w) = &why {
+                if let Error::Failed(w) = &why {
                     eprintln!("dslot: RetroAchievements: {w}");
                 }
-                kept.map(|c| found(&c.set))
+                kept.map_or(Answer::Nothing, |c| c.answer())
             }
         }
     }
 }
 
-fn found(set: &Option<Set>) -> Found {
-    match set {
-        Some(s) => Found::Set(s.clone()),
-        None => Found::Unknown,
+/// What the index files a ROM under: its path, and its size and date as `size\tseconds`.
+/// None for a file that isn't there, or a path with a tab or a newline in it, which would
+/// break the index's lines.
+fn index_key(path: &Path) -> Option<(String, String)> {
+    let meta = std::fs::metadata(path).ok()?;
+    let key = path.to_string_lossy();
+    if key.contains(['\t', '\n', '\r']) {
+        return None;
     }
+    let stamp = format!(
+        "{}\t{}",
+        meta.len(),
+        meta.modified()
+            .ok()
+            .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs())
+    );
+    Some((key.into_owned(), stamp))
+}
+
+/// The hash on the index's line for `key` with `stamp`. A line not shaped as the index's
+/// (cut short by a crash, say) is passed over, not the end of the index.
+fn find(known: &str, key: &str, stamp: &str) -> Option<String> {
+    let tail = format!("\t{stamp}");
+    known.lines().find_map(|line| {
+        let (rest, hash) = line.rsplit_once('\t')?;
+        (rest.strip_suffix(&tail)? == key && !hash.is_empty()).then(|| hash.to_owned())
+    })
+}
+
+/// Writes `text` to `to` whole or not at all: to a file beside it first, then renamed over it,
+/// so that a crash or a second writer never leaves half a file where it is read.
+fn write_whole(to: &Path, text: &str) -> std::io::Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    if let Some(dir) = to.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let name = to.file_name().unwrap_or_default().to_string_lossy();
+    let part = to.with_file_name(format!(".{name}.{}.{n}.part", std::process::id()));
+    std::fs::write(&part, text)
+        .and_then(|()| std::fs::rename(&part, to))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&part);
+        })
 }
 
 /// `set` as just fetched, with when each achievement was earned: kept from `before` (what the
@@ -266,168 +342,63 @@ fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// The set for a hash and the player's unlocks in it, from the service. Ok(None): the service
-/// doesn't know the ROM.
-fn fetch_set(account: &Account, hash: &str) -> Result<Option<Set>, Fail> {
-    let auth = format!(
-        "u={}&t={}",
-        urlencode(&account.user),
-        urlencode(&account.token)
-    );
-    let body = call(&format!("r=patch&{auth}&m={}", urlencode(hash)))?;
-    let Some(mut set) = parse_patch(&body)? else {
-        return Ok(None);
-    };
-    let mut unlocked = Vec::new();
-    for hardcore in [0, 1] {
-        let body = call(&format!("r=unlocks&{auth}&g={}&h={hardcore}", set.id))?;
-        unlocked.extend(parse_unlocks(&body)?);
-    }
-    for a in &mut set.achievements {
-        a.unlocked = unlocked.contains(&a.id);
-    }
-    Ok(Some(set))
-}
-
-/// The `patch` answer: the set, or None when the service says it doesn't know the game.
-pub fn parse_patch(body: &str) -> Result<Option<Set>, Fail> {
-    let json: serde_json::Value = serde_json::from_str(body)
-        .map_err(|_| Fail::Failed("the service answered with something other than JSON".into()))?;
-    if json.get("Success").and_then(|v| v.as_bool()) != Some(true) {
-        let why = json
-            .get("Error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("the service said no");
-        // An unknown hash is answered with an error naming it, not a set: that's an answer.
-        let why_l = why.to_ascii_lowercase();
-        if why_l.contains("unknown game")
-            || why_l.contains("not found")
-            || why_l.contains("no game")
-        {
-            return Ok(None);
-        }
-        return Err(Fail::Failed(why.to_owned()));
-    }
-    let Some(data) = json.get("PatchData") else {
-        return Err(Fail::Failed("the service's answer had no set in it".into()));
-    };
-    let id = data.get("ID").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    if id == 0 {
-        return Ok(None);
-    }
-    let title = data
-        .get("Title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
-    let text = |a: &serde_json::Value, key: &str| {
-        a.get(key)
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_owned()
-    };
-    let achievements = data
-        .get("Achievements")
-        .and_then(|v| v.as_array())
-        .map(|list| {
-            list.iter()
-                .filter(|a| a.get("Flags").and_then(|v| v.as_u64()) == Some(CORE))
-                .map(|a| Achievement {
-                    id: a.get("ID").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                    title: text(a, "Title"),
-                    description: text(a, "Description"),
-                    points: a.get("Points").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                    badge: text(a, "BadgeName"),
-                    unlocked: false,
-                    unlocked_at: None,
-                })
-                .filter(|a| a.id < WARNING_ID)
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(Some(Set {
-        id,
-        title,
-        achievements,
-    }))
-}
-
-/// The `unlocks` answer: the ids the player has.
-pub fn parse_unlocks(body: &str) -> Result<Vec<u32>, Fail> {
-    let json: serde_json::Value = serde_json::from_str(body)
-        .map_err(|_| Fail::Failed("the service answered with something other than JSON".into()))?;
-    if json.get("Success").and_then(|v| v.as_bool()) != Some(true) {
-        let why = json
-            .get("Error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("the service said no");
-        return Err(Fail::Failed(why.to_owned()));
-    }
-    Ok(json
-        .get("UserUnlocks")
-        .and_then(|v| v.as_array())
-        .map(|ids| {
-            ids.iter()
-                .filter_map(|v| v.as_u64())
-                .map(|v| v as u32)
-                .collect()
-        })
-        .unwrap_or_default())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const PATCH: &str = r#"{"Success":true,"PatchData":{"ID":12345,"Title":"Advance Wars: Days of Ruin","ConsoleID":18,"ImageIcon":"/Images/000001.png","Achievements":[
-      {"ID":1,"Title":"First Blood","Description":"Win a battle","Points":5,"Flags":3,"BadgeName":"00001","MemAddr":"0x1=1"},
-      {"ID":2,"Title":"Test only","Description":"Unofficial","Points":1,"Flags":5,"BadgeName":"00002","MemAddr":"0x1=1"},
-      {"ID":3,"Title":"Veteran","Description":"Win ten","Points":25,"Flags":3,"BadgeName":"00003","MemAddr":"0x1=1"},
-      {"ID":101000001,"Title":"Warning: Unknown Emulator","Description":"Hardcore unlocks cannot be earned using this emulator.","Points":0,"Flags":3,"BadgeName":"00000","MemAddr":"0=1"}
-    ],"Leaderboards":[]}}"#;
+    fn set(unlocked: &[u32]) -> Set {
+        let one = |id: u32, points| Achievement {
+            id,
+            title: format!("Achievement {id}"),
+            description: String::new(),
+            points,
+            badge: format!("{id:05}"),
+            unlocked: unlocked.contains(&id),
+            unlocked_at: None,
+        };
+        Set {
+            id: 12345,
+            title: "Advance Wars: Days of Ruin".into(),
+            achievements: vec![one(1, 5), one(3, 25)],
+        }
+    }
+
+    fn account(user: &str) -> Account {
+        Account {
+            user: user.into(),
+            token: format!("{user}-token"),
+        }
+    }
+
+    fn store(dir: &crate::testing::TempDir) -> Store {
+        Store {
+            cache: dir.path().join("cache"),
+            badges: dir.path().join("badges"),
+        }
+    }
 
     #[test]
-    fn a_set_with_its_core_achievements() {
-        let set = parse_patch(PATCH).unwrap().unwrap();
-        assert_eq!(
-            (set.id, set.title.as_str()),
-            (12345, "Advance Wars: Days of Ruin")
-        );
-        assert_eq!(set.achievements.len(), 2);
-        assert_eq!(set.achievements[1].badge, "00003");
-        assert_eq!(set.points(), (0, 30));
-        let ids = parse_unlocks(r#"{"Success":true,"UserUnlocks":[3,99],"GameID":12345}"#).unwrap();
-        assert_eq!(ids, [3, 99]);
-        let mut set = set;
-        for a in &mut set.achievements {
-            a.unlocked = ids.contains(&a.id);
-        }
-        assert_eq!(set.summary(), "1 of 2 \u{b7} 25 of 30 points");
+    fn the_summary_counts_and_groups() {
+        assert_eq!(set(&[3]).summary(), "1 of 2 \u{b7} 25 of 30 points");
+        let mut big = set(&[1, 3]);
+        big.achievements[0].points = 1000;
+        assert_eq!(big.summary(), "2 of 2 \u{b7} 1,025 of 1,025 points");
     }
 
     #[test]
     fn earned_since_the_last_lookup_is_dated() {
-        let set = parse_patch(PATCH).unwrap().unwrap();
-        let earned = |ids: &[u32]| {
-            let mut s = set.clone();
-            for a in &mut s.achievements {
-                a.unlocked = ids.contains(&a.id);
-            }
-            s
-        };
         // The first lookup: earned already, but when isn't known.
-        let first = dated(earned(&[1]), None, 100);
+        let first = dated(set(&[1]), None, 100);
         assert_eq!(first.achievements[0].unlocked_at, None);
-        // Veteran earned since: dated by the lookup that found it; First Blood stays unknown.
-        let second = dated(earned(&[1, 3]), Some(&first), 200);
+        // 3 earned since: dated by the lookup that found it; 1 stays unknown.
+        let second = dated(set(&[1, 3]), Some(&first), 200);
         let at: Vec<_> = second.achievements.iter().map(|a| a.unlocked_at).collect();
         assert_eq!(at, [None, Some(200)]);
         // Asked again later: the date is kept, not moved on.
-        let third = dated(earned(&[1, 3]), Some(&second), 300);
+        let third = dated(set(&[1, 3]), Some(&second), 300);
         assert_eq!(third.achievements[1].unlocked_at, Some(200));
         // Reset on the site: no longer earned, no date.
-        let reset = dated(earned(&[1]), Some(&third), 400);
+        let reset = dated(set(&[1]), Some(&third), 400);
         assert_eq!(reset.achievements[1].unlocked_at, None);
         // Kept on disk as it was; a cache from before the dates still reads.
         let text = serde_json::to_string(&third).unwrap();
@@ -438,55 +409,119 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_refused() {
+    fn kept_on_disk_and_asked_again_after_a_game() {
+        let dir = crate::testing::TempDir::new("ra-set");
+        let store = store(&dir);
+        let rom = dir.path().join("Game.gba");
+        std::fs::write(&rom, b"a gba game").unwrap();
+        let alan = account("Alan");
+        let asked = std::cell::Cell::new(0);
+        let service = |found: Option<Set>| {
+            let asked = &asked;
+            move |_: &Account, _: &str| {
+                asked.set(asked.get() + 1);
+                Ok(found)
+            }
+        };
+        let got = store.look_up_by(Some(&alan), Console::Gba, &rom, service(Some(set(&[3]))));
+        assert_eq!(got, Answer::Set(Arc::new(set(&[3]))));
+        let hash = store.indexed(&rom).unwrap();
+        assert!(store.file("Alan", &hash).is_file());
+        // Fresh: the service isn't asked again.
+        let again = store.look_up_by(Some(&alan), Console::Gba, &rom, service(None));
+        assert_eq!((again, asked.get()), (Answer::Set(Arc::new(set(&[3]))), 1));
+        // Played: asked again, and what it says now is kept, with 1 dated.
+        store.played("Alan", &rom);
+        assert_eq!(store.cached("Alan", &hash).unwrap().fetched, 0);
+        let Answer::Set(now) =
+            store.look_up_by(Some(&alan), Console::Gba, &rom, service(Some(set(&[1, 3]))))
+        else {
+            panic!("a set");
+        };
+        assert_eq!(asked.get(), 2);
+        assert!(now.achievements[0].unlocked_at.is_some());
+        // Stale and no network: what is kept. Refused: sign in again.
+        store.played("Alan", &rom);
+        let offline = store.look_up_by(Some(&alan), Console::Gba, &rom, |_, _| {
+            Err(Error::NoNetwork)
+        });
+        assert_eq!(offline, Answer::Set(now.clone()));
+        let refused = store.look_up_by(Some(&alan), Console::Gba, &rom, |_, _| {
+            Err(Error::Refused("Expired".into()))
+        });
+        assert_eq!(refused, Answer::Refused);
+        // The service not knowing it is kept too.
+        store.played("Alan", &rom);
+        let unknown = store.look_up_by(Some(&alan), Console::Gba, &rom, service(None));
+        assert_eq!(unknown, Answer::Unknown);
         assert_eq!(
-            parse_patch(r#"{"Success":false,"Error":"Unknown game"}"#).unwrap(),
-            None
+            store.look_up_by(Some(&alan), Console::Gba, &rom, service(Some(set(&[])))),
+            Answer::Unknown
         );
-        assert_eq!(
-            parse_patch(r#"{"Success":false,"Error":"Credentials invalid (0)"}"#),
-            Err(Fail::Failed("Credentials invalid (0)".into()))
-        );
-        assert!(parse_unlocks("not json").is_err());
+        assert_eq!(store.badge("../etc"), None);
     }
 
     #[test]
-    fn kept_on_disk_and_asked_again_after_a_game() {
-        let dir = crate::testing::TempDir::new("ra-set");
-        let store = Store {
-            cache: dir.path().join("cache"),
-            badges: dir.path().join("badges"),
-        };
+    fn another_players_unlocks_are_never_shown_and_signed_out_nothing_is() {
+        let dir = crate::testing::TempDir::new("ra-set-users");
+        let store = store(&dir);
         let rom = dir.path().join("Game.gba");
         std::fs::write(&rom, b"a gba game").unwrap();
-        let hash = store.hash(Console::Gba, &rom).unwrap();
-        // Remembered: the same again without reading the ROM.
+        let ok = |s: Set| move |_: &Account, _: &str| Ok(Some(s));
+        let alan = store.look_up_by(Some(&account("Alan")), Console::Gba, &rom, ok(set(&[1, 3])));
+        assert_eq!(alan, Answer::Set(Arc::new(set(&[1, 3]))));
+        // Bea's own lookup, though Alan's is fresh: hers asks the service, and dates nothing
+        // by Alan's.
+        let bea = store.look_up_by(Some(&account("Bea")), Console::Gba, &rom, ok(set(&[1])));
+        assert_eq!(bea, Answer::Set(Arc::new(set(&[1]))));
+        // Signed out: nothing, not the last player's.
+        assert_eq!(
+            store.look_up_by(None, Console::Gba, &rom, ok(set(&[1]))),
+            Answer::Nothing
+        );
+        // A name is never a way out of the cache.
+        assert_eq!(store.folder("../x"), store.cache.join("___x"));
+        assert_eq!(store.folder(""), store.cache.join("_"));
+    }
+
+    #[test]
+    fn a_bad_line_in_the_index_is_passed_over() {
+        let dir = crate::testing::TempDir::new("ra-set-index");
+        let store = store(&dir);
+        let rom = dir.path().join("Game.gba");
         std::fs::write(&rom, b"a gba game").unwrap();
-        assert_eq!(store.hash(Console::Gba, &rom).unwrap(), hash);
-        assert!(store.cache.join("hashes.tsv").is_file());
-        // Nothing kept, no sign-in: nothing known.
-        assert_eq!(store.look_up(None, Console::Gba, &rom), None);
-        let set = parse_patch(PATCH).unwrap();
-        store.keep(
-            &hash,
-            &Cached {
-                fetched: unix_now(),
-                set: set.clone(),
-            },
-        );
-        assert_eq!(
-            store.look_up(None, Console::Gba, &rom),
-            Some(Found::Set(set.clone().unwrap()))
-        );
-        // Played: what is kept is stale, but still what there is without a sign-in.
-        store.played(Console::Gba, &rom);
-        assert_eq!(store.cached(&hash).unwrap().fetched, 0);
-        assert_eq!(
-            store.look_up(None, Console::Gba, &rom),
-            Some(Found::Set(set.clone().unwrap()))
-        );
-        // A set kept with the service's warning entry in it loads without it.
-        let mut warned = set.clone().unwrap();
+        std::fs::create_dir_all(&store.cache).unwrap();
+        // A line cut short, and an empty one, before anything this ROM's.
+        std::fs::write(store.cache.join(INDEX), "/r/GBA/cut short\n\n").unwrap();
+        assert_eq!(store.indexed(&rom), None);
+        let hash = store.hash(Console::Gba, &rom).unwrap();
+        assert_eq!(store.indexed(&rom), Some(hash.clone()));
+        let index = std::fs::read_to_string(store.cache.join(INDEX)).unwrap();
+        assert!(index.starts_with("/r/GBA/cut short\n"), "{index}");
+        assert_eq!(index.lines().count(), 2);
+        // Another ROM is still remembered after it.
+        let other = dir.path().join("Other.gba");
+        std::fs::write(&other, b"another").unwrap();
+        let second = store.hash(Console::Gba, &other).unwrap();
+        assert_eq!(store.indexed(&other), Some(second));
+        assert_eq!(store.indexed(&rom), Some(hash));
+        // Changed since: no longer what the index says, until hashed again.
+        std::fs::write(&rom, b"a longer gba game").unwrap();
+        assert_eq!(store.indexed(&rom), None);
+        // Nothing written beside it is left behind.
+        let left: Vec<_> = std::fs::read_dir(&store.cache)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+            .collect();
+        assert!(left.is_empty());
+    }
+
+    #[test]
+    fn a_set_kept_with_the_warning_entry_loads_without_it() {
+        let dir = crate::testing::TempDir::new("ra-set-warning");
+        let store = store(&dir);
+        let mut warned = set(&[]);
         warned.achievements.push(Achievement {
             id: WARNING_ID,
             title: "Warning: Unknown Emulator".into(),
@@ -496,25 +531,11 @@ mod tests {
             unlocked: true,
             unlocked_at: None,
         });
-        store.keep(
-            &hash,
-            &Cached {
-                fetched: unix_now(),
-                set: Some(warned),
-            },
-        );
-        assert_eq!(store.cached(&hash).unwrap().set, set);
-        store.keep(
-            &hash,
-            &Cached {
-                fetched: unix_now(),
-                set: None,
-            },
-        );
-        assert_eq!(
-            store.look_up(None, Console::Gba, &rom),
-            Some(Found::Unknown)
-        );
-        assert_eq!(store.badge("../etc"), None);
+        let cached = Cached {
+            fetched: unix_now(),
+            set: Some(warned),
+        };
+        store.keep("Alan", "abc", &cached);
+        assert_eq!(store.cached("Alan", "abc").unwrap().set, Some(set(&[])));
     }
 }
