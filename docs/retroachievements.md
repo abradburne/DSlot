@@ -14,14 +14,14 @@ Signed out:
 |---|---|
 | Username | A types it on the keyboard (nibkit's, the one the Wi-Fi page uses). |
 | Sign in | A asks for the password (shown as dots; Y shows it), then signs in. The row says *Signing in…*, then the title line says who is signed in, or why not: the service's own words for a wrong password, *No network* when it can't be reached. The token is kept by the request itself, before the page hears of it, so a sign-in stands even if the menu is closed while it is on its way. |
-| Mode | Softcore (the default) or Hardcore: a System setting, `achievements` in settings.toml. Not shown yet: see [Hardcore, not yet](#hardcore-not-yet). |
+| Mode | Casual (the service's name for softcore; the default) or Hardcore: a System setting, `achievements` in settings.toml. Not shown yet: see [Hardcore, not yet](#hardcore-not-yet). |
 | Make an account | The sign-up page's address and a QR code of it, for a phone. B comes back. |
 
 Signed in:
 
 | Row | |
 |---|---|
-| Signed in as | The username as the service spells it, with the points the service reported (hardcore, and softcore when there are any). |
+| Signed in as | The username as the service spells it, with the points the service reported (hardcore, and casual when there are any). |
 | Sign out | A, and A again to confirm: the token file is removed. The username stays typed for next time. |
 | Mode | As above (not shown yet). |
 
@@ -33,8 +33,7 @@ loads, rewind, slow motion, frame advance or cheats; a resume drops to softcore;
 hardcore resets the game). See the service's
 [hardcore compliance requirements](https://docs.retroachievements.org/general/hardcore-compliance-requirements.html).
 Until ours are approved, DSlot offers softcore alone: `HARDCORE_OFFERED` in
-`src/achievements/mod.rs` is off, so the Mode row is hidden (the page ends with a note that
-achievements are Casual, the service's name for softcore, for now) and `RA_HARDCORE` is always `0`,
+`src/achievements/mod.rs` is off, so the Mode row is hidden and `RA_HARDCORE` is always `0`,
 even with `achievements = "hardcore"` in settings.toml. Turning it on brings both back.
 Meanwhile the service adds a *Warning: Unknown Emulator* entry ("Hardcore unlocks cannot be
 earned using this emulator", id 101000001 and up, earned already) to every set it sends us;
@@ -165,8 +164,6 @@ When the player is signed in, a game DSlot starts gets three environment variabl
 emulator's description says it earns achievements for the game's system (`[achievements]`,
 docs/emulators.md; `[env]` in the description is kept as well). An emulator without the table,
 or a game of a system it doesn't name, gets none of them: the token goes only where it is used.
-The Achievements page says which systems earn them, from the installed descriptions (*Earned in
-DS, Game Boy and Game Boy Color games for now* with DSperate and inkdot).
 
 | Variable | |
 |---|---|

@@ -277,10 +277,8 @@ fn run() -> Result<(), String> {
     let mut stats = stats::Stats::load(dirs.stats.clone());
     let mut settings = Settings::load(dirs.settings.clone(), &dirs.legacy, &games, &emulators);
     mark("stats and settings loaded");
-    // RetroAchievements: the sign-in kept, the lookups' cache, and the systems an emulator here
-    // earns achievements in.
-    let mut ra = achievements::Ra::new(dirs.achievements.clone(), &opts.cache);
-    ra.earning = emulators.earning();
+    // RetroAchievements: the sign-in kept and the lookups' cache.
+    let ra = achievements::Ra::new(dirs.achievements.clone(), &opts.cache);
 
     let mut back: Option<ui::Back> = None;
     let mut refresh = false;
@@ -292,7 +290,6 @@ fn run() -> Result<(), String> {
                 .and_then(|b| games.get(b.game))
                 .map(|g| g.path.clone());
             emulators = Emulators::load(&dirs.emulators);
-            ra.earning = emulators.earning();
             if !given_roots {
                 roots = platform::rom_roots();
                 nibkit::paths::wait_for_cards(CARD_WAIT);

@@ -50,34 +50,6 @@ pub use nib_cheevos::paths::SIGN_UP;
 /// (docs/retroachievements.md); until then every game plays softcore, whatever settings.toml
 /// says ([`Ra::env`]).
 pub const HARDCORE_OFFERED: bool = false;
-/// What the Achievements page says while hardcore isn't offered: Casual is the service's name
-/// for softcore.
-pub const CASUAL_ONLY: &str = "Achievements are Casual for now: RetroAchievements hasn't \
-     approved our emulators for Hardcore yet.";
-/// Which systems earn achievements, as the Achievements page says it: the ones an emulator
-/// installed here earns them in (its description's `[achievements]`; `earning`, sorted folder
-/// names). The shelf shows a set for any system the service has; this says where playing
-/// earns them.
-pub fn earned_in(earning: &[String]) -> String {
-    let names: Vec<&str> = Console::ALL
-        .iter()
-        .filter(|c| earning.iter().any(|s| s == c.folder()))
-        .map(|c| match c {
-            // "Nintendo DS games" reads long on the page; the DS is the device's own.
-            Console::Ds => "DS",
-            c => c.name(),
-        })
-        .collect();
-    match names.as_slice() {
-        [] => "No emulator here earns achievements yet.".into(),
-        [one] => format!("Earned in {one} games for now; more systems are coming."),
-        [first @ .., last] => format!(
-            "Earned in {} and {last} games for now; more systems are coming.",
-            first.join(", ")
-        ),
-    }
-}
-
 /// Whether the service's identity for the console's games can be had here (nib-cheevos'
 /// `hash`): the shelf looks those games up. Not Game & Watch, which rcheevos has no rule for.
 pub fn hashed(console: Console) -> bool {
@@ -98,9 +70,6 @@ pub struct Ra {
     /// `retroachievements.token`, beside settings.toml (platform::Dirs::achievements).
     pub token: PathBuf,
     pub store: Store,
-    /// The systems an installed emulator earns achievements in (`Emulators::earning`), for
-    /// the page's note ([`earned_in`]).
-    pub earning: Vec<String>,
 }
 
 /// What a sign-in, or a check of the one kept, came to: the sign-in kept and the player's
@@ -113,13 +82,7 @@ impl Ra {
         Ra {
             token,
             store: Store::new(cache),
-            earning: Vec::new(),
         }
-    }
-
-    /// What the Achievements page says playing earns achievements in ([`earned_in`]).
-    pub fn earned_in(&self) -> String {
-        earned_in(&self.earning)
     }
 
     /// Who is signed in, read from the token file now.
@@ -295,13 +258,13 @@ pub struct Standing {
 }
 
 impl Standing {
-    /// "1,234 points", "56 softcore points", both, or "No points yet".
+    /// "1,234 points", "56 casual points", both, or "No points yet".
     pub fn points(&self) -> String {
         match (self.score, self.softcore) {
             (0, 0) => "No points yet".into(),
             (h, 0) => format!("{} points", grouped(h)),
-            (0, s) => format!("{} softcore points", grouped(s)),
-            (h, s) => format!("{} points \u{b7} {} softcore", grouped(h), grouped(s)),
+            (0, s) => format!("{} casual points", grouped(s)),
+            (h, s) => format!("{} points \u{b7} {} casual", grouped(h), grouped(s)),
         }
     }
 }
@@ -370,8 +333,8 @@ mod tests {
         };
         assert_eq!(s(0, 0).points(), "No points yet");
         assert_eq!(s(1234567, 0).points(), "1,234,567 points");
-        assert_eq!(s(0, 56).points(), "56 softcore points");
-        assert_eq!(s(1000, 999).points(), "1,000 points \u{b7} 999 softcore");
+        assert_eq!(s(0, 56).points(), "56 casual points");
+        assert_eq!(s(1000, 999).points(), "1,000 points \u{b7} 999 casual");
         assert_eq!(grouped(0), "0");
         assert_eq!(grouped(100), "100");
         assert_eq!(grouped(1000), "1,000");
@@ -478,21 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn the_page_says_which_systems_earn_achievements() {
-        let s = |list: &[&str]| earned_in(&list.iter().map(|s| s.to_string()).collect::<Vec<_>>());
-        assert_eq!(
-            s(&["GB", "GBC", "NDS"]),
-            "Earned in DS, Game Boy and Game Boy Color games for now; more systems are coming."
-        );
-        assert_eq!(
-            s(&["NDS"]),
-            "Earned in DS games for now; more systems are coming."
-        );
-        assert_eq!(
-            s(&["GBA", "NDS", "SFC"]),
-            "Earned in DS, Game Boy Advance and Super Nintendo games for now; more systems are coming."
-        );
-        assert_eq!(s(&[]), "No emulator here earns achievements yet.");
+    fn which_consoles_are_hashed() {
         assert!(hashed(Console::Snes) && hashed(Console::PlayStation));
         assert!(!hashed(Console::GameWatch) && !hashed(Console::Ports));
     }

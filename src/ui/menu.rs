@@ -21,7 +21,7 @@
 //!   to the version before; the work is nibOS's updater's (`update.rs`).
 //! - **Achievements** (where there is `curl`): the RetroAchievements sign-in, kept for the
 //!   emulators (`ra.rs`): the username and password typed on the keyboard, who is signed in
-//!   and their points, signing out, hardcore or softcore, and the sign-up page as a QR code for
+//!   and their points, signing out, Casual or Hardcore, and the sign-up page as a QR code for
 //!   a phone, since the service has no way to make an account from here.
 //!
 //! A row that can inherit shows where its value comes from ("from GBA", "from System") or that
@@ -2929,8 +2929,6 @@ mod tests {
     #[test]
     fn achievements_page() {
         let mut w = world("menu-achievements", false);
-        // As if DSperate and inkdot were installed: their descriptions' `[achievements]`.
-        w.ra.earning = ["GB", "GBC", "NDS"].map(String::from).to_vec();
         let mut cx = Context {
             stats: &mut w.stats,
             settings: &mut w.settings,
@@ -2941,16 +2939,11 @@ mod tests {
         let token = w.ra.token.clone();
         let mut menu = Menu::open(false, &w.ra);
         menu.page = Page::Achievements;
-        // Hardcore is not offered yet: the page ends with the note saying so, then which systems
-        // earn achievements.
-        let casual = [
-            "Achievements are Casual for now: RetroAchievements hasn't",
-            "approved our emulators for Hardcore yet.",
-            "Earned in DS, Game Boy and Game Boy Color games for now; more",
-            "systems are coming.",
-        ];
-        let signed_out = [&["Username", "Sign in", "Make an account"][..], &casual].concat();
-        assert_eq!(labels(&menu, &cx), signed_out);
+        // Hardcore is not offered yet: no Mode row, and no notes under the rows.
+        assert_eq!(
+            labels(&menu, &cx),
+            ["Username", "Sign in", "Make an account"]
+        );
         let shown = menu.shown(&cx);
         assert_eq!(shown.title, "RetroAchievements: not signed in");
         assert!(shown.picture.is_none());
@@ -3003,10 +2996,7 @@ mod tests {
         account.save(&token).unwrap();
         tx.send(Ok((account, standing))).unwrap();
         assert!(menu.update(&Input::default(), &mut cx).account);
-        assert_eq!(
-            labels(&menu, &cx),
-            [&["Signed in as", "Sign out"][..], &casual].concat()
-        );
+        assert_eq!(labels(&menu, &cx), ["Signed in as", "Sign out"]);
         assert_eq!(
             menu.shown(&cx).title,
             "RetroAchievements: signed in as Alan"
@@ -3043,7 +3033,10 @@ mod tests {
             }
         );
         assert!(menu.update(&press, &mut cx).account);
-        assert_eq!(labels(&menu, &cx), signed_out);
+        assert_eq!(
+            labels(&menu, &cx),
+            ["Username", "Sign in", "Make an account"]
+        );
         assert!(!token.exists());
         assert_eq!(menu.shown(&cx).rows[0].value, Value::Text("Alan".into()));
         // A refusal on sign-in stays on the Sign in row, with the reason; no one signed in.

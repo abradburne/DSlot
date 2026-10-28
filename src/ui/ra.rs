@@ -1,20 +1,19 @@
 //! The menu's **Achievements** page: the RetroAchievements sign-in (achievements/). Signed out,
 //! the username typed on the keyboard, Sign in (which asks for the password) and Make an
 //! account (the sign-up page's address and a QR code of it, for a phone); signed in, who and
-//! their points, and Sign out. The Mode row (hardcore or softcore) only while hardcore is
-//! offered; until then the page ends with a note that achievements are Casual for now.
+//! their points, and Sign out. The Mode row (Casual or Hardcore) only while hardcore is
+//! offered.
 //!
 //! A [`RaPage`] holds what the page knows: the sign-in kept, the username typed so far, what
 //! the service said of the player, and the one request running (a sign-in, or the check of the
 //! sign-in kept made once each time the menu opens on the page). The requests keep or drop the
 //! token themselves, on their own threads (achievements::Ra); the page only hears how they came
 //! out, and says when the player signed in or out so that the shelf lets go of what it found
-//! for the last one. The menu keeps the rows' places, the keyboard and the notes.
+//! for the last one. The menu keeps the rows' places and the keyboard.
 
-use super::menu::{Item, Value, NOTES_WIDTH};
+use super::menu::{Item, Value};
 use crate::achievements::{self, Account, Error, Qr, Ra, SignedIn, Standing};
 use crate::settings::def;
-use crate::update;
 use std::cell::OnceCell;
 use std::sync::mpsc::Receiver;
 
@@ -96,10 +95,8 @@ impl RaPage {
     }
 
     /// The rows: signed out, the username, Sign in, Mode and Make an account; signed in, who,
-    /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED);
-    /// until then the page ends with a note that achievements are Casual for now, and then
-    /// which systems earn them (Ra::earned_in, from the emulators' descriptions). The sign-up
-    /// view has the address alone, over the QR code.
+    /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED).
+    /// The sign-up view has the address alone, over the QR code.
     pub fn rows(&self) -> Vec<Item> {
         if self.signing_up {
             return vec![Item::RaLink];
@@ -118,19 +115,6 @@ impl RaPage {
                 items.extend(mode);
                 items.push(Item::RaSignUp);
             }
-        }
-        let earned_in = self.ra.earned_in();
-        let notes = if achievements::HARDCORE_OFFERED {
-            vec![earned_in.as_str()]
-        } else {
-            vec![achievements::CASUAL_ONLY, earned_in.as_str()]
-        };
-        for note in notes {
-            items.extend(
-                update::wrap(note, NOTES_WIDTH)
-                    .into_iter()
-                    .map(Item::Message),
-            );
         }
         items
     }

@@ -50,6 +50,9 @@
   *Looking this game up again…*, then what it found (or that there was no network); what the
   servers answer replaces what was kept, a screenshot they no longer have included, and the
   shelf's box is made again with new box art.
+- **The Achievements page is just its rows**: the notes under them (that achievements are
+  Casual for now, and which systems earn them) are gone. Softcore is called **Casual**, the
+  service's own name for it, on the Mode row and in the points ("56 casual points").
 
 ## 0.4.1
 

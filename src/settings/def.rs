@@ -82,10 +82,11 @@ choice! {
 
 choice! {
     /// RetroAchievements: hardcore (no save states, rewinds or cheats; the achievements
-    /// count for the site's main leaderboards) or softcore. The emulator decides what it can
-    /// honour: one with no hardcore support plays softcore whatever is set.
+    /// count for the site's main leaderboards) or softcore, shown as Casual (the service's own
+    /// name for it). The emulator decides what it can honour: one with no hardcore support
+    /// plays softcore whatever is set.
     Achievements {
-        Softcore = "softcore", "Softcore";
+        Softcore = "softcore", "Casual";
         Hardcore = "hardcore", "Hardcore";
     }
 }
