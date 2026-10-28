@@ -15,7 +15,7 @@
 # Emulators ship their own descriptions in /usr/share/dslot/emulators (docs/emulators.md).
 
 pkgname=dslot
-pkgver=0.3.2
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="Game shelf for the Anbernic RG DS+: carts over a slot, boxes on the top screen"
 arch=(aarch64)
