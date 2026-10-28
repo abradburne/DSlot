@@ -161,6 +161,8 @@ pub enum Item {
     RaSignUp,
     /// The sign-up page's address, over the QR code; shown, not changed.
     RaLink,
+    /// Game: the game's achievements, browsed on the top screen (the shelf draws them).
+    RaList,
     /// A line of What's new; A goes back to the page.
     NoteLine(String),
     /// A line of the update's message, past what fits on the title line.
@@ -213,6 +215,7 @@ impl Item {
             Item::RaSignOut => "Sign out",
             Item::RaSignUp => "Make an account",
             Item::RaLink => "On a phone",
+            Item::RaList => "Achievements",
             Item::NoteLine(line) | Item::Message(line) => line,
         }
     }
@@ -665,6 +668,12 @@ pub struct Menu {
     ra_checked: bool,
     /// The sign-up page's address and QR code are open, in place of the rows.
     ra_signup: bool,
+    /// The selected game's achievements, in a line ("12 of 40 · 150 of 400 points"), when the
+    /// shelf has them: the Game page offers the list then. The shelf sets it each frame.
+    pub ra_set: Option<String>,
+    /// The achievement highlighted while the list is browsed on the top screen (up and down
+    /// move it; the shelf keeps it within the list), or none while it isn't.
+    pub ra_list: Option<usize>,
 }
 
 /// What the keyboard is typing.
@@ -736,6 +745,8 @@ impl Menu {
             ra_said: None,
             ra_checked: false,
             ra_signup: false,
+            ra_set: None,
+            ra_list: None,
         }
     }
 
@@ -821,6 +832,9 @@ impl Menu {
         match self.page {
             Page::Game => {
                 items.extend([Item::Favourite, Item::Rating]);
+                if self.ra_set.is_some() {
+                    items.push(Item::RaList);
+                }
                 if choice {
                     items.push(Item::Emulator);
                 }
@@ -1105,6 +1119,15 @@ impl Menu {
         }
         self.clock_job_done(cx);
         self.ra_job_done(cx);
+        // The achievements list on the top screen: up and down move along it, B leaves it.
+        if let Some(at) = self.ra_list {
+            if input.close {
+                self.ra_list = None;
+            } else if input.moved != 0 {
+                self.ra_list = Some((at as i32 + input.moved).max(0) as usize);
+            }
+            return Done::default();
+        }
         // The sign-up page: B goes back to the Achievements page, on its row.
         if self.ra_signup && input.close {
             self.ra_back(cx);
@@ -1180,6 +1203,10 @@ impl Menu {
         } else if self.page == Page::Achievements && !matches!(item, Item::Setting(_)) {
             let item = item.clone();
             self.ra_row(&item, chosen);
+        } else if *item == Item::RaList {
+            if pressed && was == self.row {
+                self.ra_list = Some(0);
+            }
         } else if *item == Item::Rescan {
             if pressed && was == self.row {
                 done.rescan = true;
@@ -1471,6 +1498,7 @@ impl Menu {
             self.reading_sys = false;
             self.clock_view = ClockView::Closed;
             self.ra_signup = false;
+            self.ra_list = None;
             if page == Page::Achievements {
                 self.ra_check();
             }
@@ -1673,6 +1701,7 @@ impl Menu {
             | Item::RaSignOut
             | Item::RaSignUp
             | Item::RaLink
+            | Item::RaList
             | Item::Joined
             | Item::Address
             | Item::NetworkInfo
@@ -1846,6 +1875,9 @@ impl Menu {
             (Page::Update, _) => update_title(),
             (Page::Achievements, _) => self.ra_title(),
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
+            (Page::Game, Some(game)) if self.ra_list.is_some() => {
+                format!("{}: achievements, on the top screen", game.name())
+            }
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
             (Page::System, _) if self.reading_sys => self.sys.summary(),
@@ -1861,6 +1893,12 @@ impl Menu {
             .filter(|i| i.set_here)
             .map(|i| format!("Y  use {}   \u{b7}   ", i.from));
         let hint = match (self.page, items.get(self.row)) {
+            (Page::Game, _) if self.ra_list.is_some() => {
+                "Up / Down  move along the list   \u{b7}   B  back".into()
+            }
+            (Page::Game, Some(Item::RaList)) => {
+                "A  browse on the top screen   \u{b7}   L / R  page   \u{b7}   B  back".into()
+            }
             (Page::Wifi, Some(Item::Info(_))) => {
                 "A  check again   \u{b7}   L / R  page   \u{b7}   B  back to Wi-Fi".into()
             }
@@ -2386,6 +2424,10 @@ impl Menu {
             | Item::RaSignOut
             | Item::RaSignUp
             | Item::RaLink => self.ra_value(item, r),
+            Item::RaList => Value::Prompt {
+                text: self.ra_set.clone().unwrap_or_default(),
+                warning: false,
+            },
             Item::SpeakerTuning => text(match self.tuning {
                 Some(nibkit::audio::Tuning::Nibos) => "nibOS",
                 Some(nibkit::audio::Tuning::Official) => "Official",
@@ -3028,6 +3070,68 @@ mod tests {
             pages.push(Page::Achievements);
         }
         pages
+    }
+
+    /// The Game page offers the achievements list once the shelf has the game's set: A browses
+    /// it on the top screen, up and down move along it (the shelf keeps the place within the
+    /// list), B comes back to the row.
+    #[test]
+    fn achievements_list_in_the_game_page() {
+        let mut w = world("menu-achievements-list", true);
+        let game = w.game.clone();
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Ds,
+            game: Some(&game),
+        };
+        let mut menu = Menu::open(true);
+        assert!(!labels(&menu, &cx).contains(&"Achievements".to_owned()));
+        menu.ra_set = Some("1 of 2 \u{b7} 25 of 30 points".into());
+        let items = labels(&menu, &cx);
+        assert_eq!(items[2], "Achievements");
+        assert_eq!(
+            menu.shown(&cx).rows[2].value,
+            Value::Prompt {
+                text: "1 of 2 \u{b7} 25 of 30 points".into(),
+                warning: false
+            }
+        );
+        let press = Input {
+            pressed: true,
+            ..Input::default()
+        };
+        menu.row = 2;
+        menu.update(&press, &mut cx);
+        assert_eq!(menu.ra_list, Some(0));
+        assert!(menu
+            .shown(&cx)
+            .title
+            .ends_with("achievements, on the top screen"));
+        assert!(menu.shown(&cx).hint.starts_with("Up / Down"));
+        let down = Input {
+            moved: 3,
+            ..Input::default()
+        };
+        menu.update(&down, &mut cx);
+        assert_eq!(menu.ra_list, Some(3));
+        let up = Input {
+            moved: -5,
+            ..Input::default()
+        };
+        menu.update(&up, &mut cx);
+        assert_eq!(menu.ra_list, Some(0));
+        // While browsing, A does nothing to the rows under it.
+        menu.update(&press, &mut cx);
+        assert_eq!(menu.row, 2);
+        let close = Input {
+            close: true,
+            ..Input::default()
+        };
+        assert!(!menu.update(&close, &mut cx).closed);
+        assert_eq!(menu.ra_list, None);
+        assert_eq!(labels(&menu, &cx)[menu.row], "Achievements");
     }
 
     /// The Achievements page: signed out, a sign-in (the service's answer injected), the

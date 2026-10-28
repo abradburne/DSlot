@@ -1497,7 +1497,13 @@ fn show(
                 console,
                 game: current,
             };
+            // The selected game's achievements, for the Game page's row and its list.
+            let selected = state.order.get(state.sel).copied();
+            open.ra_set = selected.and_then(|g| ui.cheevos_summary(g));
             let done = open.update(&menu_input, &mut cx);
+            if let (Some(at), Some(g)) = (open.ra_list, selected) {
+                open.ra_list = Some(at.min(ui.cheevos_count(g).saturating_sub(1)));
+            }
             if done.power_off {
                 return Ok(Outcome::PowerOff);
             }
@@ -1721,7 +1727,8 @@ fn show(
             match current {
                 Some(g) => {
                     let resume = resume_of(shelf, settings, &games[g]);
-                    ui.draw_top(games, g, stats, resume.as_ref(), fade)?
+                    let browsing = state.menu.as_ref().and_then(|m| m.ra_list);
+                    ui.draw_top(games, g, stats, resume.as_ref(), fade, browsing)?
                 }
                 None => {
                     let top = ui.top;

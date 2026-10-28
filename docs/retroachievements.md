@@ -31,6 +31,42 @@ points it answers with. A token the service refuses (the password was changed on
 is dropped, and the title line asks for a sign-in again. With no network the sign-in kept stands
 as it is.
 
+## On the shelf
+
+With the player signed in, the top screen says, under the selected game's details, how it
+stands with the service: *Achievements*, then *19 of 28 · 425 of 630 points*, then the badges
+of the set in a strip, the ones not yet earned dimmed. More than two rows of them page by the
+clock, every five seconds. A game the service doesn't know says *Not on RetroAchievements*;
+one still being looked up, *Looking up…*. Signed out, nothing is shown.
+
+To read the list, the menu's **Game** page has an **Achievements** row (the same line as its
+value): A browses the list on the top screen, in the details' place: each achievement's badge,
+title, points and description, the highlighted one moved by up and down, B back to the row.
+
+How it is known, all off the shelf's thread, by a worker of its own:
+
+- **Which game.** The ROM is hashed as the service does it (`achievements/hash.rs`): the MD5 of
+  the file for Game Boy, Game Boy Color and Game Boy Advance; for a DS game, of its header, its
+  two pieces of boot code and its icon/title block, as the service's documentation says (the
+  file inside a zip, when zipped). The hash is kept in `cache/achievements/hashes.tsv` against
+  the file's size and date, so a ROM is read once.
+- **The set, and what is earned.** Two requests of the emulator API with the sign-in kept, the
+  form on `curl`'s standard input as for signing in: `patch` with the hash (the set: each
+  achievement's title, description, points and badge name; the unofficial ones are left out),
+  then `unlocks`, softcore and hardcore. The answer is kept in `cache/achievements/<hash>.json`
+  with when it was fetched, and stands for six hours: browsing the shelf asks the service
+  nothing in between, and with no network the shelf shows what was kept, however old. A game
+  just played is asked about again next time it is selected, since it may have earned some.
+  The service not knowing the ROM is kept too, so it isn't asked again every time.
+- **The badges.** `https://media.retroachievements.org/Badge/<name>.png`, fetched once each
+  into `~/.cache/retroachievements/badges/` (`$XDG_CACHE_HOME` when set; DSlot's own cache
+  folder when there is no home) and read from there after. The folder is shared: DSperate keeps
+  the badge of an unlock it shows there, and the other emulators will. A badge not in yet shows
+  as a faint square.
+
+`cache/` is DSlot's cache (`~/.cache/dslot` on nibOS): safe to delete, remade as games are
+selected.
+
 ## The account question
 
 There is no way to make an account from the device. The service's two APIs are:
@@ -105,6 +141,14 @@ toasts, an achievements list and account page in the pause menu, a stored sign-i
 - `RA_HARDCORE=1` is noted in the log (`cheevos: hardcore was asked for ...; DSperate plays
   Casual`). DSperate forces hardcore off in `rc_client` because it allows save states, rewinds and
   cheats; hardcore would need those locked while a set is loaded, and the service's approval.
+- **The unlock toast.** When rcheevos fires an achievement-unlocked event, DSperate shows a
+  toast for four seconds in the corner of the top screen: the badge, *ACHIEVEMENT UNLOCKED*,
+  the title with its points, and the description. The badge is fetched (or read from the shared
+  badges folder above) and decoded by DSperate's own PNG reader on its RetroAchievements worker
+  thread, which runs at ordinary priority, never on the emulation thread; the toast waits up to
+  a second and a half for it and then shows without. The toast is DSperate's own drawing
+  (nibkit's shared pause menu has no overlay for a game that is playing): nibcase and the others
+  draw their own the same way, from the same badge files.
 - nibOS's package (`packaging/arch/PKGBUILD` in the fork) builds with `DSPERATE_CHEEVOS=ON` and
   depends on `curl` for `libcurl.so.4`.
 

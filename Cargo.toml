@@ -34,6 +34,8 @@ serde_json = "1"
 zune-jpeg = "0.4"
 # The QR code of the RetroAchievements sign-up page, for a phone (achievements.rs).
 qrcodegen = "1.8"
+# The hash RetroAchievements identifies a ROM by (achievements/hash.rs).
+md-5 = "0.10"
 
 [profile.release]
 opt-level = 3

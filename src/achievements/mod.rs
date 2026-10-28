@@ -24,6 +24,9 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 
 /// The service, and the request its clients make.
+pub mod hash;
+pub mod set;
+
 pub const HOST: &str = "https://retroachievements.org";
 /// Where an account is made, on a phone or a computer.
 pub const SIGN_UP: &str = "https://retroachievements.org/createaccount.php";
@@ -181,14 +184,25 @@ fn request(form: String) -> Receiver<Outcome> {
 
 /// `curl`, the form on its standard input, the answer parsed.
 fn post(form: &str) -> Outcome {
-    let agent = format!("DSlot/{}", env!("CARGO_PKG_VERSION"));
-    let child = Command::new("curl")
+    match call(form) {
+        Ok(body) => parse(Some(0), &body, ""),
+        Err(Fail::NoNetwork) => Outcome::NoNetwork,
+        Err(Fail::Failed(why)) => Outcome::Failed(why),
+    }
+}
+
+/// Why a request got no answer: the service couldn't be reached, or something else, said.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Fail {
+    NoNetwork,
+    Failed(String),
+}
+
+/// Posts `form` to the service's emulator API by `curl`, the form on its standard input
+/// (never in an argument: the token is in it), and gives back the body of the answer.
+pub(crate) fn call(form: &str) -> Result<String, Fail> {
+    let mut child = curl()
         .args([
-            "-sS",
-            "--max-time",
-            &TIMEOUT_SECS.to_string(),
-            "-A",
-            &agent,
             "-H",
             "Content-Type: application/x-www-form-urlencoded",
             "--data-binary",
@@ -198,39 +212,79 @@ fn post(form: &str) -> Outcome {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn();
-    let mut child = match child {
-        Ok(c) => c,
-        Err(e) => return Outcome::Failed(format!("curl: {e}")),
-    };
+        .spawn()
+        .map_err(|e| Fail::Failed(format!("curl: {e}")))?;
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(form.as_bytes());
     }
-    match child.wait_with_output() {
-        Ok(out) => parse(
-            out.status.code(),
-            &String::from_utf8_lossy(&out.stdout),
-            &String::from_utf8_lossy(&out.stderr),
-        ),
-        Err(e) => Outcome::Failed(format!("curl: {e}")),
+    let out = child
+        .wait_with_output()
+        .map_err(|e| Fail::Failed(format!("curl: {e}")))?;
+    exit(out.status.code(), &String::from_utf8_lossy(&out.stderr))?;
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Fetches `url` into `to` by `curl`: written beside it first, so a half-fetched file is
+/// never where a whole one is looked for. A 404 (a badge the service hasn't got) fails.
+pub(crate) fn fetch(url: &str, to: &Path) -> Result<(), Fail> {
+    if let Some(dir) = to.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| Fail::Failed(e.to_string()))?;
+    }
+    let part = to.with_extension("part");
+    let out = curl()
+        .args(["-f", "-o"])
+        .arg(&part)
+        .arg(url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| Fail::Failed(format!("curl: {e}")))?;
+    let done = exit(out.status.code(), &String::from_utf8_lossy(&out.stderr));
+    if done.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    done?;
+    std::fs::rename(&part, to).map_err(|e| Fail::Failed(e.to_string()))
+}
+
+/// `curl` as DSlot runs it: quiet but for errors, a time limit, DSlot's user agent.
+fn curl() -> Command {
+    let mut c = Command::new("curl");
+    c.args([
+        "-sS",
+        "--max-time",
+        &TIMEOUT_SECS.to_string(),
+        "-A",
+        &format!("DSlot/{}", env!("CARGO_PKG_VERSION")),
+    ]);
+    c
+}
+
+/// `curl`'s exit code as a failure: couldn't resolve, couldn't connect, timed out and SSL
+/// couldn't connect are no network; anything else but 0 is what it said.
+fn exit(code: Option<i32>, stderr: &str) -> Result<(), Fail> {
+    match code {
+        Some(0) => Ok(()),
+        Some(6 | 7 | 28 | 35) => Err(Fail::NoNetwork),
+        Some(c) => {
+            let why = stderr.lines().next().unwrap_or("").trim();
+            Err(Fail::Failed(if why.is_empty() {
+                format!("curl exited with {c}")
+            } else {
+                why.to_owned()
+            }))
+        }
+        None => Err(Fail::Failed("curl was killed".into())),
     }
 }
 
 /// `curl`'s exit code and output, as an outcome. Nothing of the request is in it.
 pub fn parse(code: Option<i32>, body: &str, stderr: &str) -> Outcome {
-    match code {
-        // Couldn't resolve, couldn't connect, timed out, SSL couldn't connect.
-        Some(6 | 7 | 28 | 35) => return Outcome::NoNetwork,
-        Some(0) => {}
-        Some(c) => {
-            let why = stderr.lines().next().unwrap_or("").trim();
-            return Outcome::Failed(if why.is_empty() {
-                format!("curl exited with {c}")
-            } else {
-                why.to_owned()
-            });
-        }
-        None => return Outcome::Failed("curl was killed".into()),
+    match exit(code, stderr) {
+        Ok(()) => {}
+        Err(Fail::NoNetwork) => return Outcome::NoNetwork,
+        Err(Fail::Failed(why)) => return Outcome::Failed(why),
     }
     let Ok(json) = serde_json::from_str::<serde_json::Value>(body) else {
         return Outcome::Failed("the service answered with something other than JSON".into());

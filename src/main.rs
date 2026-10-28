@@ -376,6 +376,10 @@ fn run() -> Result<(), String> {
                     }
                 };
                 mark("game exited");
+                // Its achievements are asked about again: the game may have earned some.
+                if !game.is_app() {
+                    achievements::set::Store::new(&dirs.cache).played(game.console, &game.path);
+                }
                 // And until the shelf's first frame again.
                 hold_last_frame(&opts);
                 // An emulator may set its own options in DSlot's settings, from its own menu.

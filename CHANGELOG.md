@@ -10,6 +10,15 @@
   `RA_HARDCORE` in the environment; DSperate reads them. The service has no way to make an
   account from a device, so **Make an account** shows the sign-up page's address and a QR code
   of it for a phone. docs/retroachievements.md.
+- **Achievements on the shelf**: signed in, the top screen shows the selected DS, GBA, GB or GBC
+  game's standing with RetroAchievements under its details (*19 of 28 · 425 of 630 points*) and
+  a strip of the set's badges, the ones not earned dimmed. The menu's Game page gets an
+  **Achievements** row: A browses the list on the top screen, with each badge, title, points
+  and description. Looked up by the ROM's hash as the service does it, by a worker off the
+  shelf's thread; the set and the unlocks are kept in the cache for six hours (and asked for
+  again after the game is played), so it works offline and the service isn't asked on every
+  selection; the badges are kept in `~/.cache/retroachievements/badges`, shared with the
+  emulators.
 
 ## 0.3.2
 
