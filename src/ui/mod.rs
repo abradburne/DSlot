@@ -23,6 +23,7 @@ mod input;
 mod layout;
 mod menu;
 mod netinfo;
+mod pads;
 mod power;
 mod ra;
 mod radios;

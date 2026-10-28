@@ -8,6 +8,7 @@ use super::draw::{Blade, Page, Ui, Yours, DIM, THUMBS, WHITE};
 use super::input::{self, Input, Key, Reader};
 use super::layout::*;
 use super::menu::{self, Menu};
+use super::pads::Pads;
 use super::power::{Choice, PowerMenu};
 use super::sound::{self, Sound};
 use super::{Back, Outcome, Screens, Shelf};
@@ -1168,7 +1169,7 @@ fn show(
 
     // Controllers are looked for once the shelf is on screen: SDL opens every input device to
     // ask what it is, and on nibOS each close costs an RCU grace period (~0.5 s in all).
-    let mut _pads = None;
+    let mut pads: Option<Pads> = None;
     let mut sound = Sound::new(settings.sounds());
     let mut panel = if dual { Panel::open() } else { None };
     crate::mark("touch panel ready");
@@ -1222,6 +1223,9 @@ fn show(
             for event in events.poll_iter() {
                 if let Event::Quit { .. } = event {
                     return Ok(Outcome::Quit);
+                }
+                if let Some(pads) = pads.as_mut() {
+                    pads.event(&event);
                 }
                 wake |= woken_by(&event);
             }
@@ -1347,6 +1351,9 @@ fn show(
         // With the panel read directly, SDL's copies of the same touches are ignored.
         let mouse = panel.is_none().then_some(bot);
         for event in events.poll_iter() {
+            if let Some(pads) = pads.as_mut() {
+                pads.event(&event);
+            }
             if woken_by(&event) {
                 idle = Instant::now();
             }
@@ -1871,16 +1878,7 @@ fn show(
         }
         if frame == 1 {
             platform::first_frame_shown();
-            let sub = sdl.game_controller()?;
-            for mappings in nibkit::input::CONTROLLER_MAPPINGS {
-                let _ = sub.load_mappings(mappings);
-            }
-            let found = sub.num_joysticks()?;
-            let open: Vec<_> = (0..found)
-                .filter(|&i| sub.is_game_controller(i))
-                .filter_map(|i| sub.open(i).ok())
-                .collect();
-            _pads = Some((sub, open));
+            pads = Some(Pads::open(sdl.game_controller()?)?);
             crate::mark("controllers ready");
             // Also not wanted for the first frame, and slow to start cold (~0.7 s on nibOS).
             sound.set_audio(sdl.audio().ok());

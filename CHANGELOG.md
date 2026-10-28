@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **The buttons come back when the gamepad does.** On nibOS the device's gamepad is
+  nibos-input's, and a restart of it (an update of nibos-hw, or after a crash) makes a new one;
+  the shelf kept the old one and heard nothing but the power key until DSlot itself restarted.
+  It now opens a controller SDL reports as added and lets go of one reported gone (`ui/pads.rs`).
+
 ## 0.4.0
 
 - **RetroAchievements**, an **Achievements** tab in the menu wherever there is `curl`: sign in
