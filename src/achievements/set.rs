@@ -1,5 +1,6 @@
 //! A game's achievements, for the shelf: what the service publishes for it and which of them
-//! the player has, looked up by the ROM's hash (hash.rs) and kept on disk, so that the shelf
+//! the player has, looked up by the ROM's hash (nib-cheevos' `hash`, rcheevos' rhash) and kept
+//! on disk, so that the shelf
 //! shows them without the network and doesn't ask the service each time a game is selected.
 //!
 //! What is kept is the signed-in player's: `achievements/<user>/<hash>.json`, so that another
@@ -9,7 +10,7 @@
 //! name.
 
 use super::service::{self, Error, WARNING_ID};
-use super::{hash, Account};
+use super::Account;
 use crate::rom::Console;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -172,13 +173,13 @@ impl Store {
         let index = self.cache.join(INDEX);
         let Some((key, stamp)) = index_key(path) else {
             // A path the index can't hold (a tab or a newline in it): worked out every time.
-            return hash::of(console, path);
+            return hash_of(console, path);
         };
         let known = std::fs::read_to_string(&index).unwrap_or_default();
         if let Some(hash) = find(&known, &key, &stamp) {
             return Some(hash);
         }
-        let hash = hash::of(console, path)?;
+        let hash = hash_of(console, path)?;
         let mut lines: Vec<&str> = known
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with(&format!("{key}\t")))
@@ -269,6 +270,20 @@ impl Store {
             }
         }
     }
+}
+
+/// The ROM's hash as the service spells it (32 lowercase hex digits), by rcheevos' rule for its
+/// console: none when the file can't be read, isn't shaped like the console's game, or is of a
+/// kind not hashed yet (a CHD image), which is logged.
+fn hash_of(console: Console, path: &Path) -> Option<String> {
+    nib_cheevos::hash::file(console.folder(), path)
+        .inspect_err(|e| {
+            eprintln!(
+                "dslot: RetroAchievements: no hash for {}: {e}",
+                path.display()
+            )
+        })
+        .ok()
 }
 
 /// What the index files a ROM under: its path, and its size and date as `size\tseconds`.

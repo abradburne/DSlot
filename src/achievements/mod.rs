@@ -1,14 +1,16 @@
 //! RetroAchievements: the player's sign-in, kept for the emulators to use.
 //!
 //! DSlot signs in once, with the username and password typed on its keyboard, through the
-//! service's own `dorequest.php` (`r=login2`, the request rcheevos makes), and keeps what the
-//! service answers with: the username as the service spells it and a **token**, which signs the
+//! service's own `dorequest.php` (`login2`, as rcheevos builds the request: nibkit's
+//! `nib-cheevos`, which every emulator here uses too), and keeps what the service answers with: the username as the service spells it and a **token**, which signs the
 //! player in from then on without the password. The password is sent once and never written
 //! anywhere. The token is kept in a file of its own (`retroachievements.token`, beside
 //! settings.toml, readable by DSlot's user only), two lines, `username` then `token`: the
-//! format DSperate's `--cheevos-token` reads. An emulator gets it through its environment when
-//! a game starts ([`Ra::env`]): `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE`; never the
-//! password, never a word of it on the command line.
+//! format DSperate's `--cheevos-token` reads (nib-cheevos' `launch` reads and writes it). An
+//! emulator gets it through its environment when a game starts ([`Ra::env_for`]):
+//! `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE`; never the password, never a word of it on
+//! the command line; and only an emulator whose description says it earns achievements for the
+//! game's system (`[achievements]`, docs/emulators.md).
 //!
 //! The requests go through `curl`, on a thread, as nibOS's own tools do (`nib update`,
 //! `nib bug-report`): DSlot has no TLS of its own. Where there is no `curl` the page isn't
@@ -18,33 +20,30 @@
 //! and rcheevos' endpoints sign in, start sessions and award. So the page shows the sign-up
 //! page's address and a QR code of it, for a phone ([`SIGN_UP`], [`qr`]).
 //!
-//! - `hash`: the identity the service gives a ROM.
-//! - `service`: the requests, and how every answer is checked.
-//! - `set`: a game's set and the player's unlocks, kept on disk per player.
+//! - `service`: the requests (nib-cheevos' `api`), and what DSlot makes of the answers.
+//! - `set`: a game's set and the player's unlocks, kept on disk per player, by the ROM's hash
+//!   (nib-cheevos' `hash`, rcheevos' rhash: the identity the service gives a ROM, for every
+//!   console).
 //! - `lookup`: the shelf's worker, looking games up off the shelf's thread.
 //!
 //! [`Ra`] holds where the sign-in and the lookups are kept; main makes it and hands it down.
 
-pub mod hash;
 pub mod lookup;
 pub mod service;
 pub mod set;
 
 pub use service::Error;
 
+use crate::emulator::Emulator;
+use crate::rom::Console;
+use nib_cheevos::api::Secret;
+use nib_cheevos::launch::{self, Credentials};
 use set::Store;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::OnceLock;
 
 /// Where an account is made, on a phone or a computer.
-pub const SIGN_UP: &str = "https://retroachievements.org/createaccount.php";
-
-/// The environment an emulator reads the sign-in from (docs/emulators.md).
-pub const ENV_TOKEN_FILE: &str = "RA_TOKEN_FILE";
-pub const ENV_USERNAME: &str = "RA_USERNAME";
-pub const ENV_HARDCORE: &str = "RA_HARDCORE";
+pub use nib_cheevos::paths::SIGN_UP;
 
 /// Whether hardcore is offered: the Mode row on the Achievements page, and `RA_HARDCORE=1`
 /// for a game. Off until the service approves our emulators for hardcore unlocks
@@ -55,22 +54,40 @@ pub const HARDCORE_OFFERED: bool = false;
 /// for softcore.
 pub const CASUAL_ONLY: &str = "Achievements are Casual for now: RetroAchievements hasn't \
      approved our emulators for Hardcore yet.";
-/// Which systems earn achievements, as the Achievements page says it: the ones an emulator here
-/// plays with RetroAchievements on (DSperate for DS, inkdot for GB and GBC). The shelf shows a
-/// set for any system the service has (GBA too); this says where playing earns them.
-pub const EARNED_IN: &str = "Earned in DS, Game Boy and Game Boy Color games for now; more \
-     systems are coming.";
+/// Which systems earn achievements, as the Achievements page says it: the ones an emulator
+/// installed here earns them in (its description's `[achievements]`; `earning`, sorted folder
+/// names). The shelf shows a set for any system the service has; this says where playing
+/// earns them.
+pub fn earned_in(earning: &[String]) -> String {
+    let names: Vec<&str> = Console::ALL
+        .iter()
+        .filter(|c| earning.iter().any(|s| s == c.folder()))
+        .map(|c| match c {
+            // "Nintendo DS games" reads long on the page; the DS is the device's own.
+            Console::Ds => "DS",
+            c => c.name(),
+        })
+        .collect();
+    match names.as_slice() {
+        [] => "No emulator here earns achievements yet.".into(),
+        [one] => format!("Earned in {one} games for now; more systems are coming."),
+        [first @ .., last] => format!(
+            "Earned in {} and {last} games for now; more systems are coming.",
+            first.join(", ")
+        ),
+    }
+}
+
+/// Whether the service's identity for the console's games can be had here (nib-cheevos'
+/// `hash`): the shelf looks those games up. Not Game & Watch, which rcheevos has no rule for.
+pub fn hashed(console: Console) -> bool {
+    console != Console::GameWatch && nib_cheevos::hash::console(console.folder()).is_some()
+}
 
 /// Whether the page is offered: `curl` is there to talk to the service. Looked for along
 /// `PATH` once a run.
 pub fn available() -> bool {
-    static CURL: OnceLock<bool> = OnceLock::new();
-    *CURL.get_or_init(|| {
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::split_paths(&path)
-            .chain([PathBuf::from("/usr/bin")])
-            .any(|dir| dir.join("curl").is_file())
-    })
+    service::available()
 }
 
 /// RetroAchievements as DSlot keeps it: where the sign-in is kept (the token file), and
@@ -81,6 +98,9 @@ pub struct Ra {
     /// `retroachievements.token`, beside settings.toml (platform::Dirs::achievements).
     pub token: PathBuf,
     pub store: Store,
+    /// The systems an installed emulator earns achievements in (`Emulators::earning`), for
+    /// the page's note ([`earned_in`]).
+    pub earning: Vec<String>,
 }
 
 /// What a sign-in, or a check of the one kept, came to: the sign-in kept and the player's
@@ -93,7 +113,13 @@ impl Ra {
         Ra {
             token,
             store: Store::new(cache),
+            earning: Vec::new(),
         }
+    }
+
+    /// What the Achievements page says playing earns achievements in ([`earned_in`]).
+    pub fn earned_in(&self) -> String {
+        earned_in(&self.earning)
     }
 
     /// Who is signed in, read from the token file now.
@@ -106,9 +132,9 @@ impl Ra {
     /// the menu that asked has gone. The password goes to `curl` on its standard input, never
     /// in an argument, and is written nowhere.
     pub fn sign_in(&self, user: &str, password: &str) -> Receiver<SignedIn> {
-        let form = service::password_form(user, password);
+        let (user, password) = (user.to_owned(), password.to_owned());
         let token = self.token.clone();
-        request(move || keep_sign_in(&token, service::login(&form)))
+        request(move || keep_sign_in(&token, service::login(&user, Secret::Password(&password))))
     }
 
     /// Signs in again with the token kept: whether it still stands, and the standing now. A
@@ -117,8 +143,8 @@ impl Ra {
     pub fn check(&self, account: Account) -> Receiver<SignedIn> {
         let token = self.token.clone();
         request(move || {
-            let form = service::token_form(&account);
-            checked(&token, &account, service::login(&form))
+            let answer = service::login(&account.user, Secret::Token(&account.token));
+            checked(&token, &account, answer)
         })
     }
 
@@ -147,14 +173,22 @@ impl Ra {
             return Vec::new();
         };
         let hardcore = chosen && HARDCORE_OFFERED;
-        vec![
-            (
-                ENV_TOKEN_FILE.into(),
-                self.token.to_string_lossy().into_owned(),
-            ),
-            (ENV_USERNAME.into(), account.user),
-            (ENV_HARDCORE.into(), if hardcore { "1" } else { "0" }.into()),
-        ]
+        launch::env(&self.token, &account.user, hardcore)
+    }
+
+    /// The environment a game of `system` starts with in `emulator`: [`Ra::env`] when the
+    /// emulator's description says it earns achievements for the system (`[achievements]`),
+    /// hardcore only where it says it may play it; else nothing, not even the sign-in.
+    pub fn env_for(
+        &self,
+        emulator: &Emulator,
+        system: &str,
+        chosen: bool,
+    ) -> Vec<(String, String)> {
+        if !emulator.earns(system) {
+            return Vec::new();
+        }
+        self.env(chosen && emulator.achievements.hardcore)
     }
 }
 
@@ -225,51 +259,26 @@ impl Account {
     /// Reads the token file: `username` on the first line, the token on the second. None
     /// when there is no file, or it is not whole.
     pub fn load(path: &Path) -> Option<Account> {
-        let text = std::fs::read_to_string(path).ok()?;
-        let mut lines = text.lines().map(str::trim);
-        let user = lines.next().filter(|s| !s.is_empty())?.to_owned();
-        let token = lines.next().filter(|s| !s.is_empty())?.to_owned();
-        Some(Account { user, token })
+        let c = launch::read_token_file(path).ok()?;
+        (!c.username.is_empty()).then_some(Account {
+            user: c.username,
+            token: c.token,
+        })
     }
 
     /// Writes the token file, readable by DSlot's user only, whole or not at all: to a file
     /// beside it first, then renamed over it, so that a crash never leaves half a sign-in.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let part = path.with_file_name(format!(".{name}.part"));
-        let write = || -> std::io::Result<()> {
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&part)?;
-            #[cfg(unix)]
-            {
-                // One left from before keeps its mode through truncation: set it again.
-                use std::os::unix::fs::PermissionsExt;
-                file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-            }
-            write!(file, "{}\n{}\n", self.user, self.token)?;
-            file.sync_all()?;
-            std::fs::rename(&part, path)
+        let credentials = Credentials {
+            username: self.user.clone(),
+            token: self.token.clone(),
         };
-        write().inspect_err(|_| {
-            let _ = std::fs::remove_file(&part);
-        })
+        launch::write_token_file(path, &credentials)
     }
 
     /// Removes the token file: signed out.
     pub fn clear(path: &Path) -> std::io::Result<()> {
-        match std::fs::remove_file(path) {
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            other => other,
-        }
+        launch::remove_token_file(path)
     }
 }
 
@@ -428,6 +437,64 @@ mod tests {
         assert_eq!(vars[2], ("RA_HARDCORE".to_owned(), hardcore.to_owned()));
         assert_eq!(vars.len(), 3);
         assert_eq!(ra.env(false)[2].1, "0");
+    }
+
+    /// The sign-in goes only to an emulator that earns achievements for the game's system,
+    /// and hardcore only where its description allows it and DSlot offers it.
+    #[test]
+    fn only_an_emulator_that_earns_them_gets_the_sign_in() {
+        let dir = TempDir::new("ra-env-for");
+        let ra = Ra::new(dir.path().join("retroachievements.token"), dir.path());
+        Account {
+            user: "Alan".into(),
+            token: "t0k3n".into(),
+        }
+        .save(&ra.token)
+        .unwrap();
+        let described = |text: &str| {
+            crate::emulator::Emulators::assume_installed([("e".to_owned(), text.to_owned())])
+        };
+        let both = "name = \"E\"\n[systems]\nGB = [\"/e\"]\nGBA = [\"/e\"]\n";
+        let earns = described(&format!(
+            "{both}[achievements]\nsystems = [\"GB\"]\nhardcore = true\n"
+        ));
+        let e = earns.get("e").unwrap();
+        assert_eq!(ra.env_for(e, "GB", false), ra.env(false));
+        assert_eq!(ra.env_for(e, "GB", true), ra.env(true));
+        assert!(
+            ra.env_for(e, "GBA", false).is_empty(),
+            "not its achievements' system"
+        );
+        let casual = described(&format!("{both}[achievements]\nsystems = [\"GB\"]\n"));
+        let e = casual.get("e").unwrap();
+        assert_eq!(
+            ra.env_for(e, "GB", true)[2].1,
+            "0",
+            "Casual only: no hardcore"
+        );
+        let none = described(both);
+        assert!(none.get("e").unwrap().achievements.systems.is_empty());
+        assert!(ra.env_for(none.get("e").unwrap(), "GB", false).is_empty());
+    }
+
+    #[test]
+    fn the_page_says_which_systems_earn_achievements() {
+        let s = |list: &[&str]| earned_in(&list.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            s(&["GB", "GBC", "NDS"]),
+            "Earned in DS, Game Boy and Game Boy Color games for now; more systems are coming."
+        );
+        assert_eq!(
+            s(&["NDS"]),
+            "Earned in DS games for now; more systems are coming."
+        );
+        assert_eq!(
+            s(&["GBA", "NDS", "SFC"]),
+            "Earned in DS, Game Boy Advance and Super Nintendo games for now; more systems are coming."
+        );
+        assert_eq!(s(&[]), "No emulator here earns achievements yet.");
+        assert!(hashed(Console::Snes) && hashed(Console::PlayStation));
+        assert!(!hashed(Console::GameWatch) && !hashed(Console::Ports));
     }
 
     #[test]

@@ -4,9 +4,12 @@ DSlot is built for one platform at a time, chosen with a Cargo feature: `--featu
 `--features nibos`. Building with neither, or both, stops with a message saying so.
 
 It builds on nibkit, the nibOS SDK's library ([github.com/abradburne/nibkit](https://github.com/abradburne/nibkit)),
-which Cargo fetches at the tag `Cargo.toml` names. To work on both at once, point Cargo at a
-checkout of your own for a while (`[patch."https://github.com/abradburne/nibkit"]` in
-`.cargo/config.toml`, not committed).
+and its `nib-cheevos` crate (RetroAchievements: rcheevos, which is C, so the build needs a C
+compiler), which Cargo fetches at the tag `Cargo.toml` names. To work on both at once, point
+Cargo at a checkout of your own for a while (`[patch."https://github.com/abradburne/nibkit"]`
+in `.cargo/config.toml`, not committed, naming both `nibkit` and `nib-cheevos`, the latter at
+`nib-cheevos/` in the checkout). The PKGBUILD does the same with `NIBKIT=path/to/nibkit
+makepkg ...`.
 
 ## Checks
 

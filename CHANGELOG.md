@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- **RetroAchievements through nibkit's `nib-cheevos`** (nibkit 0.2.0), the same code the
+  emulators use: a ROM's hash is rcheevos' rhash (`achievements/hash.rs` is gone), so the shelf
+  now finds the sets of every console the service has, SNES, NES, Mega Drive, PC Engine,
+  PlayStation (from a cue sheet) and the rest, as well as DS, GBA, GB and GBC; the sign-in, the
+  game's sets (`achievementsets`, the request rcheevos 12.4 makes instead of `patch`, with any
+  bonus set) and the player's unlocks are built and read by rcheevos (`rc_api_*`), not by hand;
+  the token file is `nib-cheevos`' (`launch`), the same format. The User-Agent is
+  `DSlot/<version> (nibOS; linux aarch64) rcheevos/12.4`.
+- **The sign-in goes only to an emulator that earns achievements** for the game's system, as
+  its description now says (`[achievements] systems = [...]`, docs/emulators.md); and
+  `RA_HARDCORE=1` only to one that says `hardcore = true`. The Achievements page's *Earned in*
+  note is made from the installed descriptions.
+
 - **Back opens the menu.** The DS+'s Back key, beside Menu, opens the menu from the shelf and
   goes back in it as B does; X still opens it too until X has the game page. Back is a key of
   its own, not a gamepad button: SDL3 calls it AC Back, and sdl2-compat passes it to SDL2

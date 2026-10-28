@@ -98,7 +98,7 @@ impl RaPage {
     /// The rows: signed out, the username, Sign in, Mode and Make an account; signed in, who,
     /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED);
     /// until then the page ends with a note that achievements are Casual for now, and then
-    /// which systems earn them (achievements::EARNED_IN). The sign-up
+    /// which systems earn them (Ra::earned_in, from the emulators' descriptions). The sign-up
     /// view has the address alone, over the QR code.
     pub fn rows(&self) -> Vec<Item> {
         if self.signing_up {
@@ -119,10 +119,11 @@ impl RaPage {
                 items.push(Item::RaSignUp);
             }
         }
+        let earned_in = self.ra.earned_in();
         let notes = if achievements::HARDCORE_OFFERED {
-            vec![achievements::EARNED_IN]
+            vec![earned_in.as_str()]
         } else {
-            vec![achievements::CASUAL_ONLY, achievements::EARNED_IN]
+            vec![achievements::CASUAL_ONLY, earned_in.as_str()]
         };
         for note in notes {
             items.extend(

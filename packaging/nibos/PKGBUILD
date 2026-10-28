@@ -2,13 +2,14 @@
 #
 # Built from this checkout, not downloaded: prepare() copies the sources into $srcdir, so the
 # build never writes to the repository. Dependencies are fetched once, at the versions
-# Cargo.lock pins (nibkit from its repository, at the tag Cargo.toml names), and the build
+# Cargo.lock pins (nibkit and nib-cheevos from nibkit's repository, at the tag Cargo.toml names,
+# unless NIBKIT names a local checkout to build against instead), and the build
 # itself runs offline. On an aarch64 Arch machine (nibOS's
 # build machine; docs/building.md):
 #
 #   cd packaging/nibos && PKGDEST="$PWD/out" BUILDDIR="$HOME/makepkg-build" makepkg -f --nodeps
 #
-# (--nodeps: the build machine needs Rust and SDL2, not what the shelf needs to run.)
+# (--nodeps: the build machine needs Rust, a C compiler and SDL2, not what the shelf needs to run.)
 #
 # What it does not ship, being nibOS's (its rootfs/dslot): the user DSlot runs as
 # (dslot.service.d/user.conf), the polkit rule that lets that user power off, `nib boot-ui`.
@@ -23,11 +24,14 @@ url="https://github.com/abradburne/DSlot"
 license=(GPL-3.0-or-later OFL-1.1)
 # libpulse: pacat, which plays the insert and eject clicks.
 depends=(sdl2-compat libpulse)
-makedepends=(cargo)
+makedepends=(cargo gcc)   # gcc: rcheevos, RetroAchievements' library (through nib-cheevos)
 optdepends=('dsperate: DS and GBA games'
             'noto-fonts-cjk: game titles in Japanese, Chinese and Korean')
 
 _root=$(cd "$startdir/../.." && pwd)
+# nibkit and nib-cheevos come from nibkit's repository at the tag Cargo.toml names, unless NIBKIT
+# names a local checkout to build both against instead (docs/building.md).
+_nibkit=${NIBKIT:+$(cd "$NIBKIT" && pwd)}
 
 pkgver() {
     sed -n 's/^version = "\(.*\)"/\1/p' "$_root/Cargo.toml" | head -1
@@ -39,8 +43,26 @@ prepare() {
     cp -r "$_root"/{Cargo.toml,Cargo.lock,build.rs,src,assets,data,README.md,CHANGELOG.md,LICENSE,THIRD-PARTY.md,docs} "$srcdir/dslot/"
     cp -r "$_root/packaging/stock-card" "$srcdir/dslot/packaging/"
     cp "$_root/packaging/nibos/dslot.service" "$srcdir/dslot/packaging/nibos/"
+    local locked=--locked
+    if [ -n "$_nibkit" ]; then
+        rm -rf "$srcdir/nibkit"
+        mkdir -p "$srcdir/nibkit" "$srcdir/dslot/.cargo"
+        cp -r "$_nibkit"/{Cargo.toml,build.rs,src,assets,examples,README.md,CHANGELOG.md,nib-cheevos,nibkit-menu-c} "$srcdir/nibkit/"
+        cp "$_nibkit"/LICENSE* "$srcdir/nibkit/"
+        rm -rf "$srcdir/nibkit/nib-cheevos/target" "$srcdir/nibkit/nibkit-menu-c/target"
+        printf '[patch."https://github.com/abradburne/nibkit"]\nnibkit = { path = "%s" }\nnib-cheevos = { path = "%s/nib-cheevos" }\n' \
+            "$srcdir/nibkit" "$srcdir/nibkit" > "$srcdir/dslot/.cargo/config.toml"
+        # Cargo.lock pins the tag's; the local checkout replaces it in the copy here.
+        locked=
+    fi
     cd "$srcdir/dslot"
-    cargo fetch --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+    cargo fetch $locked --target "$(rustc -vV | sed -n 's/^host: //p')"
+    # Where rcheevos' licence is (nib-cheevos' source: Cargo's checkout of nibkit, or NIBKIT's
+    # copy), for package(), which runs offline.
+    cargo metadata $locked --format-version 1 |
+        grep -o '"manifest_path":"[^"]*/nib-cheevos/Cargo.toml"' | head -1 |
+        sed 's/^"manifest_path":"//; s/Cargo.toml"$/rcheevos\/LICENSE/' > "$srcdir/rcheevos-licence"
+    [ -s "$srcdir/rcheevos-licence" ] || { echo "nib-cheevos' source not found" >&2; return 1; }
 }
 
 build() {
@@ -67,6 +89,9 @@ package() {
     install -Dm644 assets/OFL.txt "$pkgdir/usr/share/licenses/dslot/OFL.txt"
     # The crates built in: their licences and notices.
     install -Dm644 -t "$pkgdir/usr/share/licenses/dslot" LICENSE THIRD-PARTY.md
+    # rcheevos (MIT), built in through nib-cheevos (vendored there): its notice goes with every
+    # copy.
+    install -Dm644 "$(cat "$srcdir/rcheevos-licence")" "$pkgdir/usr/share/licenses/dslot/LICENSE.rcheevos"
     # Who took the photos on the system cards, and where they come from.
     install -Dm644 data/systems/photos/CREDITS.md "$pkgdir/usr/share/doc/dslot/photo-credits.md"
 }

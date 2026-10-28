@@ -33,6 +33,11 @@ GBA = ["/usr/bin/dsperate", "--gba", "{options}", "--saves", "{saves}", "--state
 [env]
 DS_DEBUG = "marks"
 
+# Where playing earns RetroAchievements: DS games get the player's sign-in. Casual only.
+[achievements]
+systems = ["NDS"]
+hardcore = false
+
 # Its settings for the handheld, put in place before the first game when there are none.
 [[seed]]
 from = "/usr/share/dsperate/dslot/dsperate.ini"
@@ -68,7 +73,8 @@ delete = ["{saves}/*.auto.dss"]
 | `priority` | default 0 | Each system's default is the installed emulator with the highest. The stock descriptions use 10 and 20; DSperate, 100. |
 | `[systems]` | required | A command for each system it plays, by the system's `Roms/` folder name: `NDS`, `GBA`, `GB`, `GBC`, `SFC` (SNES), `FC` (NES), `FDS`, `MD`, `SMS`, `SG1000`, `GG`, `PCE`, `PCECD`, `PS`, `LYNX`, `NGP`, `WS`, `GW` (Game & Watch). A system DSlot does not know is skipped. |
 | `requires` | optional | Files that must be there as well as the programs: `["/path/to/core.so"]`. |
-| `[env]` | optional | Environment variables for the emulator. When the player is signed in to RetroAchievements, DSlot adds `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE` to them (docs/retroachievements.md). |
+| `[env]` | optional | Environment variables for the emulator. |
+| `[achievements]` | optional | Where the emulator earns RetroAchievements: `systems = ["GB", "GBC"]`, some of its `[systems]` (another is an error), and `hardcore = false` (the default: Casual only; `true` when it can play hardcore, locking what hardcore forbids). When the player is signed in, a game of one of those systems gets `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE` in its environment (`RA_HARDCORE=1` only with `hardcore = true`, and once DSlot offers hardcore); a game of any other system, or in an emulator without the table, gets none. The Achievements page lists the systems the installed emulators earn in (docs/retroachievements.md). |
 | `[[seed]]` | optional | Files copied into place before a game starts, when there is none there yet: `from`, `to` (`~/` is the home folder). Never overwritten. |
 | `quit_on_output` | optional | For an emulator that goes back to a menu of its own when a game ends (the stock NNDDSS): a piece of a line of its output that says so. DSlot watches its output for it and asks it to quit (SIGTERM). |
 | `[[options]]` | optional | Options DSlot shows as settings (below). |

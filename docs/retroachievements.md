@@ -71,17 +71,25 @@ one stopped at, and the ones passed over are asked about again when they are sho
 reads the sign-in afresh for each lookup. It is a thread of its own, not tied to the shelf:
 starting a game never waits for a request to the service to finish.
 
-- **Which game.** The ROM is hashed as the service does it (`achievements/hash.rs`): the MD5 of
-  the file for Game Boy, Game Boy Color and Game Boy Advance; for a DS game, of its header, its
-  two pieces of boot code and its icon/title block, as the service's documentation says (the
-  file inside a zip, when zipped). The hash is kept in `cache/achievements/hashes.tsv` against
+- **Which game.** The ROM is hashed by rcheevos' own rhash, through nibkit's `nib-cheevos`
+  (`hash`), the same code the emulators use, so the shelf and the game always agree: every
+  console's rule (the MD5 of the file for Game Boy, Game Boy Color, Game Boy Advance, Mega
+  Drive and most others; headers left out for NES, FDS, SNES, PC Engine and Lynx; for a DS game
+  its header, its two pieces of boot code and its icon/title block; for a PlayStation or PC
+  Engine CD disc, from its cue sheet or playlist, what rhash reads of it). A zip is its first
+  entry with one of the console's extensions. CHD images and Game & Watch units have no hash
+  yet (rhash reads no CHD, and has no Game & Watch rule), so the shelf shows nothing for them.
+  The shelf looks up any console's game, whether or not an emulator here earns achievements
+  for it: it shows the set the service has. The hash is kept in `cache/achievements/hashes.tsv` against
   the file's path, size and date, so a ROM is read once. The index is anyone's, whoever is
   signed in; it is written beside itself and renamed into place, and a line it can't read is
   passed over, not the end of it.
-- **The set, and what is earned.** Two requests of the emulator API with the sign-in kept, the
-  form on `curl`'s standard input as for signing in: `patch` with the hash (the set: each
-  achievement's title, description, points and badge name; the unofficial ones are left out),
-  then `unlocks`, softcore and hardcore. The answer is kept in
+- **The set, and what is earned.** Requests of the emulator API with the sign-in kept, each
+  built and its answer read by rcheevos (`rc_api_*`, through `nib-cheevos`' `api`), the form on
+  `curl`'s standard input as for signing in: `achievementsets` with the hash (the game's sets,
+  the core set and any bonus set that goes with it: each achievement's title, description,
+  points and badge name; the unofficial ones and the service's "Unknown Emulator" warnings are
+  left out), then `unlocks`, softcore and hardcore, for each set. The answer is kept in
   `cache/achievements/<user>/<hash>.json`, the player's own (another account's unlocks are
   never shown, nor taken for what changed since), with when it was fetched, and stands for six
   hours: browsing the shelf asks the service nothing in between, and with no network the shelf
@@ -97,8 +105,9 @@ starting a game never waits for a request to the service to finish.
   yet. The emulators know better (rcheevos gets every unlock's time when a game starts), so
   DSperate writing them where DSlot can read them is the way to date the rest.
 - **The badges.** `https://media.retroachievements.org/Badge/<name>.png`, fetched once each
-  into `~/.cache/retroachievements/badges/` (`$XDG_CACHE_HOME` when set; DSlot's own cache
-  folder when there is no home) and read from there after. The folder is shared: DSperate keeps
+  into `~/.cache/retroachievements/badges/` (`$XDG_CACHE_HOME` when it is an absolute path;
+  DSlot's own cache folder when there is no home: `nib-cheevos`' `paths`, which every emulator
+  uses too) and read from there after. The folder is shared: DSperate keeps
   the badge of an unlock it shows there, and the other emulators will. A badge not in yet shows
   as a faint square.
 
@@ -123,9 +132,10 @@ There is no shorter official link.
 
 ## Credentials
 
-The sign-in is `r=login2&u=<user>&p=<password>` posted to `https://retroachievements.org/dorequest.php`
-by `curl` (`--data-binary @-`: the form goes on curl's standard input, never on its command line),
-with the user agent `DSlot/<version>`. A success answers with `User` (the username as the service
+The sign-in is `r=login2&u=<user>&p=<password>` (as rcheevos' `rc_api_init_login_request` builds
+it) posted to `https://retroachievements.org/dorequest.php` by `curl` (`--data-binary @-`: the
+form goes on curl's standard input, never on its command line), with the user agent
+`DSlot/<version> (nibOS; linux aarch64) rcheevos/12.4` (`nib-cheevos`' `ua`). A success answers with `User` (the username as the service
 spells it), `Token`, `Score`, `SoftcoreScore` and `Messages`; a refusal with `Success: false` and
 an `Error` line, which the tab shows.
 
@@ -147,17 +157,21 @@ out before handing the device to someone else.
 
 ## How a game gets it
 
-When the player is signed in, every game DSlot starts gets three environment variables, whatever
-its emulator (`[env]` in the emulator's description is kept as well):
+When the player is signed in, a game DSlot starts gets three environment variables when its
+emulator's description says it earns achievements for the game's system (`[achievements]`,
+docs/emulators.md; `[env]` in the description is kept as well). An emulator without the table,
+or a game of a system it doesn't name, gets none of them: the token goes only where it is used.
+The Achievements page says which systems earn them, from the installed descriptions (*Earned in
+DS, Game Boy and Game Boy Color games for now* with DSperate and inkdot).
 
 | Variable | |
 |---|---|
 | `RA_TOKEN_FILE` | The token file's path. |
 | `RA_USERNAME` | The username, for an emulator that reads a one-line token file. |
-| `RA_HARDCORE` | `1` when Hardcore is set and offered, else `0` (always `0` for now). |
+| `RA_HARDCORE` | `1` when Hardcore is set and offered, and the description says `hardcore = true`; else `0` (always `0` for now). |
 
-Signed out, none of them is set. An emulator that knows nothing of them is unaffected. The
-emulator reads the file itself, signs in with the token (`login2` with `t=`, or rcheevos'
+Signed out, none of them is set. The emulator reads the file itself (a Rust one with
+`nib-cheevos`' `launch::Launch::from_env`, which reads both token-file formats), signs in with the token (`login2` with `t=`, or rcheevos'
 `rc_client_begin_login_with_token`), identifies the game and awards. The password is not there to
 pass. The mode is a wish: an emulator that cannot play hardcore (DSperate today) says so in its
 log and plays softcore, and the service credits softcore.

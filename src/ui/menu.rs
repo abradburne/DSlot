@@ -3040,6 +3040,8 @@ mod tests {
     #[test]
     fn achievements_page() {
         let mut w = world("menu-achievements", false);
+        // As if DSperate and inkdot were installed: their descriptions' `[achievements]`.
+        w.ra.earning = ["GB", "GBC", "NDS"].map(String::from).to_vec();
         let mut cx = Context {
             stats: &mut w.stats,
             settings: &mut w.settings,

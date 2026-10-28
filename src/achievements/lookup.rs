@@ -15,7 +15,7 @@
 //! has changed since the last, so that what was found for the last player is let go.
 
 use super::set::Answer;
-use super::{hash, Account, Ra};
+use super::{Account, Ra};
 use crate::gfx::{self, Img};
 use crate::rom::Console;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -102,10 +102,9 @@ impl Lookups {
     }
 
     /// Asks about the game at `path` unless it has been answered or is being looked up. A
-    /// console whose ROMs the service's hash isn't reproduced for isn't asked about.
+    /// console whose ROMs have no hash here (`achievements::hashed`) isn't asked about.
     pub fn ask(&mut self, console: Console, path: &Path) {
-        if !hash::supported(console) || self.pending.contains(path) || self.found.contains_key(path)
-        {
+        if !super::hashed(console) || self.pending.contains(path) || self.found.contains_key(path) {
             return;
         }
         let ask = Ask {
@@ -381,8 +380,9 @@ mod tests {
         // Answered: not asked again.
         w.lookups.ask(Console::Gba, &path("A"));
         assert!(!w.lookups.looking(&path("A")));
-        // Nor a console the service's hash isn't reproduced for.
-        w.lookups.ask(Console::Snes, &PathBuf::from("/r/SFC/Y.sfc"));
+        // Nor a console whose games have no hash here.
+        w.lookups
+            .ask(Console::GameWatch, &PathBuf::from("/r/GW/gnw_ball.zip"));
         assert!(!w.lookups.waiting());
     }
 
