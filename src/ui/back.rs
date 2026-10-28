@@ -11,7 +11,7 @@
 use super::draw::{console_colour, destroy, dim_by, texture, Ui, DIM, FAINT, GOLD, RED, WHITE};
 use super::layout::*;
 use crate::achievements::set::Set;
-use crate::details::{self, Details};
+use crate::details::{self, Details, Looked};
 use crate::gfx;
 use crate::rom::Game;
 use crate::stats::Stats;
@@ -19,14 +19,22 @@ use sdl2::pixels::Color;
 use sdl2::render::Texture;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
+use std::time::{Duration, Instant};
+
+/// How long the note of what a look-up asked for again found stays on the box.
+const NOTE_FOR: Duration = Duration::from_secs(6);
 
 /// The box back's details, and their screenshots as textures on the top screen's canvas.
 pub struct Back {
     cache: PathBuf,
-    /// The game whose details are being looked up, and the answer to come.
-    asked: Option<(PathBuf, Receiver<Details>)>,
-    /// The game shown and what is known of it.
-    shown: Option<(PathBuf, Details)>,
+    /// The game whose details are being looked up, the answer to come, and whether they are
+    /// asked for again (Y).
+    asked: Option<(PathBuf, Receiver<Looked>, bool)>,
+    /// A note on the box: that the details are being looked up again, then what that found,
+    /// and since when it shows.
+    note: Option<(String, Option<Instant>)>,
+    /// The game shown, its index in the shelf's games, and what is known of it.
+    shown: Option<(PathBuf, usize, Details)>,
     /// Its screenshots (title screen, then in play), each with its size in pixels.
     shots: Vec<(Texture, f32, f32)>,
 }
@@ -36,14 +44,26 @@ impl Back {
         Back {
             cache,
             asked: None,
+            note: None,
             shown: None,
             shots: Vec::new(),
         }
     }
 
-    /// Whether details are still to come in: the shelf keeps drawing for them.
+    /// Whether details are still to come in, or a note is still to go: the shelf keeps drawing
+    /// for them.
     pub fn waiting(&self) -> bool {
-        self.asked.is_some()
+        self.asked.is_some() || self.note.is_some()
+    }
+
+    /// The note to show now, if any; one shown long enough is let go.
+    fn note(&mut self) -> Option<String> {
+        if let Some((_, Some(at))) = &self.note {
+            if at.elapsed() >= NOTE_FOR {
+                self.note = None;
+            }
+        }
+        self.note.as_ref().map(|(text, _)| text.clone())
     }
 }
 
@@ -60,25 +80,40 @@ pub struct Mine<'a> {
 impl Ui<'_> {
     /// The game page opened on `game`: what is kept of its details at once, and the rest
     /// looked up.
-    pub fn open_back(&mut self, game: &Game) {
+    pub fn open_back(&mut self, game: &Game, g: usize) {
         self.close_back();
         let cache = self.back.cache.clone();
         let kept = details::kept(&cache, game);
         self.back_shots(&kept);
-        self.back.shown = Some((game.path.clone(), kept));
+        self.back.shown = Some((game.path.clone(), g, kept));
+        self.ask_back(game, false);
+    }
+
+    /// Y on the game page: `game`'s details asked for afresh, with a note on the box while they
+    /// are and of what was found after. Not while a look-up is already under way.
+    pub fn look_up_again(&mut self, game: &Game) {
+        if self.back.asked.is_none() {
+            self.ask_back(game, true);
+            self.back.note = Some(("Looking this game up again\u{2026}".into(), None));
+        }
+    }
+
+    /// `game`'s details looked up on a thread of their own, `again` or not.
+    fn ask_back(&mut self, game: &Game, again: bool) {
+        let cache = self.back.cache.clone();
         let (tell, told) = channel();
         let game = game.clone();
         let path = game.path.clone();
         std::thread::spawn(move || {
-            let _ = tell.send(details::look_up(&cache, &game));
+            let _ = tell.send(details::look_up(&cache, &game, again));
         });
-        self.back.asked = Some((path, told));
+        self.back.asked = Some((path, told, again));
     }
 
     /// The game page closed: its screenshots let go of.
     pub fn close_back(&mut self) {
         self.back.shots.drain(..).for_each(|(t, _, _)| destroy(t));
-        (self.back.shown, self.back.asked) = (None, None);
+        (self.back.shown, self.back.asked, self.back.note) = (None, None, None);
     }
 
     /// The screenshots of `details` as textures.
@@ -97,11 +132,12 @@ impl Ui<'_> {
 
     /// Takes in the details looked up, if they have come.
     fn back_poll(&mut self) {
-        let Some((path, told)) = &self.back.asked else {
+        let Some((path, told, again)) = &self.back.asked else {
             return;
         };
-        let details = match told.try_recv() {
-            Ok(details) => details,
+        let again = *again;
+        let looked = match told.try_recv() {
+            Ok(looked) => looked,
             Err(TryRecvError::Empty) => return,
             Err(TryRecvError::Disconnected) => {
                 self.back.asked = None;
@@ -110,10 +146,21 @@ impl Ui<'_> {
         };
         let path = path.clone();
         self.back.asked = None;
-        if self.back.shown.as_ref().is_some_and(|(p, _)| *p == path) {
-            self.back_shots(&details);
-            self.back.shown = Some((path, details));
+        let Some((_, g, was)) = self.back.shown.take().filter(|(p, _, _)| *p == path) else {
+            return;
+        };
+        if again {
+            let line = details::found_line(&looked);
+            self.back.note = Some((line, Some(Instant::now())));
         }
+        // Box art fetched for a game with none (or fetched again, or gone): its cart and box
+        // are made again with it.
+        let details = looked.details;
+        if was.boxart != details.boxart || again && details.boxart.is_some() {
+            self.forget_art_of(g);
+        }
+        self.back_shots(&details);
+        self.back.shown = Some((path, g, details));
     }
 
     /// The back of `game`'s box, on the top screen.
@@ -131,8 +178,8 @@ impl Ui<'_> {
             .back
             .shown
             .as_ref()
-            .filter(|(p, _)| *p == game.path)
-            .map(|(_, d)| d.clone())
+            .filter(|(p, _, _)| *p == game.path)
+            .map(|(_, _, d)| d.clone())
             .unwrap_or_default();
         let looking = self.back.asked.is_some();
 
@@ -283,6 +330,19 @@ impl Ui<'_> {
                     y += 27.0;
                 }
             }
+        }
+
+        // A look-up asked for again: under way, then what it found, on a label across the box.
+        if let Some(note) = self.back.note() {
+            let w = self.fonts.width(&note, 20.0, true) + 48.0;
+            let (nx, ny) = (bx + (bw - 30.0 - w) / 2.0, by + 112.0);
+            fill(self, GOLD, (nx, ny, w, 40.0))?;
+            fill(
+                self,
+                Color::RGB(24, 26, 34),
+                (nx + 3.0, ny + 3.0, w - 6.0, 34.0),
+            )?;
+            self.text(v, &note, (20.0, true), (nx + 24.0, ny + 8.0), 0.0, GOLD)?;
         }
 
         // The points down the bottom: the player's own play.

@@ -465,6 +465,16 @@ impl Ui<'_> {
         }
     }
 
+    /// Forget game `g`'s artwork, to be composed again as it is wanted: its box art changed.
+    pub(super) fn forget_art_of(&mut self, g: usize) {
+        if let Some(a) = self.arts.remove(&g) {
+            a.destroy();
+        }
+        for t in self.thumbs.remove(&g).into_iter().flatten() {
+            destroy(t);
+        }
+    }
+
     /// Take in artwork the workers have finished and hand out more. `wants` and `hold` are
     /// places in `list`: what to make, most wanted first, and whose full-size artwork to keep.
     /// Returns whether everything wanted is here.

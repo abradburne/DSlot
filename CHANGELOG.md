@@ -35,6 +35,21 @@
   achievement badges in a grid, the ones earned rimmed in gold; the one chosen goes on the box
   as a gold sticker with its points and description. With no set, the grid's place says why,
   or offers a sign-in. The menu's Game page no longer has the Achievements row.
+- **Box art from the web for a game without its own.** When a game's page looks up its
+  screenshots and the game has no `Imgs/<rom>.png`, libretro's `Named_Boxarts` is fetched too
+  (by the ROM's file name, up to 60 seconds: they are large) and kept in DSlot's cache beside
+  the screenshots (`details/<system>/<ROM name>/boxart.png`), never on the card. The shelf's
+  box, the cart's label printed from it, the grid's cover, the system picker's blade and the
+  back of the box use it where the card has none (`art::box_art`): the card's own art first,
+  then the fetched, and the printed box only with neither. It shows as soon as it comes in.
+- **L / R on the game page** step along Play, Favourite, Rating and Settings, round the row, as
+  they turn the menu's tabs (from a badge, from the button above it); the hint line says so.
+- **Y on the game page looks the game up again**: its screenshots, box art (where it has none
+  of its own) and Wikipedia details, asked for afresh rather than waiting out the 90 days (a
+  week for a miss), for a lookup that found nothing or the wrong game. A note on the box says
+  *Looking this game up again…*, then what it found (or that there was no network); what the
+  servers answer replaces what was kept, a screenshot they no longer have included, and the
+  shelf's box is made again with new box art.
 
 ## 0.4.1
 

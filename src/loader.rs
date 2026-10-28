@@ -68,7 +68,8 @@ impl Loader {
                 };
                 let made = match job {
                     Job::Art(_) => {
-                        let (cart, cover) = art::art(source.shell, &game, source.fonts, looks);
+                        let (shell, fonts) = (source.shell, source.fonts);
+                        let (cart, cover) = art::art(shell, &game, fonts, looks, source.cache);
                         Made::Art { cart, cover }
                     }
                     Job::Thumb(_) => Made::Thumb(art::thumb(

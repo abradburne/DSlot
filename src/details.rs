@@ -5,7 +5,9 @@
 //!
 //! - **Screenshots**: libretro's thumbnails (thumbnails.libretro.com), `Named_Titles` and
 //!   `Named_Snaps`, by the system's name there and the ROM's file name, which is the No-Intro
-//!   name the thumbnails go by when the ROM is named as No-Intro names it.
+//!   name the thumbnails go by when the ROM is named as No-Intro names it. And `Named_Boxarts`
+//!   for a game with no box art of its own (`Imgs/<rom>.png`): kept here, in DSlot's cache,
+//!   never on the card, and drawn where the card has none (art.rs, `box_art`).
 //! - **What it is**: Wikipedia's search for the game's name, its system and "video game"; the
 //!   first page whose short description says it is a video game and whose title has the
 //!   game's name in it gives the summary (Wikipedia's lead, CC BY-SA, credited on the box);
@@ -24,8 +26,9 @@ use std::time::{Duration, SystemTime};
 /// How long what was found stands before it is asked for again, and what wasn't.
 const FOUND_FOR: Duration = Duration::from_secs(90 * 24 * 60 * 60);
 const MISSED_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-/// How long one request may take.
+/// How long one request may take; box art, often half a megabyte from a slow server, longer.
 const TIMEOUT_SECS: &str = "20";
+const BOXART_TIMEOUT_SECS: &str = "60";
 const THUMBNAILS: &str = "https://thumbnails.libretro.com";
 const WIKIPEDIA: &str = "https://en.wikipedia.org";
 const WIKIDATA: &str = "https://www.wikidata.org/w/api.php";
@@ -42,21 +45,30 @@ pub struct About {
     pub genre: Option<String>,
 }
 
-/// What is known of a game: its details, and its screenshots' files.
+/// What is known of a game: its details, and its screenshots' and box art's files.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Details {
     pub about: Option<About>,
     pub title_shot: Option<PathBuf>,
     pub snap: Option<PathBuf>,
+    /// Box art fetched for a game with none of its own.
+    pub boxart: Option<PathBuf>,
 }
 
 /// What is kept for a game, beside its screenshots: when each part was last asked for.
 #[derive(Default, Serialize, Deserialize)]
 struct Kept {
     about: Option<About>,
-    /// When the details, and the screenshots, were last asked for (Unix seconds).
+    /// When the details, the screenshots and the box art were last asked for (Unix seconds).
     about_at: u64,
     shots_at: u64,
+    #[serde(default)]
+    boxart_at: u64,
+}
+
+/// Where box art fetched for `game` is kept, whether or not it has been.
+pub fn boxart_file(cache: &Path, game: &Game) -> PathBuf {
+    folder(cache, game).join("boxart.png")
 }
 
 /// The system's name among libretro's thumbnails; None where there are none.
@@ -122,12 +134,22 @@ pub fn kept(cache: &Path, game: &Game) -> Details {
         about: kept.about,
         title_shot: file("title.png"),
         snap: file("snap.png"),
+        boxart: file("boxart.png"),
     }
 }
 
-/// `game`'s details: what is kept, with whatever is missing or old asked for first. Slow (a
-/// few requests): on a thread.
-pub fn look_up(cache: &Path, game: &Game) -> Details {
+/// What a look-up came to: the details, and whether any of the servers answered.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Looked {
+    pub details: Details,
+    pub reached: bool,
+}
+
+/// `game`'s details: what is kept, with whatever is missing or old asked for first; `again`,
+/// everything asked for afresh (Y on the game page). What a server answers replaces what was
+/// kept, a screenshot it no longer has included; what it can't be asked keeps what was there.
+/// Slow (a few requests): on a thread.
+pub fn look_up(cache: &Path, game: &Game, again: bool) -> Looked {
     let dir = folder(cache, game);
     let file = dir.join("details.json");
     let mut kept: Kept = std::fs::read_to_string(&file)
@@ -137,29 +159,58 @@ pub fn look_up(cache: &Path, game: &Game) -> Details {
     let now = now();
     let due = |at: u64, found: bool| {
         let stands = if found { FOUND_FOR } else { MISSED_FOR };
-        at + stands.as_secs() <= now
+        again || at + stands.as_secs() <= now
     };
+    let mut reached = false;
     let _ = std::fs::create_dir_all(&dir);
     let mut changed = false;
     let shots_found = dir.join("title.png").is_file() || dir.join("snap.png").is_file();
-    if due(kept.shots_at, shots_found) {
+    // Box art only for a game with none of its own, and only until it is found.
+    let wants_box = !game.art("Imgs").is_file()
+        && (again || !dir.join("boxart.png").is_file())
+        && due(kept.boxart_at, false);
+    if due(kept.shots_at, shots_found) || wants_box {
         if let Some(system) = thumbnail_system(game.console) {
             let name = thumbnail_name(&game.stem);
-            let mut reached = false;
-            for (kind, to) in [("Named_Titles", "title.png"), ("Named_Snaps", "snap.png")] {
+            let mut answered = false;
+            let mut kinds = Vec::new();
+            if due(kept.shots_at, shots_found) {
+                kinds.extend([("Named_Titles", "title.png"), ("Named_Snaps", "snap.png")]);
+            }
+            if wants_box {
+                kinds.push(("Named_Boxarts", "boxart.png"));
+            }
+            for &(kind, to) in &kinds {
                 let url = format!(
                     "{THUMBNAILS}/{}/{kind}/{}.png",
                     escape(system),
                     escape(&name)
                 );
-                match get(&url, &dir.join(to)) {
-                    Got::Yes | Got::NotThere => reached = true,
+                let timeout = match kind {
+                    "Named_Boxarts" => BOXART_TIMEOUT_SECS,
+                    _ => TIMEOUT_SECS,
+                };
+                match get(&url, &dir.join(to), timeout) {
+                    Got::Yes => answered = true,
+                    Got::NotThere => {
+                        // Asked again: what the server no longer has goes.
+                        if again {
+                            let _ = std::fs::remove_file(dir.join(to));
+                        }
+                        answered = true;
+                    }
                     Got::NoNetwork => {}
                 }
             }
             // With no network, asked again next time rather than in a week.
-            if reached {
-                kept.shots_at = now;
+            if answered {
+                reached = true;
+                for &(kind, _) in &kinds {
+                    match kind {
+                        "Named_Boxarts" => kept.boxart_at = now,
+                        _ => kept.shots_at = now,
+                    }
+                }
                 changed = true;
             }
         }
@@ -167,9 +218,14 @@ pub fn look_up(cache: &Path, game: &Game) -> Details {
     if due(kept.about_at, kept.about.is_some()) {
         // Unreached: asked again next time.
         if let Ok(about) = about(game) {
-            kept.about = about.or(kept.about.take());
+            // Asked again, the answer stands even if it is that there is none.
+            kept.about = if again {
+                about
+            } else {
+                about.or(kept.about.take())
+            };
             kept.about_at = now;
-            changed = true;
+            (changed, reached) = (true, true);
         }
     }
     if changed {
@@ -181,10 +237,37 @@ pub fn look_up(cache: &Path, game: &Game) -> Details {
         }
     }
     let file = |name: &str| Some(dir.join(name)).filter(|f| f.is_file());
-    Details {
-        about: kept.about,
-        title_shot: file("title.png"),
-        snap: file("snap.png"),
+    Looked {
+        details: Details {
+            about: kept.about,
+            title_shot: file("title.png"),
+            snap: file("snap.png"),
+            boxart: file("boxart.png"),
+        },
+        reached,
+    }
+}
+
+/// What a look-up asked for again found, for the note on the box: "Found the title screen, a
+/// screenshot and the Wikipedia summary", or that it found nothing, or couldn't ask.
+pub fn found_line(looked: &Looked) -> String {
+    if !looked.reached {
+        return "No network: kept what was here".into();
+    }
+    let d = &looked.details;
+    let parts: Vec<&str> = [
+        d.title_shot.as_ref().map(|_| "the title screen"),
+        d.snap.as_ref().map(|_| "a screenshot"),
+        d.boxart.as_ref().map(|_| "box art"),
+        d.about.as_ref().map(|_| "the Wikipedia summary"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    match parts.as_slice() {
+        [] => "Looked again: nothing found for this game".into(),
+        [one] => format!("Found {one}"),
+        [rest @ .., last] => format!("Found {} and {last}", rest.join(", ")),
     }
 }
 
@@ -208,11 +291,11 @@ fn user_agent() -> String {
     )
 }
 
-/// `url` into `to`, whole or not at all.
-fn get(url: &str, to: &Path) -> Got {
+/// `url` into `to`, whole or not at all, in at most `timeout` seconds.
+fn get(url: &str, to: &Path, timeout: &str) -> Got {
     let part = to.with_extension("part");
     let status = Command::new("curl")
-        .args(["-sSL", "--max-time", TIMEOUT_SECS, "-A", &user_agent()])
+        .args(["-sSL", "--max-time", timeout, "-A", &user_agent()])
         .args(["-w", "%{http_code}", "-o"])
         .arg(&part)
         .arg(url)
@@ -410,6 +493,54 @@ mod tests {
             "Nintendo%20-%20Game%20Boy%20Advance"
         );
         assert_eq!(thumbnail_system(Console::Apps), None);
+    }
+
+    /// A game's own box art first, then what was fetched into the cache, never on the card.
+    #[test]
+    fn box_art_own_then_fetched() {
+        let dir = crate::testing::TempDir::new("details-boxart");
+        let (roms, cache) = (dir.path().join("GBA"), dir.path().join("cache"));
+        std::fs::create_dir_all(&roms).unwrap();
+        let game = Game {
+            console: Console::Gba,
+            path: roms.join("Golden Sun (USA, Europe).gba"),
+            title: vec!["Golden Sun".into()],
+            stem: "Golden Sun (USA, Europe)".into(),
+            code: String::new(),
+            icon: None,
+            cover: None,
+            gone: false,
+        };
+        let own = game.art("Imgs");
+        assert_eq!(crate::art::box_art(&game, &cache), own);
+        let fetched = boxart_file(&cache, &game);
+        assert!(fetched.starts_with(&cache));
+        std::fs::create_dir_all(fetched.parent().unwrap()).unwrap();
+        std::fs::write(&fetched, b"png").unwrap();
+        assert_eq!(crate::art::box_art(&game, &cache), fetched);
+        assert_eq!(kept(&cache, &game).boxart, Some(fetched));
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::write(&own, b"png").unwrap();
+        assert_eq!(crate::art::box_art(&game, &cache), own);
+    }
+
+    #[test]
+    fn what_a_look_up_found() {
+        let mut looked = Looked::default();
+        assert_eq!(found_line(&looked), "No network: kept what was here");
+        looked.reached = true;
+        assert_eq!(
+            found_line(&looked),
+            "Looked again: nothing found for this game"
+        );
+        looked.details.snap = Some(PathBuf::from("snap.png"));
+        assert_eq!(found_line(&looked), "Found a screenshot");
+        looked.details.title_shot = Some(PathBuf::from("title.png"));
+        looked.details.about = Some(About::default());
+        assert_eq!(
+            found_line(&looked),
+            "Found the title screen, a screenshot and the Wikipedia summary"
+        );
     }
 
     #[test]

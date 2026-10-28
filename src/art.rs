@@ -961,9 +961,25 @@ fn gbc_shell(clear: bool) -> Frame {
     Frame { img, sticker }
 }
 
+/// Where a game's box art is: its own (`Imgs/<rom>.png`, an app's icon) where there is one;
+/// else what the game page fetched for it into DSlot's `cache` (details.rs), where it did; else
+/// its own place, where nothing is, and the box is printed.
+pub fn box_art(game: &Game, cache: &Path) -> std::path::PathBuf {
+    let own = game.art("Imgs");
+    if own.is_file() {
+        return own;
+    }
+    let fetched = crate::details::boxart_file(cache, game);
+    if fetched.is_file() {
+        fetched
+    } else {
+        own
+    }
+}
+
 /// A game's cart and its box, the box art read once for both.
-pub fn art(shell: &Shell, game: &Game, fonts: &Fonts, looks: Looks) -> (Img, Img) {
-    let src = load_png(&game.art("Imgs"));
+pub fn art(shell: &Shell, game: &Game, fonts: &Fonts, looks: Looks, cache: &Path) -> (Img, Img) {
+    let src = load_png(&box_art(game, cache));
     // An app's page is a grid of boxes alone: no cart to draw.
     let cart = if disc::is_disc(game.console) {
         disc::disc(
@@ -1296,7 +1312,7 @@ pub fn thumb_size(console: Console, size: (usize, usize)) -> (usize, usize) {
 /// A box is drawn as high as a DS one, at its own shape: a GBA box is square.
 pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cache: &Path) -> Img {
     let (w, h) = thumb_size(game.console, size);
-    let art = game.art("Imgs");
+    let art = box_art(game, cache);
     let source = fs::metadata(&art)
         .or_else(|_| fs::metadata(&game.path))
         .ok();

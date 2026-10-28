@@ -88,6 +88,8 @@ pub struct Done {
     /// The menu, over the page: on the game's Game page, or (`sign_in`) on Achievements.
     pub settings: bool,
     pub sign_in: bool,
+    /// Y: the game's screenshots, box art and details looked up again (back.rs).
+    pub look_again: bool,
 }
 
 /// The open game page.
@@ -132,6 +134,18 @@ impl GamePage {
         } else {
             None
         }
+    }
+
+    /// L / R: the button before or after, round the row, as L / R turn the menu's tabs. From
+    /// a badge, from the button above it.
+    fn flip(&mut self, by: i32) {
+        let at = match self.focus {
+            Focus::Button(b) => BUTTONS.iter().position(|&x| x == b).unwrap_or(0),
+            Focus::Badge(i) => (i % COLS) * BUTTONS.len() / COLS,
+            Focus::SignIn => 0,
+        };
+        let n = BUTTONS.len() as i32;
+        self.focus = Focus::Button(BUTTONS[(at as i32 + by).rem_euclid(n) as usize]);
     }
 
     /// Moves the focus `dx` across and `dy` down.
@@ -209,6 +223,10 @@ impl GamePage {
         if input.turn != 0 || input.moved != 0 {
             self.step(input.turn.signum(), input.moved.signum(), cx);
         }
+        if input.page != 0 {
+            self.flip(input.page.signum());
+        }
+        done.look_again = input.reset;
         if pressed {
             let path = &cx.game.path;
             match self.focus {
@@ -417,7 +435,7 @@ impl Ui<'_> {
             }
             (None, None) => {}
         }
-        let hint = "D-pad  move   \u{b7}   A  choose   \u{b7}   Back  settings   \u{b7}   B  close";
+        let hint = "D-pad  move  \u{b7}  L / R  buttons  \u{b7}  A  choose  \u{b7}  Y  look up again  \u{b7}  Back  settings  \u{b7}  B  close";
         self.footer(v, hint, 0.0, game.console)
     }
 }
@@ -499,6 +517,15 @@ mod tests {
         page.update(&right, &mut cx);
         assert_eq!(page.focus, Focus::Button(Button::Settings));
         assert!(page.update(&a, &mut cx).settings);
+        // L / R: along the buttons, round the row.
+        let (l, r) = (input(|i| i.page = -1), input(|i| i.page = 1));
+        page.update(&r, &mut cx);
+        assert_eq!(page.focus, Focus::Button(Button::Play));
+        page.update(&l, &mut cx);
+        assert_eq!(page.focus, Focus::Button(Button::Settings));
+        page.update(&l, &mut cx);
+        assert_eq!(page.focus, Focus::Button(Button::Rating));
+        assert!(page.update(&input(|i| i.reset = true), &mut cx).look_again);
         assert!(page.update(&input(|i| i.close = true), &mut cx).closed);
         // A tap on a button presses it.
         let (x, y, w, h) = GamePage::button_rect(0);
@@ -540,6 +567,11 @@ mod tests {
         }
         assert!(matches!(page.focus, Focus::Button(_)));
         assert_eq!(page.first, 0);
+        // From a badge, L / R go to the buttons: the one after the button above it.
+        page.update(&down, &mut cx);
+        assert_eq!(page.focus, Focus::Badge(0));
+        page.update(&input(|i| i.page = 1), &mut cx);
+        assert_eq!(page.focus, Focus::Button(Button::Favourite));
         // A tap on a badge picks it.
         let (x, y, _, _) = page.badge_rect(2).unwrap();
         page.update(&input(|i| i.taps = vec![(x + 1.0, y + 1.0)]), &mut cx);

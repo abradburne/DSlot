@@ -187,9 +187,13 @@ a sticker. The details come from the web when the page is opened, and only then,
 the screenshots from libretro's thumbnails (thumbnails.libretro.com, by the ROM's file name,
 so a ROM named as No-Intro names it finds them), what the game is from Wikipedia's search and
 summary (en.wikipedia.org, the blurb credited on the box, CC BY-SA) and Wikidata
-(www.wikidata.org). Nothing else is sent: the game's name and system, and DSlot's version in
-the User-Agent. They are kept in the cache, `details/<system>/<ROM name>/`, and asked for again
+(www.wikidata.org). A game with no box art of its own gets its box art from libretro's
+thumbnails then too (see Artwork). Nothing else is sent: the game's name and system, and
+DSlot's version in the User-Agent. They are kept in the cache, `details/<system>/<ROM name>/`, and asked for again
 after 90 days (a week for what wasn't found); with no network the page shows what was kept.
+**Y** on the page asks for them all again now, for a lookup that found nothing or the wrong
+game: a note on the box says so while it runs and what it found after. What the servers answer
+replaces what was kept; with no network, what was kept stays.
 
 ## The status bar
 
@@ -245,7 +249,7 @@ scripts too. How to make one: [docs/apps.md](docs/apps.md).
 | Flick the grid or a list | It keeps scrolling and slows to a stop, as on a phone; touch it to stop it |
 | Y | Mark or unmark the game as a favourite |
 | Back (beside Menu) | Open the menu |
-| X | The game page: the box turns round to its back on the top screen (screenshots, what the game is, your play); Play, Favourite, Rating, Settings and the game's achievement badges on the touch screen. The D-pad moves, A (or a tap) presses or picks a badge, B or X closes it, Back opens the menu over it |
+| X | The game page: the box turns round to its back on the top screen (screenshots, what the game is, your play); Play, Favourite, Rating, Settings and the game's achievement badges on the touch screen. The D-pad moves, L / R step along the buttons (as they turn the menu's tabs), A (or a tap) presses or picks a badge, Y looks the game's screenshots, box art and details up again, B or X closes it, Back opens the menu over it |
 | Start | The View sheet: how this page is shown (View, Sort by, Show, Game case) on the top screen, the shelf below changing as you go. Up / down picks a row, left / right changes it, Y goes back to what it inherits, Start, B or a touch closes it |
 | Select + Start | Leave DSlot (on the stock OS, Menu too) |
 | Hold power (nibOS) | The power menu: Sleep, Restart, Power off, Cancel. During a game, the game is saved and put away first; Cancel carries on with it |
@@ -308,6 +312,10 @@ Artwork is optional. With none, every cart gets a sticker printed from the ROM's
 icon and game code, and every box is drawn from the same. Box art goes in `Imgs/` beside the
 ROMs, the folder the stock menu uses, so one set of covers serves both; labels and finished
 carts can go in `Labels/` and `Carts/`. Names, shapes and sizes: [docs/artwork.md](docs/artwork.md).
+
+A game with no box art in `Imgs/` gets libretro's (thumbnails.libretro.com, by the ROM's file
+name) the first time its page (X) is opened with a network: it is kept in DSlot's cache, not on
+the card, and used wherever the card has none. Art you put in `Imgs/` always comes first.
 
 A card set up for slot CFW (`Games/GBA`, `Labels/GBA`, Cart Studio's `cart_shell.txt`) works
 as it is, beside the stock layout: [docs/slot-cards.md](docs/slot-cards.md).

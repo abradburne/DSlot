@@ -24,7 +24,7 @@ use crate::stats::Stats;
 use nibkit::touch::{Panel, Pointer};
 use sdl2::event::Event;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Pushing a cart in: the slide, then the fade to black once the latch has clicked.
@@ -532,7 +532,7 @@ fn pages(
 
 /// A page's blade in the system picker: its games, the game whose art it shows (the one last
 /// played, else the first by name), and when that was.
-fn blade(games: &[Game], stats: &Stats, console: Console) -> Blade {
+fn blade(games: &[Game], stats: &Stats, console: Console, cache: &Path) -> Blade {
     let mine = || {
         games
             .iter()
@@ -552,7 +552,7 @@ fn blade(games: &[Game], stats: &Stats, console: Console) -> Blade {
         console,
         games: mine().count(),
         last: last.map(|(_, i)| stats.last_played(&games[i].path)),
-        art: game.is_some_and(|i| games[i].art("Imgs").is_file()),
+        art: game.is_some_and(|i| crate::art::box_art(&games[i], cache).is_file()),
         game,
     }
 }
@@ -1449,7 +1449,12 @@ fn show(
                         state.menu = Some(Menu::open(true, shelf.ra));
                         state.repeat.stop();
                     }
-                    Key::Y | Key::L | Key::R | Key::Start | Key::Select => {}
+                    // As L / R turn the menu's tabs, along the buttons.
+                    Key::L => menu_input.page -= 1,
+                    Key::R => menu_input.page += 1,
+                    // Y: the game's screenshots, box art and details looked up again.
+                    Key::Y => menu_input.reset = true,
+                    Key::Start | Key::Select => {}
                 },
                 // Select alone: the system picker, on this page's blade.
                 Some(Input::Press(Key::Select)) => {
@@ -1464,7 +1469,7 @@ fn show(
                 Some(Input::Press(Key::X)) if state.order.get(state.sel).is_some() => {
                     let game = &games[state.order[state.sel]];
                     state.game_page = Some(GamePage::open(game, shelf.ra.account().is_some()));
-                    ui.open_back(game);
+                    ui.open_back(game, state.order[state.sel]);
                     state.repeat.stop();
                 }
                 // Start: how the page is shown, on the top screen over the shelf it changes.
@@ -1602,6 +1607,9 @@ fn show(
                     let mut cx = page_context(&mut *stats, &ui, games, g);
                     let done = page.update(&menu_input, &mut cx);
                     relist |= done.changed;
+                    if done.look_again {
+                        ui.look_up_again(&games[g]);
+                    }
                     if done.settings || done.sign_in {
                         state.menu = Some(match done.sign_in {
                             true => Menu::open_achievements(true, shelf.ra),
@@ -1790,7 +1798,7 @@ fn show(
             Some(_) => state
                 .pages
                 .iter()
-                .map(|&c| blade(games, stats, c))
+                .map(|&c| blade(games, stats, c, &shelf.opts.cache))
                 .collect(),
             None => Vec::new(),
         };
