@@ -213,17 +213,12 @@ struct Cheevos {
     found: HashMap<usize, Option<cheevos::Found>>,
     asked: HashSet<usize>,
     badges: HashMap<String, Texture>,
-    /// When the strip was first drawn: its pages turn by the clock.
-    since: Instant,
     /// The first row on the top screen while the list is browsed.
     first: usize,
 }
 
-/// Rows the browsed list shows at once, and badges a page of the strip holds.
+/// Rows the browsed list shows at once.
 const LIST_ROWS: usize = 6;
-const STRIP_COLS: usize = 11;
-const STRIP_ROWS: usize = 2;
-const STRIP_PAGE_SECS: u64 = 5;
 
 impl Cheevos {
     fn start<'scope>(scope: &'scope Scope<'scope, '_>, store: cheevos::Store) -> Cheevos {
@@ -282,7 +277,6 @@ impl Cheevos {
             found: HashMap::new(),
             asked: HashSet::new(),
             badges: HashMap::new(),
-            since: Instant::now(),
             first: 0,
         }
     }
@@ -359,8 +353,7 @@ impl<'a> Ui<'a> {
     }
 
     /// The game's achievements on the top screen, under its details at `(x, y)`: a line
-    /// counting them and a strip of their badges, paging by the clock when there are more than
-    /// fit; or, while the menu browses them (`list` is the row highlighted), the list itself,
+    /// counting them and a bar of how far through the set the player is; or, while the menu browses them (`list` is the row highlighted), the list itself,
     /// from `y_list` down, each with its badge, title, points and description.
     fn draw_cheevos(
         &mut self,
@@ -471,29 +464,22 @@ impl<'a> Ui<'a> {
         }
         self.text(v, "Achievements", (22.0, false), (x, y), 0.0, DIM)?;
         self.text(v, &set.summary(), (22.0, true), (x, y + 28.0), 0.0, WHITE)?;
-        let per_page = STRIP_COLS * STRIP_ROWS;
-        let pages = n.div_ceil(per_page).max(1);
-        let page = (self.cheevos.since.elapsed().as_secs() / STRIP_PAGE_SECS) as usize % pages;
-        let (side, pitch) = (30.0, 36.0);
-        let badges: Vec<_> = set
-            .achievements
-            .iter()
-            .skip(page * per_page)
-            .take(per_page)
-            .map(|a| (a.badge.clone(), a.unlocked))
-            .collect();
-        for (i, (name, unlocked)) in badges.into_iter().enumerate() {
-            let (col, row) = (i % STRIP_COLS, i / STRIP_COLS);
-            self.badge(
-                v,
-                &name,
-                unlocked,
-                (x + col as f32 * pitch, y + 62.0 + row as f32 * pitch, side),
-            )?;
-        }
-        if pages > 1 {
-            let where_ = format!("{} / {pages}", page + 1);
-            self.text(v, &where_, (18.0, false), (x + width, y + 32.0), 1.0, FAINT)?;
+        // How far through the set, by count: a faint track and the part earned in gold.
+        let (bar_y, bar_h) = (y + 66.0, 6.0);
+        let done = if n == 0 {
+            0.0
+        } else {
+            set.unlocked() as f32 / n as f32
+        };
+        let white = &mut self.white[v.c];
+        white.set_color_mod(255, 255, 255);
+        white.set_alpha_mod(28);
+        self.canvases[v.c].copy(white, None, v.rect(x, bar_y, width, bar_h))?;
+        if done > 0.0 {
+            white.set_color_mod(GOLD.r, GOLD.g, GOLD.b);
+            white.set_alpha_mod(255);
+            self.canvases[v.c].copy(white, None, v.rect(x, bar_y, width * done, bar_h))?;
+            white.set_color_mod(255, 255, 255);
         }
         Ok(())
     }

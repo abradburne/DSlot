@@ -45,9 +45,8 @@ as it is.
 ## On the shelf
 
 With the player signed in, the top screen says, under the selected game's details, how it
-stands with the service: *Achievements*, then *19 of 28 · 425 of 630 points*, then the badges
-of the set in a strip, the ones not yet earned dimmed. More than two rows of them page by the
-clock, every five seconds. A game the service doesn't know says *Not on RetroAchievements*;
+stands with the service: *Achievements*, then *19 of 28 · 425 of 630 points*, then a bar of how
+many of the set are earned. A game the service doesn't know says *Not on RetroAchievements*;
 one still being looked up, *Looking up…*. Signed out, nothing is shown.
 
 To read the list, the menu's **Game** page has an **Achievements** row (the same line as its
@@ -69,6 +68,13 @@ How it is known, all off the shelf's thread, by a worker of its own:
   nothing in between, and with no network the shelf shows what was kept, however old. A game
   just played is asked about again next time it is selected, since it may have earned some.
   The service not knowing the ROM is kept too, so it isn't asked again every time.
+- **When each was earned.** `unlocks` says which, not when, so DSlot dates what it sees change:
+  an achievement a lookup finds earned that the one before found not gets that lookup's time
+  (`unlocked_at` in the cached set, Unix seconds), which, since a game just played is asked
+  about again as soon as it is selected, is close to the end of the session that earned it.
+  One already earned the first time the game is looked up has no date. Nothing shows the dates
+  yet. The emulators know better (rcheevos gets every unlock's time when a game starts), so
+  DSperate writing them where DSlot can read them is the way to date the rest.
 - **The badges.** `https://media.retroachievements.org/Badge/<name>.png`, fetched once each
   into `~/.cache/retroachievements/badges/` (`$XDG_CACHE_HOME` when set; DSlot's own cache
   folder when there is no home) and read from there after. The folder is shared: DSperate keeps

@@ -32,6 +32,11 @@ pub struct Achievement {
     pub badge: String,
     #[serde(default)]
     pub unlocked: bool,
+    /// When it was earned, as far as DSlot knows (Unix seconds): the lookup that first found it
+    /// earned, when an earlier one had found it not. None for one already earned the first
+    /// time the game was looked up, or not earned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unlocked_at: Option<u64>,
 }
 
 /// A game's set, and the player's standing in it.
@@ -204,6 +209,8 @@ impl Store {
         };
         match fetch_set(account, &hash) {
             Ok(set) => {
+                let before = kept.and_then(|c| c.set);
+                let set = set.map(|s| dated(s, before.as_ref(), now));
                 let cached = Cached { fetched: now, set };
                 self.keep(&hash, &cached);
                 Some(found(&cached.set))
@@ -223,6 +230,24 @@ fn found(set: &Option<Set>) -> Found {
         Some(s) => Found::Set(s.clone()),
         None => Found::Unknown,
     }
+}
+
+/// `set` as just fetched, with when each achievement was earned: kept from `before` (what the
+/// last lookup found), or `now` for one earned since. With nothing before to go by, unknown.
+fn dated(mut set: Set, before: Option<&Set>, now: u64) -> Set {
+    for a in &mut set.achievements {
+        if !a.unlocked {
+            continue;
+        }
+        let was = before.and_then(|b| b.achievements.iter().find(|o| o.id == a.id));
+        a.unlocked_at = match was {
+            Some(o) if o.unlocked => o.unlocked_at,
+            Some(_) => Some(now),
+            // Not in the set before (added to it since), or no set before: when is unknown.
+            None => None,
+        };
+    }
+    set
 }
 
 fn unix_now() -> u64 {
@@ -305,6 +330,7 @@ pub fn parse_patch(body: &str) -> Result<Option<Set>, Fail> {
                     points: a.get("Points").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                     badge: text(a, "BadgeName"),
                     unlocked: false,
+                    unlocked_at: None,
                 })
                 .collect()
         })
@@ -366,6 +392,37 @@ mod tests {
             a.unlocked = ids.contains(&a.id);
         }
         assert_eq!(set.summary(), "1 of 2 \u{b7} 25 of 30 points");
+    }
+
+    #[test]
+    fn earned_since_the_last_lookup_is_dated() {
+        let set = parse_patch(PATCH).unwrap().unwrap();
+        let earned = |ids: &[u32]| {
+            let mut s = set.clone();
+            for a in &mut s.achievements {
+                a.unlocked = ids.contains(&a.id);
+            }
+            s
+        };
+        // The first lookup: earned already, but when isn't known.
+        let first = dated(earned(&[1]), None, 100);
+        assert_eq!(first.achievements[0].unlocked_at, None);
+        // Veteran earned since: dated by the lookup that found it; First Blood stays unknown.
+        let second = dated(earned(&[1, 3]), Some(&first), 200);
+        let at: Vec<_> = second.achievements.iter().map(|a| a.unlocked_at).collect();
+        assert_eq!(at, [None, Some(200)]);
+        // Asked again later: the date is kept, not moved on.
+        let third = dated(earned(&[1, 3]), Some(&second), 300);
+        assert_eq!(third.achievements[1].unlocked_at, Some(200));
+        // Reset on the site: no longer earned, no date.
+        let reset = dated(earned(&[1]), Some(&third), 400);
+        assert_eq!(reset.achievements[1].unlocked_at, None);
+        // Kept on disk as it was; a cache from before the dates still reads.
+        let text = serde_json::to_string(&third).unwrap();
+        assert_eq!(serde_json::from_str::<Set>(&text).unwrap(), third);
+        assert!(!serde_json::to_string(&first)
+            .unwrap()
+            .contains("unlocked_at"));
     }
 
     #[test]
