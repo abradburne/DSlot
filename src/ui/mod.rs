@@ -7,6 +7,7 @@
 //! - `cheevos`: the selected game's achievements on the top screen, and their list.
 //! - `ra`: the menu's Achievements page, the RetroAchievements sign-in.
 //! - `menu`: the menu's rows on the touch screen.
+//! - `sheet`: the View sheet (Start), the menu's View page drawn on the top screen.
 //! - `netinfo`: the Wi-Fi page's Network info page, read from the system on a thread.
 //! - `sysinfo`: the System page's System info page, read from /proc and /sys on a thread.
 //! - `clock`: the System page's Date and time page, through nibOS's `nib clock`.
@@ -28,6 +29,7 @@ mod power;
 mod ra;
 mod radios;
 mod screens;
+mod sheet;
 mod shelf;
 mod skeleton;
 mod sound;

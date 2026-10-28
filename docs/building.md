@@ -85,7 +85,7 @@ target/release/dslot --roms /tmp/demo
 ```
 
 Arrow keys are the D-pad, Return or Space A, Backspace B, Tab X, F Y, L and R the shoulders,
-Escape leaves; the mouse is the touch screen. Headless, to a PNG (how the screenshots in
+S Select, D Start, \` (backquote) the Back key, Escape leaves; the mouse is the touch screen. Headless, to a PNG (how the screenshots in
 `docs/` are made; `--press` keys first, one a frame):
 
 ```sh

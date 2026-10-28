@@ -71,6 +71,9 @@ pub enum Page {
     Update,
     /// RetroAchievements (ra.rs).
     Achievements,
+    /// How the shelf's page is shown (View, Sort by, Show, Game case), at the console's level:
+    /// the menu Start opens, alone, drawn on the top screen over the shelf it changes.
+    View,
 }
 
 /// What a row is.
@@ -691,12 +694,22 @@ impl Menu {
     /// Opens on the Game page when there is a game selected, else on the console's. `ra` is
     /// where the RetroAchievements sign-in is kept.
     pub fn open(game: bool, ra: &Ra) -> Menu {
+        let page = if game { Page::Game } else { Page::Console };
+        Menu::on(page, ra, Radios::start())
+    }
+
+    /// The View page alone (Start): no radios asked about for it.
+    pub fn open_view(ra: &Ra) -> Menu {
+        Menu::on(Page::View, ra, None)
+    }
+
+    fn on(page: Page, ra: &Ra, radios: Option<Radios>) -> Menu {
         let controls = platform::CONTROLS
             .iter()
             .map(|&c| (c, platform::control(c)))
             .collect();
         Menu {
-            page: if game { Page::Game } else { Page::Console },
+            page,
             row: 0,
             scroll: 0,
             armed: None,
@@ -714,7 +727,7 @@ impl Menu {
             tuning: None,
             job: None,
             restart: false,
-            radios: Radios::start(),
+            radios,
             radio: Snapshot::default(),
             typing: None,
             forget: None,
@@ -787,6 +800,9 @@ impl Menu {
     /// The pages there are: Game only with a game selected, Wi-Fi and Bluetooth where DSlot can
     /// talk to them (nibOS).
     fn pages(&self, cx: &Context) -> Vec<Page> {
+        if self.page == Page::View {
+            return vec![Page::View];
+        }
         let game = cx.game.is_some().then_some(Page::Game);
         let radios = self
             .radios
@@ -845,7 +861,7 @@ impl Menu {
                 }
             }
             // The apps' page is always a grid, of boxes without cases.
-            Page::Console if cx.console == Console::Apps => {
+            Page::Console | Page::View if cx.console == Console::Apps => {
                 for key in [def::SORT, def::SHOW] {
                     items.extend(def::builtin(key).map(Item::Setting));
                 }
@@ -860,6 +876,7 @@ impl Menu {
                     items.extend(def::builtin(def::SNES_CART).map(Item::Setting));
                 }
             }
+            Page::View => shelf(&mut items),
             Page::System if self.clock_view != ClockView::Closed => self.clock_items(&mut items),
             Page::System if self.reading_sys => {
                 items.extend(self.sys_rows().into_iter().map(Item::Sys));
@@ -1821,6 +1838,7 @@ impl Menu {
             Page::Bluetooth => "Bluetooth".to_owned(),
             Page::Update => "Update".to_owned(),
             Page::Achievements => "Achievements".to_owned(),
+            Page::View => "View".to_owned(),
         };
         let tabs = pages.iter().map(|&p| (tab(p), p == self.page)).collect();
         let radio_title = || {
@@ -1877,6 +1895,8 @@ impl Menu {
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
             (Page::System, _) if self.reading_sys => self.sys.summary(),
             (Page::System, _) => "DSlot and the device".to_owned(),
+            (Page::View, _) if cx.console == Console::Apps => "How Apps are shown".to_owned(),
+            (Page::View, _) => format!("How the {} page is shown", cx.console.label()),
             _ if cx.console == Console::Apps => "Every app".to_owned(),
             _ => format!("Every {} game", cx.console.label()),
         };
@@ -1931,6 +1951,10 @@ impl Menu {
                 "D-pad  change   \u{b7}   L / R  page   \u{b7}   B  back".into()
             }
             (Page::Achievements, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
+            (Page::View, _) => format!(
+                "D-pad  change   \u{b7}   {}Start / B  close",
+                back.unwrap_or_default()
+            ),
             _ => format!(
                 "D-pad  change   \u{b7}   {}L / R  page   \u{b7}   B  back",
                 back.unwrap_or_default()
@@ -3350,6 +3374,59 @@ mod tests {
             inherited("Use System (Cover grid)")
         );
         assert_eq!(cx.settings.view(Console::Ds), crate::settings::View::Grid);
+    }
+
+    /// The View sheet (Start): the View page alone, the shelf's rows at the console's level,
+    /// so a change there is the console page's own, and Start, B or Back closes it.
+    #[test]
+    fn the_view_sheet() {
+        let mut w = world("menu-view", true);
+        let game = w.game.clone();
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Gba,
+            game: Some(&game),
+            cheevos: None,
+        };
+        let mut menu = Menu::open_view(&w.ra);
+        assert_eq!(menu.pages(&cx), [Page::View]);
+        assert_eq!(labels(&menu, &cx), ["View", "Sort by", "Show", "Game case"]);
+        let shown = menu.shown(&cx);
+        assert_eq!(shown.title, "How the GBA page is shown");
+        assert_eq!(shown.tabs, [("View".to_owned(), true)]);
+        // L / R stay on it.
+        menu.update(
+            &Input {
+                page: 1,
+                ..Input::default()
+            },
+            &mut cx,
+        );
+        assert_eq!(menu.page, Page::View);
+        let right = Input {
+            turn: 1,
+            ..Input::default()
+        };
+        // From what it inherits: first the same, set here, then the next.
+        assert!(menu.update(&right, &mut cx).changed);
+        assert!(menu.update(&right, &mut cx).changed);
+        assert_eq!(cx.settings.view(Console::Gba), crate::settings::View::Grid);
+        assert!(cx.settings.get(&Scope::System, "view").is_none());
+        // Set here: Y offers what it inherits (System's, or the default when System has none).
+        assert!(menu.shown(&cx).hint.contains("Y  use default"));
+        let close = Input {
+            close: true,
+            ..Input::default()
+        };
+        assert!(menu.update(&close, &mut cx).closed);
+
+        // The apps' page has no View or Game case: they are always a grid of bare boxes.
+        cx.console = Console::Apps;
+        let menu = Menu::open_view(&w.ra);
+        assert_eq!(labels(&menu, &cx), ["Sort by", "Show"]);
+        assert_eq!(menu.shown(&cx).title, "How Apps are shown");
     }
 
     /// A command run for a row (switching the speaker tuning): working, then its answer on

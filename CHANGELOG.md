@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Back opens the menu.** The DS+'s Back key, beside Menu, opens the menu from the shelf and
+  goes back in it as B does; X still opens it too until X has the game page. Back is a key of
+  its own, not a gamepad button: SDL3 calls it AC Back, and sdl2-compat passes it to SDL2
+  programs as Sleep, so DSlot takes both.
+- **Start opens the View sheet**: how the page is shown (View, Sort by, Show, Game case), on
+  the top screen in the game's details' place, so the shelf on the touch screen changes as each
+  row does. They are the console page's settings, as in the menu, with Y back to what they
+  inherit; Start, B, Back or a touch closes it. Start no longer plays: A does.
+
 ## 0.4.1
 
 - **Which systems earn achievements**, on the Achievements page under the Casual note: DS, Game

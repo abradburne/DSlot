@@ -228,12 +228,13 @@ scripts too. How to make one: [docs/apps.md](docs/apps.md).
 | D-pad up / down | Jump to the previous / next letter (a row, in the cover grid; a game, in a list) |
 | L / R, or tap a page's tab | The previous / next page (the tabs scroll when there are more than fit; tap a faded end to see more) |
 | Select | The system picker: a blade for each system, its games and when one was last played, and its card on the top screen. Up / down (or drag) to choose, A or a tap to go there, B or Select to close |
-| A, Start, or drag the cart down | Insert the cart and play |
+| A, or drag the cart down | Insert the cart and play |
 | Tap a neighbouring cart | Bring it to the centre |
 | Tap a cover in the grid or a name in a list, then tap it again | Pick it, then play it |
 | Flick the grid or a list | It keeps scrolling and slows to a stop, as on a phone; touch it to stop it |
 | Y | Mark or unmark the game as a favourite |
-| X | Open the menu |
+| Back (beside Menu) | Open the menu (X too, for now) |
+| Start | The View sheet: how this page is shown (View, Sort by, Show, Game case) on the top screen, the shelf below changing as you go. Up / down picks a row, left / right changes it, Y goes back to what it inherits, Start, B or a touch closes it |
 | Select + Start | Leave DSlot (on the stock OS, Menu too) |
 | Hold power (nibOS) | The power menu: Sleep, Restart, Power off, Cancel. During a game, the game is saved and put away first; Cancel carries on with it |
 
@@ -241,10 +242,10 @@ On nibOS Menu does nothing on the shelf: it is the button that brings you back f
 
 ## Menu
 
-X opens the menu on the touch screen, with a page for each level of settings: **Game** (the
+Back (or X) opens the menu on the touch screen, with a page for each level of settings: **Game** (the
 selected game), its **console** (DS, GBA, ...) and **System**. L / R or a tap on a tab changes
 page; D-pad up / down picks a row, left / right (or A, or a tap on the row) changes it, Y
-resets it to what it inherits, B closes the menu.
+resets it to what it inherits, B or Back closes the menu.
 
 | Page | |
 |---|---|

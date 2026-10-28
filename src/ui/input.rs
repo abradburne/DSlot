@@ -26,6 +26,9 @@ pub enum Key {
     R,
     /// Select tapped alone (held with Start, it leaves DSlot).
     Select,
+    /// The Back key beside Menu: a key of its own, not a gamepad button (nibOS's
+    /// docs/engineering/input.md).
+    Back,
 }
 
 #[derive(Debug, PartialEq)]
@@ -170,9 +173,12 @@ fn pad(button: Button) -> Option<Key> {
     })
 }
 
-/// The keys that stand in for the buttons in a desktop preview.
+/// The keys that stand in for the buttons in a desktop preview, and the DS+'s Back key, which
+/// is one: SDL3 calls it AC Back, and sdl2-compat hands SDL3's number for it to SDL2 programs
+/// untranslated, where it is Sleep.
 fn keyboard(key: Keycode) -> Option<Key> {
     Some(match key {
+        Keycode::AcBack | Keycode::Sleep | Keycode::Backquote => Key::Back,
         Keycode::Up => Key::Up,
         Keycode::Down => Key::Down,
         Keycode::Left => Key::Left,
@@ -184,6 +190,7 @@ fn keyboard(key: Keycode) -> Option<Key> {
         Keycode::L | Keycode::PageUp => Key::L,
         Keycode::R | Keycode::PageDown => Key::R,
         Keycode::S => Key::Select,
+        Keycode::D => Key::Start,
         _ => return None,
     })
 }
@@ -244,6 +251,26 @@ mod tests {
             reader.read(down(Button::Start), None),
             Some(Input::Press(Key::Start))
         );
+    }
+
+    fn key(keycode: Keycode) -> Event {
+        Event::KeyDown {
+            timestamp: 0,
+            window_id: 0,
+            keycode: Some(keycode),
+            scancode: None,
+            keymod: sdl2::keyboard::Mod::NOMOD,
+            repeat: false,
+        }
+    }
+
+    #[test]
+    fn the_back_key() {
+        let mut reader = Reader::default();
+        // As SDL3 names it, as sdl2-compat passes it on, and the desktop preview's stand-in.
+        for k in [Keycode::AcBack, Keycode::Sleep, Keycode::Backquote] {
+            assert_eq!(reader.read(key(k), None), Some(Input::Press(Key::Back)));
+        }
     }
 
     #[test]

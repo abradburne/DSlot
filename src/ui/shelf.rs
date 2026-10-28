@@ -4,7 +4,7 @@
 //! device is powered off.
 
 use super::bouncer::{self, Bouncer};
-use super::draw::{Blade, Page, Ui, Yours, DIM, THUMBS, WHITE};
+use super::draw::{Beside, Blade, Page, Ui, Yours, DIM, THUMBS, WHITE};
 use super::input::{self, Input, Key, Reader};
 use super::layout::*;
 use super::menu::{self, Menu};
@@ -588,6 +588,8 @@ fn keyboard_key(key: Key) -> Option<nibkit::menu::keyboard::Key> {
         Key::R => K::R,
         Key::Start => K::Start,
         Key::Select => K::Select,
+        // Back as B: the keyboard's own way back.
+        Key::Back => K::B,
     })
 }
 
@@ -859,9 +861,9 @@ impl State {
                 let dir = self.hold(key);
                 self.sel = self.vertical(games, dir, mode);
             }
-            Key::A | Key::B | Key::Start => (self.insert, self.fling) = (Some(0.0), None),
+            Key::A | Key::B => (self.insert, self.fling) = (Some(0.0), None),
             Key::Y => return true,
-            Key::X | Key::L | Key::R | Key::Select => {}
+            Key::X | Key::L | Key::R | Key::Select | Key::Start | Key::Back => {}
         }
         false
     }
@@ -1369,7 +1371,7 @@ fn show(
                 Some(Input::Press(key)) if state.power.is_some() => match key {
                     Key::Up | Key::Down => power_moved += state.hold(key),
                     Key::A => power_pick = true,
-                    Key::B | Key::X | Key::Start => power_cancel = true,
+                    Key::B | Key::X | Key::Start | Key::Back => power_cancel = true,
                     _ => {}
                 },
                 Some(Input::Pointer(p)) if state.power.is_some() => pointers.push(p),
@@ -1399,7 +1401,7 @@ fn show(
                         }
                     }
                     Key::A => pick_go = true,
-                    Key::B | Key::Select | Key::X | Key::Start => pick_close = true,
+                    Key::B | Key::Select | Key::X | Key::Start | Key::Back => pick_close = true,
                     Key::Y | Key::L | Key::R => {}
                 },
                 Some(Input::Press(key)) if state.menu.is_some() => match key {
@@ -1414,7 +1416,7 @@ fn show(
                     Key::Y => menu_input.reset = true,
                     Key::L => menu_input.page -= 1,
                     Key::R => menu_input.page += 1,
-                    Key::B | Key::X | Key::Start => menu_input.close = true,
+                    Key::B | Key::X | Key::Start | Key::Back => menu_input.close = true,
                     Key::Select => {}
                 },
                 // Select alone: the system picker, on this page's blade.
@@ -1423,8 +1425,14 @@ fn show(
                     state.picker = Some(Picker::on(at));
                     state.repeat.stop();
                 }
-                Some(Input::Press(Key::X)) if !games.is_empty() => {
+                // Back (or X, until X has a page of its own): the menu.
+                Some(Input::Press(Key::Back | Key::X)) if !games.is_empty() => {
                     state.menu = Some(Menu::open(state.order.get(state.sel).is_some(), shelf.ra))
+                }
+                // Start: how the page is shown, on the top screen over the shelf it changes.
+                Some(Input::Press(Key::Start)) if !games.is_empty() => {
+                    state.menu = Some(Menu::open_view(shelf.ra));
+                    state.repeat.stop();
                 }
                 Some(Input::Press(Key::L)) => flip = Some(state.beside(console, -1)),
                 Some(Input::Press(Key::R)) => flip = Some(state.beside(console, 1)),
@@ -1495,11 +1503,19 @@ fn show(
         }
         if let Some(open) = state.menu.as_mut() {
             state.drag = None;
-            let taps = pointers.drain(..).filter_map(|p| match p {
-                Pointer::Down(x, y) => Some((x, y)),
-                _ => None,
-            });
-            menu_input.taps = taps.collect();
+            let taps: Vec<_> = pointers
+                .drain(..)
+                .filter_map(|p| match p {
+                    Pointer::Down(x, y) => Some((x, y)),
+                    _ => None,
+                })
+                .collect();
+            if open.page == menu::Page::View {
+                // The View sheet is on the top screen: a touch on the shelf below closes it.
+                menu_input.close |= !taps.is_empty();
+            } else {
+                menu_input.taps = taps;
+            }
             let mut cx = menu::Context {
                 stats: &mut *stats,
                 settings: &mut *settings,
@@ -1734,12 +1750,22 @@ fn show(
             }
             let fade = state.fade();
             let current = state.order.get(state.sel).copied();
+            let viewing = state
+                .menu
+                .as_ref()
+                .is_some_and(|m| m.page == menu::Page::View);
             match current {
                 Some(g) => {
                     let resume = resume_of(shelf, settings, &games[g]);
-                    let browsing = state.menu.as_ref().and_then(|m| m.cheevos_list);
-                    ui.draw_top(games, g, stats, resume.as_ref(), fade, browsing)?
+                    let beside = match state.menu.as_ref().and_then(|m| m.cheevos_list) {
+                        _ if viewing => Beside::Sheet,
+                        Some(list) => Beside::Cheevos(list),
+                        None => Beside::Details,
+                    };
+                    ui.draw_top(games, g, stats, resume.as_ref(), fade, beside)?
                 }
+                // Under the View sheet, which is where to show them all again.
+                None if viewing => {}
                 None => {
                     let top = ui.top;
                     ui.text(
@@ -1752,7 +1778,7 @@ fn show(
                     )?;
                     ui.text(
                         top,
-                        "Show all games again from the menu.",
+                        "Start shows all games again.",
                         (24.0, false),
                         (SW / 2.0, 392.0),
                         0.5,
@@ -1770,8 +1796,10 @@ fn show(
                 strip,
                 fade,
             };
+            // The View sheet leaves the shelf on the touch screen, to be seen changing.
+            let sheet = state.menu.as_ref().filter(|m| m.page == menu::Page::View);
             match &state.menu {
-                Some(open) => {
+                Some(open) if sheet.is_none() => {
                     let game = current.map(|g| &games[g]);
                     let cx = menu::Context {
                         stats: &mut *stats,
@@ -1783,7 +1811,7 @@ fn show(
                     };
                     ui.draw_menu(&open.shown(&cx), console)?;
                 }
-                None => match mode {
+                _ => match mode {
                     Layout::Shelf => ui.draw_carts(&page, state.carousel, pull)?,
                     Layout::Grid => ui.draw_grid(&page, state.scroll, stats)?,
                     Layout::List | Layout::ListCovers => {
@@ -1791,7 +1819,19 @@ fn show(
                     }
                 },
             }
-            if state.menu.is_none() {
+            if let Some(open) = sheet {
+                let game = current.map(|g| &games[g]);
+                let cx = menu::Context {
+                    stats: &mut *stats,
+                    settings: &mut *settings,
+                    emulators,
+                    console,
+                    game,
+                    cheevos: None,
+                };
+                soft("the View sheet", ui.draw_sheet(&open.shown(&cx)));
+            }
+            if state.menu.is_none() || sheet.is_some() {
                 ui.tab(console, &state.pages, &strip)?;
             }
         }

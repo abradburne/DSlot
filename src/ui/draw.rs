@@ -42,10 +42,21 @@ const fn rgb([r, g, b]: colour::Rgb) -> Color {
     Color::RGB(r, g, b)
 }
 
+/// What the top screen shows beside the game's box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Beside {
+    /// Its name and details, and its achievements' line.
+    Details,
+    /// The menu browsing its achievements: their list in the details' place (cheevos.rs).
+    Cheevos(ListView),
+    /// Nothing: the View sheet is drawn there after (sheet.rs).
+    Sheet,
+}
+
 /// What the touch screen's hint line says on the shelf.
-pub const HINT: &str = "A  insert  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \u{b7}  Select  systems  \u{b7}  X  menu  \u{b7}  Y  favourite  \u{b7}  Select + Start  exit";
+pub const HINT: &str = "A  insert  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \u{b7}  Select  systems  \u{b7}  Start  view  \u{b7}  Back  menu  \u{b7}  Y  favourite  \u{b7}  Select + Start  exit";
 /// The same on a page without carts (Game & Watch, the apps), where there is none to insert.
-const START_HINT: &str = "A  start  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \u{b7}  Select  systems  \u{b7}  X  menu  \u{b7}  Y  favourite  \u{b7}  Select + Start  exit";
+const START_HINT: &str = "A  start  \u{b7}  D-pad  browse  \u{b7}  L / R  page  \u{b7}  Select  systems  \u{b7}  Start  view  \u{b7}  Back  menu  \u{b7}  Y  favourite  \u{b7}  Select + Start  exit";
 /// What the touch screen's hint line says over the system picker.
 /// The stopped notice: how many characters fit a line of its box, and how many lines it shows.
 const NOTICE_WIDTH: usize = 52;
@@ -707,7 +718,8 @@ impl Ui<'_> {
         self.shade(v, fade)
     }
 
-    /// The top screen: the game's box, its name and details, its play time and rating.
+    /// The top screen: the game's box, and `beside` it its name and details, its play time and
+    /// rating (or what has their place).
     pub fn draw_top(
         &mut self,
         games: &[Game],
@@ -715,7 +727,7 @@ impl Ui<'_> {
         stats: &Stats,
         resume: Option<&Wanted>,
         fade: f32,
-        cheevos_list: Option<ListView>,
+        beside: Beside,
     ) -> Result<(), String> {
         let v = self.top;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
@@ -746,6 +758,11 @@ impl Ui<'_> {
             self.draw_resume(g, size, saved)?;
         }
 
+        let cheevos_list = match beside {
+            Beside::Details => None,
+            Beside::Cheevos(list) => Some(list),
+            Beside::Sheet => return self.shade(v, fade),
+        };
         let (x, width) = (580.0, 400.0);
         let size = self.fonts.fit(game.name(), 58.0, 28.0, width, true);
         let mut y = 228.0;
