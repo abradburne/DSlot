@@ -5,10 +5,12 @@
 - **RetroAchievements**, an **Achievements** tab in the menu wherever there is `curl`: sign in
   with the username and password typed on the keyboard, see who is signed in and their points,
   and sign out. Achievements are softcore for now: hardcore (a Mode row) stays hidden until the
-  service approves our emulators for it, and the page ends with a note saying so. DSlot keeps the token the service
-  answers with (two lines, username and token, mode 0600, beside settings.toml) and never the
-  password, and hands it to every emulator it starts as `RA_TOKEN_FILE`, `RA_USERNAME` and
-  `RA_HARDCORE` in the environment; DSperate reads them. The service has no way to make an
+  service approves our emulators for it, and the page ends with a note saying so. DSlot keeps
+  the token the service answers with (two lines, username and token, mode 0600, beside
+  settings.toml), as soon as it answers, even if the menu has been closed meanwhile, and never
+  the password, and hands it to every emulator it starts as `RA_TOKEN_FILE`, `RA_USERNAME` and
+  `RA_HARDCORE` in the environment; DSperate reads them. A token the service refuses (the
+  password changed on the site) is dropped and the page asks for a sign-in again. The service has no way to make an
   account from a device, so **Make an account** shows the sign-up page's address and a QR code
   of it for a phone. docs/retroachievements.md.
 - **Achievements on the shelf**: signed in, the top screen shows the selected DS, GBA, GB or GBC
@@ -16,10 +18,12 @@
   a bar of how far through the set the player is. The menu's Game page gets an
   **Achievements** row: A browses the list on the top screen, with each badge, title, points
   and description. Looked up by the ROM's hash as the service does it, by a worker off the
-  shelf's thread; the set and the unlocks are kept in the cache for six hours (and asked for
-  again after the game is played), so it works offline and the service isn't asked on every
-  selection; the badges are kept in `~/.cache/retroachievements/badges`, shared with the
-  emulators. An achievement found earned that an earlier lookup found not is kept with when
+  shelf's thread that never holds up starting a game; the set and the unlocks are kept in the
+  cache for six hours, for each player apart (and asked for again after the game is played),
+  so it works offline and the service isn't asked on every selection; the badges are kept in
+  `~/.cache/retroachievements/badges`, shared with the emulators. Signed out, nothing is shown;
+  signing in or out looks the games up again for the new player; a sign-in the service no
+  longer takes says to sign in again. An achievement found earned that an earlier lookup found not is kept with when
   (`unlocked_at`), for showing the latest later. The service's *Warning: Unknown Emulator*
   entry, which it adds to every set for an emulator it doesn't know, is left out of the list
   and the count.

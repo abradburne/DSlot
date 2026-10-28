@@ -13,7 +13,7 @@ Signed out:
 | Row | |
 |---|---|
 | Username | A types it on the keyboard (nibkit's, the one the Wi-Fi page uses). |
-| Sign in | A asks for the password (shown as dots; Y shows it), then signs in. The row says *Signing in…*, then the title line says who is signed in, or why not: the service's own words for a wrong password, *No network* when it can't be reached. |
+| Sign in | A asks for the password (shown as dots; Y shows it), then signs in. The row says *Signing in…*, then the title line says who is signed in, or why not: the service's own words for a wrong password, *No network* when it can't be reached. The token is kept by the request itself, before the page hears of it, so a sign-in stands even if the menu is closed while it is on its way. |
 | Mode | Softcore (the default) or Hardcore: a System setting, `achievements` in settings.toml. Not shown yet: see [Hardcore, not yet](#hardcore-not-yet). |
 | Make an account | The sign-up page's address and a QR code of it, for a phone. B comes back. |
 
@@ -44,35 +44,51 @@ notices.
 Each time the menu turns to the tab with a sign-in kept, DSlot asks the service once whether the
 token still stands (the same request, with the token in place of the password) and shows the
 points it answers with. A token the service refuses (the password was changed on the site, say)
-is dropped, and the title line asks for a sign-in again. With no network the sign-in kept stands
-as it is.
+is dropped, unless the file has changed since the check began, and the title line asks for a
+sign-in again. Only a refusal of the sign-in does that (the service's codes
+`invalid_credentials`, `expired_token` and `access_denied`, as rcheevos reads them); the service
+failing otherwise, or no network, leaves the sign-in kept as it is.
+
+Signing in, signing out and a token dropped are each told to the shelf, which lets go of what it
+looked up for the last player and looks the selected game up again for the new one.
 
 ## On the shelf
 
 With the player signed in, the top screen says, under the selected game's details, how it
 stands with the service: *Achievements*, then *19 of 28 · 425 of 630 points*, then a bar of how
 many of the set are earned. A game the service doesn't know says *Not on RetroAchievements*;
-one still being looked up, *Looking up…*. Signed out, nothing is shown.
+one still being looked up, *Looking up…*. Signed out, nothing is shown: not even what was kept
+for the last player. A sign-in the service no longer takes (refused on a lookup, with nothing
+fresh kept for the game) says *Sign in again in the menu*.
 
 To read the list, the menu's **Game** page has an **Achievements** row (the same line as its
 value): A browses the list on the top screen, in the details' place: each achievement's badge,
 title, points and description, the highlighted one moved by up and down, B back to the row.
 
-How it is known, all off the shelf's thread, by a worker of its own:
+How it is known, all off the shelf's thread, by a worker of its own (`achievements/lookup.rs`).
+It looks up the game asked about last first: browsing quickly past a row of games looks up the
+one stopped at, and the ones passed over are asked about again when they are shown again. It
+reads the sign-in afresh for each lookup. It is a thread of its own, not tied to the shelf:
+starting a game never waits for a request to the service to finish.
 
 - **Which game.** The ROM is hashed as the service does it (`achievements/hash.rs`): the MD5 of
   the file for Game Boy, Game Boy Color and Game Boy Advance; for a DS game, of its header, its
   two pieces of boot code and its icon/title block, as the service's documentation says (the
   file inside a zip, when zipped). The hash is kept in `cache/achievements/hashes.tsv` against
-  the file's size and date, so a ROM is read once.
+  the file's path, size and date, so a ROM is read once. The index is anyone's, whoever is
+  signed in; it is written beside itself and renamed into place, and a line it can't read is
+  passed over, not the end of it.
 - **The set, and what is earned.** Two requests of the emulator API with the sign-in kept, the
   form on `curl`'s standard input as for signing in: `patch` with the hash (the set: each
   achievement's title, description, points and badge name; the unofficial ones are left out),
-  then `unlocks`, softcore and hardcore. The answer is kept in `cache/achievements/<hash>.json`
-  with when it was fetched, and stands for six hours: browsing the shelf asks the service
-  nothing in between, and with no network the shelf shows what was kept, however old. A game
-  just played is asked about again next time it is selected, since it may have earned some.
-  The service not knowing the ROM is kept too, so it isn't asked again every time.
+  then `unlocks`, softcore and hardcore. The answer is kept in
+  `cache/achievements/<user>/<hash>.json`, the player's own (another account's unlocks are
+  never shown, nor taken for what changed since), with when it was fetched, and stands for six
+  hours: browsing the shelf asks the service nothing in between, and with no network the shelf
+  shows what was kept for the player, however old. A game just played is asked about again
+  next time it is selected, since it may have earned some (found by the hashes index alone: the
+  ROM is never read between the game and the shelf). The service not knowing the ROM is kept
+  too, so it isn't asked again every time.
 - **When each was earned.** `unlocks` says which, not when, so DSlot dates what it sees change:
   an achievement a lookup finds earned that the one before found not gets that lookup's time
   (`unlocked_at` in the cached set, Unix seconds), which, since a game just played is asked
@@ -116,7 +132,8 @@ an `Error` line, which the tab shows.
 What is kept, and where:
 
 - `retroachievements.token`, beside settings.toml (`~/.config/dslot/` on nibOS, the app's folder
-  on the stock OS): two lines, the username then the token, mode 0600. It is the format DSperate's
+  on the stock OS): two lines, the username then the token, mode 0600, written beside itself and
+  renamed into place so that it is never half there. It is the format DSperate's
   `--cheevos-token` reads. On nibOS the home folder lives on the data card, so it outlives an
   update of the root the way settings.toml does.
 - The **password is never written**: not to the token file, not to settings.toml, not to the
