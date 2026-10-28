@@ -1,6 +1,6 @@
 [package]
 name = "dslot"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.87"
 description = "A cart-and-box game shelf for the Anbernic RG DS+, on its stock OS or on nibOS."

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - **RetroAchievements**, an **Achievements** tab in the menu wherever there is `curl`: sign in
   with the username and password typed on the keyboard, see who is signed in and their points,
