@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **nibkit 0.2.2**: the menu's Achievements tab is wide enough for its label, with room either
+  side; the other tabs stay as they were, and a tap finds the tab drawn there
+  (`layout::tab_at`).
 - **Earned achievements**, a row on the Achievements page while signed in: every achievement
   earned in the games the shelf has looked up, the latest first, with the game and its points,
   and the highlighted one's description on the title line. Read from what the lookups keep, so

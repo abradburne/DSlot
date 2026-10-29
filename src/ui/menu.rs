@@ -48,7 +48,7 @@ use std::time::{Duration, Instant};
 use toml::Value as Toml;
 
 // Where the rows and tabs are: nibkit's menu layout, which draws them too.
-use nibkit::menu::layout::{row_hit, tab_hit, VISIBLE};
+use nibkit::menu::layout::{row_hit, tab_at, VISIBLE};
 #[cfg(test)]
 use nibkit::menu::layout::{row_y, ROW_STEP, TABS, TOP};
 /// How often the System page reads the battery again while it is shown.
@@ -697,6 +697,20 @@ enum Typing {
     RaPassword,
 }
 
+/// A page's tab: its label.
+fn tab(page: Page, cx: &Context) -> &'static str {
+    match page {
+        Page::Game => "Game",
+        Page::Console => cx.console.label(),
+        Page::System => "System",
+        Page::Wifi => "Wi-Fi",
+        Page::Bluetooth => "Bluetooth",
+        Page::Update => "Update",
+        Page::Achievements => "Achievements",
+        Page::View => "View",
+    }
+}
+
 impl Menu {
     /// Opens on the Game page when there is a game selected, else on the console's. `ra` is
     /// where the RetroAchievements sign-in is kept.
@@ -1058,8 +1072,9 @@ impl Menu {
         let (mut turn, mut pressed, mut page_turn) = (input.turn, input.pressed, input.page);
         let pages = self.pages(cx);
         // A tap on a tab turns to it; one on a row picks it and steps its value.
+        let labels: Vec<&str> = pages.iter().map(|&p| tab(p, cx)).collect();
         for &(x, y) in &input.taps {
-            if let Some(p) = tab_hit(x, y, pages.len()) {
+            if let Some(p) = tab_at(x, y, &labels) {
                 page_turn = 0;
                 self.turn_to(pages[p]);
             } else if let Some(r) = row_hit(y).map(|r| r + self.scroll) {
@@ -1850,17 +1865,10 @@ impl Menu {
     /// The menu as it is to be drawn.
     pub fn shown(&self, cx: &Context) -> Shown {
         let pages = self.pages(cx);
-        let tab = |p: Page| match p {
-            Page::Game => "Game".to_owned(),
-            Page::Console => cx.console.label().to_owned(),
-            Page::System => "System".to_owned(),
-            Page::Wifi => "Wi-Fi".to_owned(),
-            Page::Bluetooth => "Bluetooth".to_owned(),
-            Page::Update => "Update".to_owned(),
-            Page::Achievements => "Achievements".to_owned(),
-            Page::View => "View".to_owned(),
-        };
-        let tabs = pages.iter().map(|&p| (tab(p), p == self.page)).collect();
+        let tabs = pages
+            .iter()
+            .map(|&p| (tab(p, cx).to_owned(), p == self.page))
+            .collect();
         let radio_title = || {
             let r = &self.radio;
             match (&r.asking, &r.busy, &r.said) {
@@ -3486,9 +3494,10 @@ mod tests {
 
     #[test]
     fn touches() {
-        assert_eq!(tab_hit(TABS.0 + 10.0, TABS.1 + 10.0, 3), Some(0));
-        assert_eq!(tab_hit(TABS.0 + 2.5 * TABS.2, TABS.1, 3), Some(2));
-        assert_eq!(tab_hit(TABS.0 + 3.5 * TABS.2, TABS.1, 3), None);
+        let tabs = ["Game", "DS", "System"];
+        assert_eq!(tab_at(TABS.0 + 10.0, TABS.1 + 10.0, &tabs), Some(0));
+        assert_eq!(tab_at(TABS.0 + 2.5 * TABS.2, TABS.1, &tabs), Some(2));
+        assert_eq!(tab_at(TABS.0 + 3.5 * TABS.2, TABS.1, &tabs), None);
         assert_eq!(row_hit(row_y(3) + 10.0), Some(3));
         assert_eq!(row_hit(TOP - ROW_STEP), None);
     }

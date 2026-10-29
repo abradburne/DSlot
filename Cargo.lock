@@ -582,8 +582,8 @@ dependencies = [
 
 [[package]]
 name = "nib-cheevos"
-version = "0.2.0"
-source = "git+https://github.com/abradburne/nibkit?tag=v0.2.0#df5c286c148c4025e78547c1d26d189d335178ba"
+version = "0.2.2"
+source = "git+https://github.com/abradburne/nibkit?tag=v0.2.2#e8d197cdbfb1e588520fad4d9993270c345021fc"
 dependencies = [
  "cc",
  "libc",
@@ -592,8 +592,8 @@ dependencies = [
 
 [[package]]
 name = "nibkit"
-version = "0.2.0"
-source = "git+https://github.com/abradburne/nibkit?tag=v0.2.0#df5c286c148c4025e78547c1d26d189d335178ba"
+version = "0.2.2"
+source = "git+https://github.com/abradburne/nibkit?tag=v0.2.2#e8d197cdbfb1e588520fad4d9993270c345021fc"
 dependencies = [
  "libc",
  "serde",
