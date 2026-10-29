@@ -259,15 +259,18 @@ On nibOS Menu does nothing on the shelf: it is the button that brings you back f
 ## Menu
 
 Back opens the menu on the touch screen, with a page for each level of settings: **Game** (the
-selected game), its **console** (DS, GBA, ...) and **System**. L / R or a tap on a tab changes
-page; D-pad up / down picks a row, left / right (or A, or a tap on the row) changes it, Y
-resets it to what it inherits, B or Back closes the menu.
+selected game), its **console** (DS, GBA, ...) and **System**, and on nibOS **Network** (Wi-Fi
+and Bluetooth) and **Achievements**. A page with more than a screen's worth is in sections, in
+a row under the tabs. L / R or a tap on a tab changes page, L2 / R2 or a tap on a section
+changes section; D-pad up / down picks a row, left / right (or A, or a tap on the row) changes
+it, Y resets it to what it inherits, B or Back closes the menu.
 
-| Page | |
-|---|---|
-| Game | Favourite and rating; the emulator it starts in and that emulator's options for it (DSperate: 3D resolution, frame skip, ...); clear its resume state, delete its saves (each asks first: A, then A again). |
-| Console | The emulator its games start in (only when more than one is installed), that emulator's options, and how the page is shown: View, Sort by, Show, Game case. |
-| System | How every page is shown (unless its console says otherwise), Sounds, Button repeat; on nibOS the volume, each screen's brightness and Wi-Fi; Start at power-on; Power off. |
+| Page | Sections | |
+|---|---|---|
+| Game | | Favourite and rating; the emulator it starts in and that emulator's options for it (DSperate: 3D resolution, frame skip, ...); clear its resume state, delete its saves (each asks first: A, then A again). |
+| Console | Emulator, Shelf | The emulator its games start in (only when more than one is installed) and that emulator's options; how the page is shown: View, Sort by, Show, Game case. |
+| System | Shelf, Screen, Sound, Power, Time, About, Update | How every page is shown (unless its console says otherwise), Button repeat, Rescan games; each screen's brightness and the screensaver; the volume, Sounds and the speakers' tuning; the battery, Start at power-on, Power off; the clock; the device and what it is using; on nibOS, its updates. |
+| Network | Wi-Fi, Bluetooth, Network info | nibOS: the networks and devices, and what to read out when something won't connect. |
 
 A setting for a game wins over its console's, which wins over the system's, and each row says
 where its value comes from. All of it: [docs/settings.md](docs/settings.md).

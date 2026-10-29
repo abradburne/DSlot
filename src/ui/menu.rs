@@ -3,30 +3,32 @@
 //!
 //! - **Game**: the selected game's favourite and rating, the emulator it starts in and that
 //!   emulator's options for it, and actions on its files (its resume state, its saves).
-//! - **The console** (DS, GBA, ...): the emulator its games start in, that emulator's options,
-//!   and how the page is shown.
-//! - **System**: how every page is shown, the clicks, button repeat, the device's volume,
-//!   brightness and Wi-Fi where DSlot can change them, start at power-on, power off, and
-//!   **System info**: a read-only page of the device and what it is using (`sysinfo.rs`), and
-//!   **Date and time** (nibOS): the clock, its zone and where the time came from, with Sync
-//!   now, a zone picker and setting it by hand through `nib clock` (`clock.rs`).
-//! - **Wi-Fi** and **Bluetooth** (nibOS): the networks in range, joining one (its passphrase
-//!   typed on nibkit's keyboard), leaving and forgetting; Bluetooth on and off, the paired
-//!   devices to connect and disconnect, forgetting one, and pairing a new one. The work is done
-//!   on a thread of its own (`radios.rs`). The Wi-Fi page shows the IPv4 address too, and opens
-//!   **Network info** (its row, or Y): a read-only page of what a player is asked for when
+//! - **The console** (DS, GBA, ...), in two parts: **Emulator**, the emulator its games start in
+//!   and that emulator's options, and **Shelf**, how the page is shown.
+//! - **System**, in parts: **Shelf** (how every page is shown, the empty systems, button repeat,
+//!   rescan), **Screen** (brightness, the screensaver), **Sound** (volume, the clicks, the
+//!   speakers' tuning), **Power** (the battery, start at power-on, sleep, power off), **Time**
+//!   (12- or 24-hour, and on nibOS the clock, its zone and where the time came from, with Sync
+//!   now, a zone picker and setting it by hand through `nib clock`: `clock.rs`) and **About** (a
+//!   read-only page of the device and what it is using: `sysinfo.rs`); and **Update** (nibOS):
+//!   the version, the update channel, checking for an update, downloading it in the background
+//!   (paused and resumed), restarting into it, what's new, and going back to the version
+//!   before; the work is nibOS's updater's (`update.rs`).
+//! - **Network** (nibOS), **Wi-Fi** and **Bluetooth**: the networks in range, joining one (its
+//!   passphrase typed on nibkit's keyboard), leaving and forgetting; Bluetooth on and off, the
+//!   paired devices to connect and disconnect, forgetting one, and pairing a new one. The work
+//!   is done on a thread of its own (`radios.rs`). The Wi-Fi page shows the IPv4 address too;
+//!   **Network info** (or Y on Wi-Fi) is a read-only page of what a player is asked for when
 //!   something won't connect (`netinfo.rs`).
-//! - **Update** (nibOS): the version, the update channel, checking for an update, downloading
-//!   it in the background (paused and resumed), restarting into it, what's new, and going back
-//!   to the version before; the work is nibOS's updater's (`update.rs`).
 //! - **Achievements** (where there is `curl`): the RetroAchievements sign-in, kept for the
 //!   emulators (`ra.rs`): the username and password typed on the keyboard, who is signed in
 //!   and their points, signing out, Casual or Hardcore, and the sign-up page as a QR code for
 //!   a phone, since the service has no way to make an account from here.
 //!
 //! A row that can inherit shows where its value comes from ("from GBA", "from System") or that
-//! it is set here; Y resets it to what it inherits. L / R or the tabs change page; up and down
-//! pick a row, left and right or A (or a tap) change it, B closes the menu.
+//! it is set here; Y resets it to what it inherits. L / R or the tabs change page, L2 / R2 or
+//! the sections under the tabs change part ([`SECTIONS`]); up and down pick a row, left and
+//! right or A (or a tap) change it, B closes the menu.
 
 use super::clock;
 use super::netinfo;
@@ -48,9 +50,9 @@ use std::time::{Duration, Instant};
 use toml::Value as Toml;
 
 // Where the rows and tabs are: nibkit's menu layout, which draws them too.
-use nibkit::menu::layout::{row_hit, tab_at, VISIBLE};
+use nibkit::menu::layout::{row_hit, section_at, tab_at, VISIBLE};
 #[cfg(test)]
-use nibkit::menu::layout::{row_y, ROW_STEP, TABS, TOP};
+use nibkit::menu::layout::{row_y, LEFT, ROW_STEP, SECTIONS_Y, TABS, TOP};
 /// How often the System page reads the battery again while it is shown.
 const BATTERY_EVERY: Duration = Duration::from_secs(3);
 /// How often the Update page reads the updater's status again while it is shown.
@@ -72,6 +74,61 @@ pub enum Page {
     /// How the shelf's page is shown (View, Sort by, Show, Game case), at the console's level:
     /// the menu Start opens, alone, drawn on the top screen over the shelf it changes.
     View,
+}
+
+/// A part of a page: a section under its tab, with rows of their own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Part {
+    /// All the page's rows: a page in one part.
+    Whole,
+    /// A console's page: the emulator its games start in, and that emulator's options.
+    Emulator,
+    /// How the shelf is shown: a console's page, and System's for every page with the rest of
+    /// the shelf's (empty systems, button repeat, looking for games again).
+    Shelf,
+    /// System: the screens' brightness and the screensaver.
+    Screen,
+    /// System: the volume, the clicks and the speaker amps' tuning.
+    Sound,
+    /// System: the battery, starting at power-on, sleeping and powering off.
+    Power,
+    /// System: the clock, 12-hour or 24-hour, and on nibOS the date and time (clock.rs).
+    Time,
+    /// System: the device and what it is using, read every second (sysinfo.rs).
+    About,
+    /// Wi-Fi: what a player is asked for when something won't connect (netinfo.rs).
+    NetInfo,
+}
+
+/// Every page's parts, in the order they go under its tab. A tab holds its own page's and those
+/// of the pages under it ([`under`]); a part with no rows (no emulator to choose and no
+/// options) is left out, and a tab of one part shows none.
+const SECTIONS: &[(Page, Part)] = &[
+    (Page::Game, Part::Whole),
+    (Page::Console, Part::Emulator),
+    (Page::Console, Part::Shelf),
+    (Page::System, Part::Shelf),
+    (Page::System, Part::Screen),
+    (Page::System, Part::Sound),
+    (Page::System, Part::Power),
+    (Page::System, Part::Time),
+    (Page::System, Part::About),
+    (Page::Update, Part::Whole),
+    (Page::Wifi, Part::Whole),
+    (Page::Bluetooth, Part::Whole),
+    (Page::Wifi, Part::NetInfo),
+    (Page::Achievements, Part::Whole),
+    (Page::View, Part::Whole),
+];
+
+/// The page whose tab `page` is under: Update is System's, Bluetooth is with Wi-Fi under
+/// Network; the others have tabs of their own.
+fn under(page: Page) -> Page {
+    match page {
+        Page::Update => Page::System,
+        Page::Bluetooth => Page::Wifi,
+        page => page,
+    }
 }
 
 /// What a row is.
@@ -98,8 +155,6 @@ pub enum Item {
     SleepOff,
     /// The clock, 12-hour or 24-hour: nibOS's preference, for every app.
     Clock,
-    /// System (nibOS): opens the Date and time page (clock.rs).
-    DateTime,
     /// A row of the Date and time page.
     ClockRow(ClockRow),
     /// The zone picker: a region (or UTC); A opens its places.
@@ -115,8 +170,6 @@ pub enum Item {
     ClockApply,
     /// Looks in every console's folders again, for games the watch on them missed.
     Rescan,
-    /// System: opens the System info page (sysinfo.rs).
-    SystemInfo,
     /// A line of the System info page; shown, not changed.
     Sys(SysRow),
     /// An emulator's action on the game's files; asks before it acts.
@@ -128,8 +181,6 @@ pub enum Item {
     Joined,
     /// Wi-Fi: the IPv4 address, for the common case; shown, not changed.
     Address,
-    /// Wi-Fi: opens the Network info page (netinfo.rs).
-    NetworkInfo,
     /// A line of the Network info page; A on any runs the reachability checks again.
     Info(InfoRow),
     /// Wi-Fi: look for networks again.
@@ -194,14 +245,12 @@ impl Item {
             Item::Battery => "Battery",
             Item::PowerOnStart => "Start at power-on",
             Item::Clock => "Clock",
-            Item::DateTime => "Date and time",
             Item::ClockRow(row) => row.label(),
             Item::ZoneRegion(region) => region,
             Item::Zone { label, .. } => label,
             Item::ClockField(field) => field.label(),
             Item::ClockApply => "Set the clock",
             Item::Rescan => "Rescan games",
-            Item::SystemInfo => "System info",
             Item::Sys(row) => row.label(),
             Item::Action(a) => &a.label,
             Item::DeleteSaves => "Delete saves",
@@ -212,7 +261,6 @@ impl Item {
             Item::SleepOff => "Power off when asleep",
             Item::Joined => "Joined",
             Item::Address => "Address",
-            Item::NetworkInfo => "Network info",
             Item::Info(row) => row.label(),
             Item::Scan => "Look for networks",
             Item::Network(name) => name,
@@ -407,9 +455,10 @@ impl ClockRow {
     }
 }
 
-/// What the Date and time page shows in place of the System page's rows.
+/// What the Time part shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ClockView {
+    /// Not the Time part, or no date and time to show (the stock OS): the Clock row alone.
     Closed,
     /// The page itself.
     Page,
@@ -455,6 +504,8 @@ pub struct Row {
 pub struct Shown {
     /// Each page's tab, and whether it is the page on show.
     pub tabs: Vec<(String, bool)>,
+    /// The parts under the tab, and whether each is the one on show: none for a tab of one.
+    pub sections: Vec<(String, bool)>,
     /// The line under the tabs: what the page is about.
     pub title: String,
     /// All the page's rows; those from `scroll` on are on screen.
@@ -524,8 +575,10 @@ pub struct Input {
     pub pressed: bool,
     /// Y: back to what the row inherits.
     pub reset: bool,
-    /// L / R: pages to move by.
+    /// L / R: tabs to move by.
     pub page: i32,
+    /// L2 / R2: sections to move by, under the tab.
+    pub section: i32,
     /// Left or right let go of: a slider has settled.
     pub released: bool,
     pub close: bool,
@@ -604,6 +657,8 @@ impl Context<'_> {
 /// The open menu.
 pub struct Menu {
     pub page: Page,
+    /// The page's part on show.
+    pub part: Part,
     /// The highlighted row.
     pub row: usize,
     /// The first row on screen.
@@ -660,12 +715,10 @@ pub struct Menu {
     /// The network's facts, read on a thread while the Wi-Fi page is up (nibOS).
     netinfo: Option<netinfo::Watch>,
     net: netinfo::Info,
-    /// Network info is open on the Wi-Fi page, in place of its rows.
-    reading_net: bool,
     /// The clock (nibOS): `nib clock status`, read on a thread while the System page is up.
     clock: Option<clock::Watch>,
     time: clock::Info,
-    /// What the Date and time page shows, in place of the System page's rows.
+    /// What the Time part shows: the page itself, the zone picker or the fields.
     clock_view: ClockView,
     /// The zones to choose from, read when the picker first opens.
     zones: Option<clock::Zones>,
@@ -676,8 +729,6 @@ pub struct Menu {
     /// The device's facts, read on a thread while System info is up.
     sysinfo: Option<sysinfo::Watch>,
     sys: sysinfo::Info,
-    /// System info is open on the System page, in place of its rows.
-    reading_sys: bool,
     /// The Achievements page: the RetroAchievements sign-in (ra.rs).
     ra: RaPage,
     /// The player signed in or out since the shelf last heard (`Done::account`).
@@ -697,8 +748,27 @@ enum Typing {
     RaPassword,
 }
 
-/// A page's tab: its label.
+/// The tab of a page with one of its own ([`under`]): its label.
 fn tab(page: Page, cx: &Context) -> &'static str {
+    match page {
+        Page::Wifi => "Network",
+        page => section(page, Part::Whole, cx),
+    }
+}
+
+/// A part's section: its label.
+fn section(page: Page, part: Part, cx: &Context) -> &'static str {
+    match part {
+        Part::Emulator => return "Emulator",
+        Part::Shelf => return "Shelf",
+        Part::Screen => return "Screen",
+        Part::Sound => return "Sound",
+        Part::Power => return "Power",
+        Part::Time => return "Time",
+        Part::About => return "About",
+        Part::NetInfo => return "Network info",
+        Part::Whole => {}
+    }
     match page {
         Page::Game => "Game",
         Page::Console => cx.console.label(),
@@ -709,6 +779,14 @@ fn tab(page: Page, cx: &Context) -> &'static str {
         Page::Achievements => "Achievements",
         Page::View => "View",
     }
+}
+
+/// The part a page opens on: its first.
+fn first_part(page: Page) -> Part {
+    SECTIONS
+        .iter()
+        .find(|(p, _)| *p == page)
+        .map_or(Part::Whole, |&(_, part)| part)
 }
 
 impl Menu {
@@ -740,6 +818,7 @@ impl Menu {
             .collect();
         Menu {
             page,
+            part: first_part(page),
             row: 0,
             scroll: 0,
             armed: None,
@@ -769,7 +848,6 @@ impl Menu {
             reading_notes: false,
             netinfo: None,
             net: netinfo::Info::default(),
-            reading_net: false,
             clock: None,
             time: clock::Info::default(),
             clock_view: ClockView::Closed,
@@ -778,7 +856,6 @@ impl Menu {
             clock_job: None,
             sysinfo: None,
             sys: sysinfo::Info::default(),
-            reading_sys: false,
             ra: RaPage::new(ra),
             account_changed: false,
         }
@@ -788,7 +865,7 @@ impl Menu {
     pub fn open_update(game: bool, ra: &Ra) -> Menu {
         let mut menu = Menu::open(game, ra);
         if update::there() {
-            menu.page = Page::Update;
+            menu.turn_to(Page::Update);
         }
         menu
     }
@@ -797,11 +874,11 @@ impl Menu {
     pub fn open_radio(game: bool, bluetooth: bool, ra: &Ra) -> Menu {
         let mut menu = Menu::open(game, ra);
         if menu.radios.is_some() {
-            menu.page = if bluetooth {
+            menu.turn_to(if bluetooth {
                 Page::Bluetooth
             } else {
                 Page::Wifi
-            };
+            });
         }
         menu
     }
@@ -848,17 +925,57 @@ impl Menu {
             .collect()
     }
 
-    /// The page's rows.
+    /// The sections under the page's tab: each page under it with a part of its own, in
+    /// [`SECTIONS`]' order, less those with no rows.
+    fn sections(&self, cx: &Context) -> Vec<(Page, Part)> {
+        let pages = self.pages(cx);
+        let tab = under(self.page);
+        SECTIONS
+            .iter()
+            .copied()
+            .filter(|&(page, part)| {
+                under(page) == tab
+                    && pages.contains(&page)
+                    && !self.items_of(page, part, cx).is_empty()
+            })
+            .collect()
+    }
+
+    /// The part on show: the one picked, or the page's first with rows while that one has none.
+    fn part_on(&self, cx: &Context) -> Part {
+        let listed = SECTIONS.contains(&(self.page, self.part));
+        if listed && !self.items_of(self.page, self.part, cx).is_empty() {
+            return self.part;
+        }
+        SECTIONS
+            .iter()
+            .filter(|(p, _)| *p == self.page)
+            .map(|&(_, part)| part)
+            .find(|&part| !self.items_of(self.page, part, cx).is_empty())
+            .unwrap_or(self.part)
+    }
+
+    /// The rows of the part on show.
     pub fn items(&self, cx: &Context) -> Vec<Item> {
+        let items = self.items_of(self.page, self.part_on(cx), cx);
+        // Never none: something to highlight.
+        if items.is_empty() {
+            return vec![Item::Sys(SysRow::Board)];
+        }
+        items
+    }
+
+    /// A part's rows: none where it has none on this page (an emulator with no options).
+    fn items_of(&self, page: Page, part: Part, cx: &Context) -> Vec<Item> {
         let mut items = Vec::new();
-        let choice = cx.choices(self.page).len() > 1;
+        let choice = cx.choices(page).len() > 1;
         let shelf = |items: &mut Vec<Item>| {
             for key in [def::VIEW, def::SORT, def::SHOW, def::CASE] {
                 items.extend(def::builtin(key).map(Item::Setting));
             }
         };
         let options = |items: &mut Vec<Item>| {
-            if let Some(emulator) = cx.emulator(self.page) {
+            if let Some(emulator) = cx.emulator(page) {
                 items.extend(
                     emulator
                         .options_for(cx.console.folder())
@@ -866,8 +983,20 @@ impl Menu {
                 );
             }
         };
-        match self.page {
-            Page::Game => {
+        let setting = |items: &mut Vec<Item>, keys: &[&str]| {
+            items.extend(
+                keys.iter()
+                    .filter_map(|k| def::builtin(k))
+                    .map(Item::Setting),
+            );
+        };
+        let control = |items: &mut Vec<Item>, c: Control| {
+            if self.controls.iter().any(|&(x, v)| x == c && v.is_some()) {
+                items.push(Item::Control(c));
+            }
+        };
+        match (page, part) {
+            (Page::Game, _) => {
                 items.extend([Item::Favourite, Item::Rating]);
                 if choice {
                     items.push(Item::Emulator);
@@ -875,7 +1004,7 @@ impl Menu {
                 options(&mut items);
                 let root = platform::saves();
                 let saves = root.as_deref();
-                if let Some(emulator) = cx.emulator(self.page) {
+                if let Some(emulator) = cx.emulator(page) {
                     let actions = emulator
                         .actions
                         .iter()
@@ -887,63 +1016,60 @@ impl Menu {
                     items.push(Item::DeleteSaves);
                 }
             }
-            // The apps' page is always a grid, of boxes without cases.
-            Page::Console | Page::View if cx.console == Console::Apps => {
-                for key in [def::SORT, def::SHOW] {
-                    items.extend(def::builtin(key).map(Item::Setting));
-                }
+            // The apps' page is always a grid, of boxes without cases, and has no emulator.
+            (Page::Console, Part::Emulator) if cx.console == Console::Apps => {}
+            (Page::Console, _) | (Page::View, _) if cx.console == Console::Apps => {
+                setting(&mut items, &[def::SORT, def::SHOW]);
             }
-            Page::Console => {
+            (Page::Console, Part::Emulator) => {
                 if choice {
                     items.push(Item::Emulator);
                 }
                 options(&mut items);
+            }
+            (Page::Console, _) => {
                 shelf(&mut items);
                 if cx.console == Console::Snes {
-                    items.extend(def::builtin(def::SNES_CART).map(Item::Setting));
+                    setting(&mut items, &[def::SNES_CART]);
                 }
             }
-            Page::View => shelf(&mut items),
-            Page::System if self.clock_view != ClockView::Closed => self.clock_items(&mut items),
-            Page::System if self.reading_sys => {
-                items.extend(self.sys_rows().into_iter().map(Item::Sys));
-                if items.is_empty() {
-                    items.push(Item::Sys(SysRow::Board));
-                }
-            }
-            Page::System => {
+            (Page::View, _) => shelf(&mut items),
+            (Page::System, Part::Shelf) => {
                 shelf(&mut items);
-                let own = [
-                    def::SHOW_EMPTY,
-                    def::SOUNDS,
-                    def::REPEAT,
-                    def::SAVER,
-                    def::SAVER_LOOK,
-                ]
-                .into_iter()
-                .filter_map(def::builtin);
-                items.extend(own.map(Item::Setting));
-                let there = self.controls.iter().filter(|(_, v)| v.is_some());
-                for &(c, _) in there.filter(|(c, _)| *c != Control::BatteryProtect) {
-                    items.push(Item::Control(c));
+                setting(&mut items, &[def::SHOW_EMPTY, def::REPEAT]);
+                items.push(Item::Rescan);
+            }
+            (Page::System, Part::Screen) => {
+                control(
+                    &mut items,
+                    Control::Brightness(nibkit::screens::Screen::Top),
+                );
+                control(
+                    &mut items,
+                    Control::Brightness(nibkit::screens::Screen::Bottom),
+                );
+                setting(&mut items, &[def::SAVER, def::SAVER_LOOK]);
+            }
+            (Page::System, Part::Sound) => {
+                control(&mut items, Control::Volume);
+                setting(&mut items, &[def::SOUNDS]);
+                if self.tuning.is_some() {
+                    items.extend([Item::SpeakerTuning, Item::ImportTuning]);
                 }
+                // The tuning applies at the next restart.
+                if self.restart {
+                    items.push(Item::RestartNow);
+                }
+            }
+            (Page::System, Part::Power) => {
                 // The battery's line, and its protect switch where the system has one.
                 if self.battery.is_some() || nibkit::battery::read().is_some() {
                     items.push(Item::Battery);
                 }
-                let protect =
-                    |&(c, v): &(Control, Option<i64>)| c == Control::BatteryProtect && v.is_some();
-                if self.controls.iter().any(protect) {
-                    items.push(Item::Control(Control::BatteryProtect));
-                }
-                items.push(Item::Clock);
-                if clock::available() {
-                    items.push(Item::DateTime);
-                }
-                items.push(Item::Rescan);
-                items.push(Item::SystemInfo);
-                if self.tuning.is_some() {
-                    items.extend([Item::SpeakerTuning, Item::ImportTuning]);
+                control(&mut items, Control::BatteryProtect);
+                // Wi-Fi's own switch is on the Network tab, where there is one.
+                if self.radios.is_none() {
+                    control(&mut items, Control::Wifi);
                 }
                 if self.at_boot.is_some() {
                     items.push(Item::PowerOnStart);
@@ -951,32 +1077,39 @@ impl Menu {
                 if self.sleep_off.is_some() {
                     items.push(Item::SleepOff);
                 }
-                if self.restart {
-                    items.push(Item::RestartNow);
-                }
                 items.push(Item::PowerOff);
             }
-            Page::Wifi if self.reading_net => {
+            (Page::System, Part::Time) => {
+                if matches!(self.clock_view, ClockView::Closed | ClockView::Page) {
+                    items.push(Item::Clock);
+                }
+                self.clock_items(&mut items);
+            }
+            (Page::System, Part::About) => {
+                items.extend(self.sys_rows().into_iter().map(Item::Sys));
+                if items.is_empty() {
+                    items.push(Item::Sys(SysRow::Board));
+                }
+            }
+            (Page::System, _) => {}
+            (Page::Wifi, Part::NetInfo) => {
                 items.extend(InfoRow::ALL.into_iter().map(Item::Info));
             }
-            Page::Wifi => {
-                if self
-                    .controls
-                    .iter()
-                    .any(|(c, v)| *c == Control::Wifi && v.is_some())
-                {
-                    items.push(Item::Control(Control::Wifi));
-                }
+            (Page::Wifi, _) => {
+                control(&mut items, Control::Wifi);
                 if self.radio.wifi.is_some() {
                     items.extend([Item::Joined, Item::Address]);
                 }
-                items.push(Item::NetworkInfo);
+                // Before the worker has said: what the Wi-Fi is doing, as soon as it is known.
+                if items.is_empty() {
+                    items.push(Item::Joined);
+                }
                 if let Some(wifi) = &self.radio.wifi {
                     items.push(Item::Scan);
                     items.extend(wifi.networks.iter().map(|n| Item::Network(n.name.clone())));
                 }
             }
-            Page::Update if self.reading_notes => {
+            (Page::Update, _) if self.reading_notes => {
                 let notes = self.update_notes.as_ref().map_or("", |(_, n)| n.as_str());
                 items.extend(
                     update::wrap(notes, NOTES_WIDTH)
@@ -987,7 +1120,7 @@ impl Menu {
                     items.push(Item::NoteLine(String::new()));
                 }
             }
-            Page::Update => {
+            (Page::Update, _) => {
                 let s = self.update.as_ref().map(|(s, _)| s);
                 items.extend([Item::UpdateVersion, Item::UpdateChannel, Item::UpdateState]);
                 // What the title line can't hold of the message, on lines of its own.
@@ -1007,8 +1140,8 @@ impl Menu {
                     items.push(Item::Rollback);
                 }
             }
-            Page::Achievements => items.extend(self.ra.rows()),
-            Page::Bluetooth => {
+            (Page::Achievements, _) => items.extend(self.ra.rows()),
+            (Page::Bluetooth, _) => {
                 items.push(Item::BluetoothPower);
                 if let Some(bt) = self.radio.bluetooth.as_ref().filter(|b| b.powered) {
                     let gadget = |g: &super::radios::Gadget| Item::Gadget {
@@ -1069,24 +1202,48 @@ impl Menu {
             closed: input.close,
             ..Done::default()
         };
-        let (mut turn, mut pressed, mut page_turn) = (input.turn, input.pressed, input.page);
+        let (mut turn, mut pressed) = (input.turn, input.pressed);
+        let (mut page_turn, mut section_turn) = (input.page, input.section);
         let pages = self.pages(cx);
-        // A tap on a tab turns to it; one on a row picks it and steps its value.
-        let labels: Vec<&str> = pages.iter().map(|&p| tab(p, cx)).collect();
+        let tabs: Vec<Page> = pages.iter().copied().filter(|&p| under(p) == p).collect();
+        if !pages.contains(&self.page) {
+            self.turn_to(Page::Console);
+        }
+        // A tap on a tab turns to it, one on a section to that part; one on a row picks it and
+        // steps its value.
+        let labels: Vec<&str> = tabs.iter().map(|&p| tab(p, cx)).collect();
         for &(x, y) in &input.taps {
-            if let Some(p) = tab_at(x, y, &labels) {
-                page_turn = 0;
-                self.turn_to(pages[p]);
+            let sections = self.sections(cx);
+            let names: Vec<&str> = sections.iter().map(|&(p, s)| section(p, s, cx)).collect();
+            if let Some(t) = tab_at(x, y, &labels) {
+                (page_turn, section_turn) = (0, 0);
+                self.turn_to(tabs[t]);
+            } else if let Some(i) = section_at(x, y, &names).filter(|_| names.len() > 1) {
+                (page_turn, section_turn) = (0, 0);
+                self.go(sections[i]);
             } else if let Some(r) = row_hit(y).map(|r| r + self.scroll) {
                 (self.row, turn, pressed) = (r, turn + 1, true);
             }
         }
         if page_turn != 0 {
-            let at = pages.iter().position(|&p| p == self.page).unwrap_or(0) as i32;
-            self.turn_to(pages[(at + page_turn).rem_euclid(pages.len() as i32) as usize]);
+            let at = tabs
+                .iter()
+                .position(|&p| p == under(self.page))
+                .unwrap_or(0) as i32;
+            self.turn_to(tabs[(at + page_turn).rem_euclid(tabs.len() as i32) as usize]);
         }
-        if !pages.contains(&self.page) {
-            self.turn_to(Page::Console);
+        let sections = self.sections(cx);
+        if section_turn != 0 && sections.len() > 1 {
+            let here = (self.page, self.part);
+            let at = sections.iter().position(|&s| s == here).unwrap_or(0) as i32;
+            let n = sections.len() as i32;
+            self.go(sections[(at + section_turn).rem_euclid(n) as usize]);
+        }
+        // A part with no rows now (the emulator's, for a console with none to choose): the page's
+        // first with some.
+        let part = self.part_on(cx);
+        if part != self.part {
+            self.go((self.page, part));
         }
         // Drained on every page, so the System page only rereads for changes made while it shows.
         let changed = self
@@ -1136,13 +1293,8 @@ impl Menu {
         } else if self.netinfo.take().is_some() {
             self.net = netinfo::Info::default();
         }
-        // Network info: B goes back to the Wi-Fi page, A checks again.
-        if self.reading_net && input.close {
-            self.close_net_info();
-            return Done::default();
-        }
-        // The device's facts, while System info is up.
-        if self.page == Page::System && self.reading_sys {
+        // The device's facts, while About is up.
+        if self.page == Page::System && self.part == Part::About {
             if self.sysinfo.is_none() {
                 self.sysinfo = sysinfo::Watch::start();
             }
@@ -1152,8 +1304,8 @@ impl Menu {
         } else if self.sysinfo.take().is_some() {
             self.sys = sysinfo::Info::default();
         }
-        // The clock, while the System page is up (its row shows the time).
-        if self.page == Page::System && clock::available() {
+        // The clock, while Time is up.
+        if self.page == Page::System && self.part == Part::Time && clock::available() {
             if self.clock.is_none() {
                 self.clock = clock::Watch::start();
             }
@@ -1171,20 +1323,9 @@ impl Menu {
             self.ra_back(cx);
             return Done::default();
         }
-        // Date and time: B goes back a level, to the System page at last.
-        if self.clock_view != ClockView::Closed && input.close {
+        // The zone picker and the fields: B goes back a level, to the Time part's own rows.
+        if !matches!(self.clock_view, ClockView::Closed | ClockView::Page) && input.close {
             self.clock_back(cx);
-            return Done::default();
-        }
-        // System info: B goes back to the System page, on its row.
-        if self.reading_sys && input.close {
-            self.reading_sys = false;
-            let items = self.items(cx);
-            self.row = items
-                .iter()
-                .position(|i| *i == Item::SystemInfo)
-                .unwrap_or(0);
-            self.scroll = self.row.saturating_sub(VISIBLE - 1);
             return Done::default();
         }
 
@@ -1205,31 +1346,21 @@ impl Menu {
         }
         let item = &items[self.row];
         let chosen = pressed && was == self.row;
-        // Y on the Wi-Fi page opens Network info, except on a saved network, where it forgets.
+        // Y on the Wi-Fi page turns to Network info, except on a saved network, where it forgets.
         let forgets = matches!(item, Item::Network(name) if self.known(name));
-        if self.page == Page::System && self.clock_view != ClockView::Closed {
+        if self.page == Page::System && self.part == Part::Time && *item != Item::Clock {
             let item = item.clone();
             self.clock_row(&item, chosen, turn, cx);
-        } else if *item == Item::DateTime {
-            if chosen {
-                self.open_clock(cx);
-            }
-        } else if self.page == Page::System && self.reading_sys {
+        } else if self.page == Page::System && self.part == Part::About {
             // Shown only: nothing to press or turn.
-        } else if *item == Item::SystemInfo {
-            if chosen {
-                self.open_sys_info();
-            }
-        } else if self.page == Page::Wifi && self.reading_net {
+        } else if self.page == Page::Wifi && self.part == Part::NetInfo {
             if chosen {
                 if let Some(watch) = &self.netinfo {
                     watch.check_again();
                 }
             }
-        } else if self.page == Page::Wifi
-            && ((*item == Item::NetworkInfo && chosen) || (input.reset && !forgets))
-        {
-            self.open_net_info();
+        } else if self.page == Page::Wifi && input.reset && !forgets {
+            self.go((Page::Wifi, Part::NetInfo));
         } else if matches!(self.page, Page::Wifi | Page::Bluetooth)
             && !matches!(item, Item::Control(_))
         {
@@ -1453,36 +1584,6 @@ impl Menu {
             .is_some_and(|w| w.networks.iter().any(|n| n.name == name && n.known))
     }
 
-    /// Opens Network info over the Wi-Fi page's rows, and runs its checks.
-    fn open_net_info(&mut self) {
-        (self.reading_net, self.row, self.scroll) = (true, 0, 0);
-        (self.armed, self.note, self.forget) = (None, None, None);
-        if let Some(watch) = &self.netinfo {
-            watch.check_again();
-        }
-    }
-
-    /// Opens System info over the System page's rows.
-    fn open_sys_info(&mut self) {
-        (self.reading_sys, self.row, self.scroll) = (true, 0, 0);
-        (self.armed, self.note) = (None, None);
-    }
-
-    /// Back to the Wi-Fi page's rows, on its Network info row.
-    fn close_net_info(&mut self) {
-        self.reading_net = false;
-        let joined_rows = if self.radio.wifi.is_some() { 2 } else { 0 };
-        self.row = usize::from(self.has_wifi_switch()) + joined_rows;
-        self.scroll = self.row.saturating_sub(VISIBLE - 1);
-    }
-
-    /// Whether the Wi-Fi page starts with the switch's row.
-    fn has_wifi_switch(&self) -> bool {
-        self.controls
-            .iter()
-            .any(|(c, v)| *c == Control::Wifi && v.is_some())
-    }
-
     /// Whether the keyboard is up: it takes every button.
     pub fn typing(&self) -> bool {
         self.typing.is_some()
@@ -1521,12 +1622,12 @@ impl Menu {
         }
     }
 
+    /// Turns to `page`, on its first part.
     fn turn_to(&mut self, page: Page) {
         if self.page != page {
             (self.page, self.row, self.scroll, self.armed, self.note) = (page, 0, 0, None, None);
-            (self.forget, self.reading_notes, self.reading_net) = (None, false, false);
-            self.reading_sys = false;
-            self.clock_view = ClockView::Closed;
+            (self.forget, self.reading_notes) = (None, false);
+            self.enter(first_part(page));
             self.ra.leave();
             if page == Page::Achievements {
                 self.ra.check();
@@ -1536,6 +1637,30 @@ impl Menu {
                 self.hour12 = nibkit::clock::hour12();
                 self.tuning = nibkit::audio::tuning();
                 self.sleep_off = sleepoff::read();
+            }
+        }
+    }
+
+    /// Turns to a page's part: a section.
+    fn go(&mut self, (page, part): (Page, Part)) {
+        self.turn_to(page);
+        if self.part != part {
+            self.enter(part);
+        }
+    }
+
+    /// Shows `part` of the page, from its first row: Time on the date and time (where there
+    /// are), Network info with its checks run again.
+    fn enter(&mut self, part: Part) {
+        (self.part, self.row, self.scroll) = (part, 0, 0);
+        (self.armed, self.note, self.forget) = (None, None, None);
+        self.clock_view = match part {
+            Part::Time if clock::available() => ClockView::Page,
+            _ => ClockView::Closed,
+        };
+        if part == Part::NetInfo {
+            if let Some(watch) = &self.netinfo {
+                watch.check_again();
             }
         }
     }
@@ -1732,9 +1857,7 @@ impl Menu {
             | Item::ImportTuning
             | Item::RestartNow
             | Item::Rescan
-            | Item::SystemInfo
             | Item::Sys(_)
-            | Item::DateTime
             | Item::ClockRow(_)
             | Item::ZoneRegion(_)
             | Item::Zone { .. }
@@ -1751,7 +1874,6 @@ impl Menu {
             | Item::RaNoneEarned
             | Item::Joined
             | Item::Address
-            | Item::NetworkInfo
             | Item::Info(_)
             | Item::Scan
             | Item::Network(_)
@@ -1867,8 +1989,18 @@ impl Menu {
         let pages = self.pages(cx);
         let tabs = pages
             .iter()
-            .map(|&p| (tab(p, cx).to_owned(), p == self.page))
+            .filter(|&&p| under(p) == p)
+            .map(|&p| (tab(p, cx).to_owned(), p == under(self.page)))
             .collect();
+        let here = (self.page, self.part_on(cx));
+        let mut sections: Vec<(String, bool)> = self
+            .sections(cx)
+            .into_iter()
+            .map(|(p, part)| (section(p, part, cx).to_owned(), (p, part) == here))
+            .collect();
+        if sections.len() < 2 {
+            sections.clear();
+        }
         let radio_title = || {
             let r = &self.radio;
             match (&r.asking, &r.busy, &r.said) {
@@ -1881,7 +2013,7 @@ impl Menu {
                 (Some(Ask::Show(code)), ..) => format!("Type {code} on the device, then Enter"),
                 (_, Some(busy), _) => busy.clone(),
                 (_, _, Some(said)) if !said.is_empty() => said.clone(),
-                _ if self.page == Page::Wifi && self.reading_net => self.net.summary(),
+                _ if here == (Page::Wifi, Part::NetInfo) => self.net.summary(),
                 _ if self.page == Page::Wifi => "Wi-Fi networks".into(),
                 _ => "Bluetooth devices".into(),
             }
@@ -1918,7 +2050,7 @@ impl Menu {
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
-            (Page::System, _) if self.reading_sys => self.sys.summary(),
+            (Page::System, _) if here.1 == Part::About => self.sys.summary(),
             (Page::System, _) => "DSlot and the device".to_owned(),
             (Page::View, _) if cx.console == Console::Apps => "How Apps are shown".to_owned(),
             (Page::View, _) => format!("How the {} page is shown", cx.console.label()),
@@ -1934,7 +2066,7 @@ impl Menu {
             .map(|i| format!("Y  use {}   \u{b7}   ", i.from));
         let hint = match (self.page, items.get(self.row)) {
             (Page::Wifi, Some(Item::Info(_))) => {
-                "A  check again   \u{b7}   L / R  page   \u{b7}   B  back to Wi-Fi".into()
+                "A  check again   \u{b7}   L / R  page   \u{b7}   B  back".into()
             }
             (Page::Wifi, Some(Item::Network(name))) if self.known(name) => {
                 "A  join or leave   \u{b7}   Y  forget   \u{b7}   L / R  page   \u{b7}   B  back"
@@ -1952,7 +2084,7 @@ impl Menu {
                 "A  back to Update   \u{b7}   L / R  page   \u{b7}   B  close".into()
             }
             (Page::System, Some(Item::ClockRow(_))) => {
-                "A  choose   \u{b7}   L / R  page   \u{b7}   B  back to System".into()
+                "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into()
             }
             (Page::System, Some(Item::ZoneRegion(_))) => "A  choose   \u{b7}   B  back".into(),
             (Page::System, Some(Item::Zone { .. })) => {
@@ -1961,7 +2093,7 @@ impl Menu {
             (Page::System, Some(Item::ClockField(_) | Item::ClockApply)) => {
                 "D-pad  change   \u{b7}   A  set the clock   \u{b7}   B  back".into()
             }
-            (Page::System, Some(Item::Sys(_))) => "L / R  page   \u{b7}   B  back to System".into(),
+            (Page::System, Some(Item::Sys(_))) => "L / R  page   \u{b7}   B  back".into(),
             (Page::Update, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             (Page::Achievements, _) if self.ra.signing_up() => {
                 "L / R  page   \u{b7}   B  back to Achievements".into()
@@ -1982,6 +2114,12 @@ impl Menu {
                 back.unwrap_or_default()
             ),
         };
+        // Under a tab of sections, L2 / R2 go through them.
+        let hint = if sections.is_empty() {
+            hint
+        } else {
+            hint.replace("L / R  page", "L / R  page   \u{b7}   L2 / R2  section")
+        };
         let row = |(r, item): (usize, &Item)| Row {
             label: item.label().to_owned(),
             value: self.value(item, r, cx),
@@ -1990,6 +2128,7 @@ impl Menu {
         let rows = items.iter().enumerate().map(row).collect();
         Shown {
             tabs,
+            sections,
             title,
             rows,
             scroll: self.scroll,
@@ -2293,8 +2432,7 @@ impl Menu {
             },
             Item::Clock => text(if self.hour12 { "12-hour" } else { "24-hour" }),
             Item::SleepOff => text(&sleepoff::label(self.sleep_off.flatten())),
-            Item::DateTime
-            | Item::ClockRow(_)
+            Item::ClockRow(_)
             | Item::ZoneRegion(_)
             | Item::Zone { .. }
             | Item::ClockField(_)
@@ -2326,23 +2464,7 @@ impl Menu {
                 },
                 warning: false,
             },
-            Item::NetworkInfo => Value::Prompt {
-                text: if r == self.row {
-                    "Press A".into()
-                } else {
-                    String::new()
-                },
-                warning: false,
-            },
             Item::Info(row) => self.info_value(*row),
-            Item::SystemInfo => Value::Prompt {
-                text: if r == self.row {
-                    "Press A".into()
-                } else {
-                    String::new()
-                },
-                warning: false,
-            },
             Item::Sys(row) => self
                 .sys_value(*row)
                 .map_or_else(|| text("\u{2013}"), |(v, _)| v),
@@ -2594,16 +2716,11 @@ impl Menu {
         }
     }
 
-    /// Opens the page over the System page's rows.
-    fn open_clock(&mut self, _cx: &Context) {
-        self.clock_view = ClockView::Page;
-        (self.row, self.scroll, self.armed, self.note) = (0, 0, None, None);
-    }
-
-    /// B: back a level; from the page itself, back to the System page on its row.
+    /// B, in the zone picker or the fields: back a level.
     fn clock_back(&mut self, cx: &Context) {
         let (view, row) = match &self.clock_view {
-            ClockView::Closed | ClockView::Page => (ClockView::Closed, None),
+            ClockView::Closed => (ClockView::Closed, None),
+            ClockView::Page => (ClockView::Page, None),
             ClockView::Regions => (ClockView::Page, Some(ClockRow::Zone)),
             ClockView::Places(_) => (ClockView::Regions, None),
             ClockView::Manual => (ClockView::Page, Some(ClockRow::Manual)),
@@ -2621,9 +2738,6 @@ impl Menu {
             (None, Some(region)) => items
                 .iter()
                 .position(|i| *i == Item::ZoneRegion(region.clone())),
-            (None, None) if self.clock_view == ClockView::Closed => {
-                items.iter().position(|i| *i == Item::DateTime)
-            }
             _ => Some(0),
         }
         .unwrap_or(0)
@@ -2775,7 +2889,6 @@ impl Menu {
         };
         let dash = "\u{2013}".to_owned();
         match item {
-            Item::DateTime => prompt(self.time.glance(self.hour12).unwrap_or_default(), false),
             Item::ClockRow(ClockRow::Time) => {
                 prompt(self.time.local.map_or(dash, |t| t.time(self.hour12)), false)
             }
@@ -3005,7 +3118,7 @@ mod tests {
         };
         let token = w.ra.token.clone();
         let mut menu = Menu::open(false, &w.ra);
-        menu.page = Page::Achievements;
+        (menu.page, menu.part) = (Page::Achievements, Part::Whole);
         // Hardcore is not offered yet: no Mode row, and no notes under the rows.
         assert_eq!(
             labels(&menu, &cx),
@@ -3196,7 +3309,7 @@ mod tests {
         };
         account.save(&w.ra.token).unwrap();
         let mut menu = Menu::open(false, &w.ra);
-        menu.page = Page::Achievements;
+        (menu.page, menu.part) = (Page::Achievements, Part::Whole);
         assert_eq!(labels(&menu, &cx)[0], "Signed in as");
         let tx = menu.ra.waiting_on(false);
         assert_eq!(
@@ -3253,25 +3366,45 @@ mod tests {
             menu.pages(&cx),
             with_radios(&menu, vec![Page::Game, Page::Console, Page::System])
         );
+        // The Game page is one part: no sections under its tab.
+        assert!(menu.shown(&cx).sections.is_empty());
         menu.turn_to(Page::Console);
+        assert_eq!(menu.part, Part::Emulator);
+        assert_eq!(labels(&menu, &cx), ["3D resolution"]);
+        let sections = |m: &Menu, cx: &Context| m.shown(cx).sections;
+        assert_eq!(
+            sections(&menu, &cx),
+            [("Emulator".to_owned(), true), ("Shelf".to_owned(), false)]
+        );
+        menu.go((Page::Console, Part::Shelf));
+        assert_eq!(labels(&menu, &cx), ["View", "Sort by", "Show", "Game case"]);
+        menu.turn_to(Page::System);
         assert_eq!(
             labels(&menu, &cx),
-            ["3D resolution", "View", "Sort by", "Show", "Game case"]
-        );
-        menu.turn_to(Page::System);
-        let system = labels(&menu, &cx);
-        assert_eq!(
-            system[..6],
             [
                 "View",
                 "Sort by",
                 "Show",
                 "Game case",
                 "Show systems with no games",
-                "Sounds"
+                "Button repeat",
+                "Rescan games"
             ]
         );
-        assert_eq!(system.last().map(String::as_str), Some("Power off"));
+        let names: Vec<String> = sections(&menu, &cx).into_iter().map(|s| s.0).collect();
+        let mut system = vec!["Shelf", "Screen", "Sound", "Power", "Time", "About"];
+        if update::there() {
+            system.push("Update");
+        }
+        assert_eq!(names, system);
+        assert!(labels(&menu, &cx).len() <= VISIBLE);
+        menu.go((Page::System, Part::Sound));
+        assert!(labels(&menu, &cx).contains(&"Sounds".to_owned()));
+        menu.go((Page::System, Part::Power));
+        let power = labels(&menu, &cx);
+        assert_eq!(power.last().map(String::as_str), Some("Power off"));
+        menu.go((Page::System, Part::Time));
+        assert_eq!(labels(&menu, &cx)[0], "Clock");
 
         // The GBA page, a second emulator for GBA, no game: the Emulator row, no 3D resolution.
         let mut w = world("menu-gba", true);
@@ -3284,14 +3417,76 @@ mod tests {
         };
         let menu = Menu::open(false, &w.ra);
         assert_eq!(menu.page, Page::Console);
-        assert_eq!(
-            labels(&menu, &cx),
-            ["Emulator", "View", "Sort by", "Show", "Game case"]
-        );
+        assert_eq!(labels(&menu, &cx), ["Emulator"]);
         assert_eq!(
             menu.pages(&cx),
             with_radios(&menu, vec![Page::Console, Page::System])
         );
+    }
+
+    /// L2 / R2 go through the sections under a tab, round from the last to the first; L / R
+    /// change tab, onto its first part; a tap on a section turns to it. Update is under
+    /// System's tab, Wi-Fi and Bluetooth under Network's.
+    #[test]
+    fn sections_under_tabs() {
+        let mut w = world("menu-sections", false);
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Ds,
+            game: None,
+        };
+        let mut menu = Menu::open(false, &w.ra);
+        let step = |section: i32, page: i32| Input {
+            section,
+            page,
+            ..Input::default()
+        };
+        menu.update(&step(1, 0), &mut cx);
+        assert_eq!((menu.page, menu.part), (Page::Console, Part::Shelf));
+        menu.update(&step(1, 0), &mut cx);
+        assert_eq!(menu.part, Part::Emulator, "round to the first");
+        menu.update(&step(0, 1), &mut cx);
+        assert_eq!((menu.page, menu.part), (Page::System, Part::Shelf));
+        menu.update(&step(2, 0), &mut cx);
+        assert_eq!(menu.part, Part::Sound);
+        let shown = menu.shown(&cx);
+        assert!(shown.sections.contains(&("Sound".to_owned(), true)));
+        assert!(shown.hint.contains("L2 / R2  section"));
+        assert_eq!(
+            shown.tabs.iter().filter(|t| t.1).collect::<Vec<_>>(),
+            [&("System".to_owned(), true)]
+        );
+        // Back past the first: the last, Update where there is one.
+        menu.update(&step(-3, 0), &mut cx);
+        let last = if update::there() {
+            (Page::Update, Part::Whole)
+        } else {
+            (Page::System, Part::About)
+        };
+        assert_eq!((menu.page, menu.part), last);
+        assert!(menu.shown(&cx).tabs.contains(&("System".to_owned(), true)));
+        // A tap on the first section.
+        let tap = Input {
+            taps: vec![(LEFT + 5.0, SECTIONS_Y + 10.0)],
+            ..Input::default()
+        };
+        menu.update(&tap, &mut cx);
+        assert_eq!((menu.page, menu.part), (Page::System, Part::Shelf));
+        // The tabs: Wi-Fi and Bluetooth are one, Network, and Update has none of its own.
+        let tabs: Vec<String> = menu.shown(&cx).tabs.into_iter().map(|t| t.0).collect();
+        assert!(!tabs
+            .iter()
+            .any(|t| t == "Update" || t == "Wi-Fi" || t == "Bluetooth"));
+        assert_eq!(tabs.iter().any(|t| t == "Network"), menu.radios.is_some());
+        // Time: B closes the menu from the date and time's own rows.
+        menu.go((Page::System, Part::Time));
+        let close = Input {
+            close: true,
+            ..Input::default()
+        };
+        assert!(menu.update(&close, &mut cx).closed);
     }
 
     #[test]
@@ -3350,9 +3545,10 @@ mod tests {
 
         // The shelf's settings: the system's, which a console's page inherits.
         menu.turn_to(Page::System);
+        assert_eq!(menu.part, Part::Shelf);
         menu.update(&right, &mut cx);
-        menu.turn_to(Page::Console);
-        let view = 1;
+        menu.go((Page::Console, Part::Shelf));
+        let view = 0;
         assert_eq!(
             menu.shown(&cx).rows[view].value,
             inherited("Use System (Cover grid)")
@@ -3425,7 +3621,7 @@ mod tests {
             game: None,
         };
         let mut menu = Menu::open(false, &w.ra);
-        menu.turn_to(Page::System);
+        menu.go((Page::System, Part::Sound));
         menu.tuning = Some(nibkit::audio::Tuning::Nibos);
         menu.run(Item::SpeakerTuning, || {
             Ok("Speaker tuning: official, from the next restart.".into())
@@ -3470,7 +3666,9 @@ mod tests {
             game: None,
         };
         let mut menu = Menu::open(false, &w.ra);
-        menu.turn_to(Page::System);
+        menu.go((Page::System, Part::Power));
+        // A row besides Power off to move to, wherever the tests run.
+        menu.at_boot = Some(false);
         let last = menu.items(&cx).len() - 1;
         let press = Input {
             pressed: true,
@@ -3502,8 +3700,7 @@ mod tests {
         assert_eq!(row_hit(TOP - ROW_STEP), None);
     }
 
-    /// System info: A on its row opens it, its rows are those the device has a source for,
-    /// and B goes back to the System page on its row.
+    /// System's About: its rows are those the device has a source for, and B closes the menu.
     #[test]
     fn system_info() {
         let mut w = world("menu-sysinfo", false);
@@ -3515,20 +3712,8 @@ mod tests {
             game: None,
         };
         let mut menu = Menu::open(false, &w.ra);
-        menu.turn_to(Page::System);
-        let at = menu
-            .items(&cx)
-            .iter()
-            .position(|i| *i == Item::SystemInfo)
-            .unwrap();
-        menu.update(&moved(at as i32), &mut cx);
-        let press = Input {
-            pressed: true,
-            ..Input::default()
-        };
-        menu.update(&press, &mut cx);
-        assert!(menu.reading_sys);
-        assert!(menu.shown(&cx).hint.contains("back to System"));
+        menu.go((Page::System, Part::About));
+        assert!(menu.shown(&cx).hint.contains("B  back"));
 
         // The facts as alpha2 gives them, less a kernel release and a battery.
         menu.sys = sysinfo::Info {
@@ -3625,14 +3810,12 @@ mod tests {
         assert_eq!(row("System").source.as_deref(), Some("1.3 of 1.6 GB used"));
         assert_eq!(row("Display").value, prompt("DSI-1 1024\u{d7}768"));
 
-        // B: back to the System page, on the System info row.
+        // B: the menu closes, from About as from any part.
         let close = Input {
             close: true,
             ..Input::default()
         };
-        menu.update(&close, &mut cx);
-        assert!(!menu.reading_sys);
-        assert_eq!(menu.items(&cx)[menu.row], Item::SystemInfo);
+        assert!(menu.update(&close, &mut cx).closed);
     }
 
     /// The Update page's row, in each phase: what it says, and when it warns.

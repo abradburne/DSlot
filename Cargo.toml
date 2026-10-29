@@ -18,10 +18,10 @@ nibos = ["nibkit/nibos", "nibkit/net-control"]
 [dependencies]
 # nibOS's SDK library (github.com/abradburne/nibkit, MIT): the screens, buttons, touch,
 # brightness, settings and emulator descriptions DSlot shares with other apps.
-nibkit = { git = "https://github.com/abradburne/nibkit", tag = "v0.2.2", default-features = false, features = ["dslot", "menu"] }
+nibkit = { git = "https://github.com/abradburne/nibkit", tag = "v0.3.0", default-features = false, features = ["dslot", "menu"] }
 # RetroAchievements, nibkit's (rcheevos, vendored there, MIT): a ROM's hash for every console,
 # zipped ones too, and the service's requests built and read by rcheevos (achievements/).
-nib-cheevos = { git = "https://github.com/abradburne/nibkit", tag = "v0.2.2", default-features = false, features = ["zip", "api"] }
+nib-cheevos = { git = "https://github.com/abradburne/nibkit", tag = "v0.3.0", default-features = false, features = ["zip", "api"] }
 sdl2 = { version = "0.38", features = ["unsafe_textures"] }
 png = "0.17"
 fontdue = "0.9"

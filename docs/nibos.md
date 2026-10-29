@@ -66,8 +66,9 @@ the send failed). The command's output goes to the journal. Any button then clos
 
 ## Network info
 
-The Wi-Fi page shows the IPv4 address under the network joined (**Address**), and opens
-**Network info** (its row, or **Y** on any row but a saved network, where Y forgets): a
+The Wi-Fi page shows the IPv4 address under the network joined (**Address**). **Network
+info**, the Network tab's last section (or **Y** on any Wi-Fi row but a saved network, where Y
+forgets), is a
 read-only page of what a player is asked for when something won't connect, so support needn't
 guess whether they were on Wi-Fi at all (`src/ui/netinfo.rs`). Its lines: Wi-Fi (off, on and
 not connected, on and connected), the network with its signal in dBm and band, the address with
@@ -87,15 +88,15 @@ page is up, from `nib wifi status` (`nibkit::device::wifi`), `ip -j addr`, `ip -
 iwd's `iwctl station wlan0 show` (or `iw dev wlan0 link` without iwctl),
 `/run/systemd/resolve/resolv.conf` and `/etc/hostname`. The checks run on a thread of their own
 when the page opens and again on **A** (each a name lookup and a TCP connect to port 443, 4 s at
-most), so a slow one never holds the page. **B** goes back to the Wi-Fi page. The parsers have
+most), so a slow one never holds the page. **B** closes the menu. The parsers have
 unit tests fed with the commands' captured output. On the stock OS there is no Wi-Fi page and
 none of this is built in.
 
 ## Date and time
 
-The System page's **Date and time** row (nibOS, where `/usr/lib/nibos/nib-clock` is
-installed; never on the stock OS) shows the time and zone at a glance and opens the page
-(`src/ui/clock.rs`): the time to the second (12- or 24-hour as the Clock row says), the date
+The System page's **Time** section shows, under the Clock row (12- or 24-hour), the date and
+time (nibOS, where `/usr/lib/nibos/nib-clock` is installed; never on the stock OS;
+`src/ui/clock.rs`): the time to the second (12- or 24-hour as the Clock row says), the date
 in words, the zone with its offset, and **Time source**: "Set from the network (last at
 10:47)", "Not set from the network yet" (a warning: on the DSlot edition Wi-Fi comes up on
 demand, so after a power-off the clock runs from the hardware clock until something brings the
@@ -116,11 +117,11 @@ network up), or "Network time is off: set by hand". The title line says the same
   kept within the month), **Set the clock** applies them (`nib clock set`), which turns network
   time off so it isn't put straight back.
 
-`status` is read as any user on a thread every second while the System page is up; the
+`status` is read as any user on a thread every second while the Time section is up; the
 commands run as root through `sudo -n` (nibOS's `sudoers.d/nibos-clock` lets the wheel group)
 on a thread of their own, the row saying "Working…" until they answer; their output goes to
-the journal. nibOS writes the hardware clock after a set or a sync. B goes back a level, then to
-the System page. The parsers, the zone grouping and the fields' stepping have unit tests.
+the journal. nibOS writes the hardware clock after a set or a sync. B goes back a level from the
+zone picker and the fields; from the section itself it closes the menu. The parsers, the zone grouping and the fields' stepping have unit tests.
 
 ## Notices from nibOS
 

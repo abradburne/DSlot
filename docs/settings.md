@@ -34,8 +34,13 @@ shows its value, white. Stepping back round to *Use ...* clears it here, and so 
 which the footer offers (*Y use GBA*) on a row set here. The System page has no one to inherit
 from: its rows are values.
 
+The System page is in sections, under its tab (L2 / R2 or a tap go through them): **Shelf**
+(how every page is shown, the empty systems, Button repeat, Rescan games), **Screen**, **Sound**,
+**Power**, **Time**, **About** and, on nibOS, **Update**. A console's page has two: **Emulator**
+and **Shelf**.
+
 Not kept in DSlot's file, but on the System page: the device's **volume**, the **brightness** of
-each screen, **Wi-Fi**, the **battery** and **battery protect**, and the **clock** (12-hour or
+each screen, **Wi-Fi** (where there is no Network page for it), the **battery** and **battery protect**, and the **clock** (12-hour or
 24-hour, nibOS's preference for every app: `nibkit::clock`, else the locale's habit), where the platform lets DSlot change them (nibOS; on the stock OS
 its own helper keeps volume and brightness, and DSlot leaves them be). Brightness changes as
 the slider moves, and is saved by nibOS when it is let go of; the sliders follow changes made
@@ -45,8 +50,8 @@ and the change is logged as refused. **Rescan games** (games copied or deleted w
 runs are noticed by themselves; this looks again at every page), **Start at power-on** and
 **Power off** are there too.
 
-**System info** (its row, or a tap on it) is a read-only page of the device and what it is
-using, for a player asked "what does it say under System info?" and for anyone chasing memory
+**About**, System's last section, is a read-only page of the device and what it is
+using, for a player asked "what does it say under About?" and for anyone chasing memory
 on a 1 GB device: the board and the nibOS release (version, edition, channel; its build as a
 note), the kernel, how long it has been up, the A/B slot running (from the root partition's
 label on the kernel's command line), DSlot's version with nibkit's; the memory in use of the
@@ -57,7 +62,7 @@ thermal zones, the GPU's frequency; the system, NIBOS-DATA and TF2 card file sys
 card only while one is mounted); the battery; and each panel's mode. Read from `/proc` and
 `/sys` on a thread every second while the page is up (`src/ui/sysinfo.rs`); nothing is run,
 nothing needs the network, and a line whose source the device lacks (a desktop preview, the
-stock OS) is left out rather than guessed. **B** goes back to the System page.
+stock OS) is left out rather than guessed. **B** closes the menu, as anywhere.
 
 ## Screensaver
 

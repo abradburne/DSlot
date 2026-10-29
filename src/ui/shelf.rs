@@ -634,6 +634,7 @@ fn keyboard_key(key: Key) -> Option<nibkit::menu::keyboard::Key> {
         Key::Select => K::Select,
         // Back as B: the keyboard's own way back.
         Key::Back => K::B,
+        Key::L2 | Key::R2 => return None,
     })
 }
 
@@ -908,7 +909,8 @@ impl State {
             }
             Key::A | Key::B => (self.insert, self.fling) = (Some(0.0), None),
             Key::Y => return true,
-            Key::X | Key::L | Key::R | Key::Select | Key::Start | Key::Back => {}
+            Key::X | Key::L | Key::R | Key::L2 | Key::R2 | Key::Select | Key::Start | Key::Back => {
+            }
         }
         false
     }
@@ -1474,7 +1476,7 @@ fn show(
                     }
                     Key::A => pick_go = true,
                     Key::B | Key::Select | Key::X | Key::Start | Key::Back => pick_close = true,
-                    Key::Y | Key::L | Key::R => {}
+                    Key::Y | Key::L | Key::R | Key::L2 | Key::R2 => {}
                 },
                 Some(Input::Press(key)) if state.menu.is_some() => match key {
                     // While typing, the keyboard has them all.
@@ -1488,6 +1490,8 @@ fn show(
                     Key::Y => menu_input.reset = true,
                     Key::L => menu_input.page -= 1,
                     Key::R => menu_input.page += 1,
+                    Key::L2 => menu_input.section -= 1,
+                    Key::R2 => menu_input.section += 1,
                     Key::B | Key::X | Key::Start | Key::Back => menu_input.close = true,
                     Key::Select => {}
                 },
@@ -1506,7 +1510,7 @@ fn show(
                     Key::R => menu_input.page += 1,
                     // Y: the game's screenshots, box art and details looked up again.
                     Key::Y => menu_input.reset = true,
-                    Key::Start | Key::Select => {}
+                    Key::Start | Key::Select | Key::L2 | Key::R2 => {}
                 },
                 // Select alone: the system picker, on this page's blade.
                 Some(Input::Press(Key::Select)) => {

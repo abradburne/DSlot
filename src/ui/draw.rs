@@ -1799,6 +1799,7 @@ impl Ui<'_> {
         use nibkit::menu::{layout, Draw, Status};
         let laid_out = nibkit::menu::Menu {
             tabs: menu.tabs.clone(),
+            sections: menu.sections.clone(),
             title: menu.title.clone(),
             rows: menu.rows.iter().map(menu_row).collect(),
             row: menu.row,

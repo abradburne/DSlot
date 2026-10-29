@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Sections in the menu**: a page with more than a screen's worth is cut into sections, in a
+  row under the tabs (nibkit 0.3.0's `Menu::sections`); L2 / R2 (the triggers, read as SDL's
+  trigger axes; `[` and `]` on a keyboard) or a tap go through them, L / R still change tab.
+  System's 25 rows are **Shelf**, **Screen**, **Sound**, **Power**, **Time** and **About**, and
+  **Update** is System's last section rather than a tab; a console's page is **Emulator** and
+  **Shelf**. Wi-Fi and Bluetooth are one tab, **Network**, with **Network info** as its third
+  section. The pages that opened from a row (Date and time, System info, Network info) are
+  sections now, so their rows are gone and B closes the menu from them as from any other.
+  The Game page stays one part.
 - **Flicked carts carry on**: on the shelf, a flick of the carts keeps them going after the
   finger lifts, slowing as a flicked grid or list does, to rest on a cart (held at either end),
   where before they stopped at the nearest one. The selection goes along with them; a tap while

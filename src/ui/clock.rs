@@ -177,16 +177,6 @@ impl Info {
             _ => ("Unknown".into(), false),
         }
     }
-
-    /// The System row's glance: "11:07, Asia/Tokyo".
-    pub fn glance(&self, hour12: bool) -> Option<String> {
-        let t = self.local?;
-        Some(if self.zone.is_empty() {
-            t.short(hour12)
-        } else {
-            format!("{}, {}", t.short(hour12), self.zone)
-        })
-    }
 }
 
 const MONTHS: [&str; 12] = [
@@ -666,7 +656,6 @@ mod tests {
             info.source(false),
             ("Set from the network (last at 10:47)".into(), false)
         );
-        assert_eq!(info.glance(true).as_deref(), Some("11:07 AM, Asia/Tokyo"));
         assert!(info.rtc);
         assert_eq!(info.network, Some(true));
 

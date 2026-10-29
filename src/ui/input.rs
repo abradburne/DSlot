@@ -24,6 +24,10 @@ pub enum Key {
     Start,
     L,
     R,
+    /// The triggers behind the shoulders, which SDL reads as axes: pushed in past a point,
+    /// pressed.
+    L2,
+    R2,
     /// Select tapped alone (held with Start, it leaves DSlot).
     Select,
     /// The Back key beside Menu: a key of its own, not a gamepad button (nibOS's
@@ -49,6 +53,8 @@ pub struct Reader {
     chord: bool,
     /// The direction the left stick is pushed along each axis (x, y), as a D-pad press.
     stick: [Option<Key>; 2],
+    /// Whether each trigger (L2, R2) is pressed in.
+    triggers: [bool; 2],
 }
 
 /// How far the stick is pushed (of 32767) to press a direction, and let back to let it go.
@@ -96,6 +102,29 @@ impl Reader {
             }
             // The left stick as the D-pad: pushed past a point, a direction goes down (and
             // repeats while held); let back nearer the middle, it comes up.
+            // A trigger, past the same points as the stick.
+            Event::ControllerAxisMotion {
+                axis: axis @ (Axis::TriggerLeft | Axis::TriggerRight),
+                value,
+                ..
+            } => {
+                let (i, key) = match axis {
+                    Axis::TriggerLeft => (0, Key::L2),
+                    _ => (1, Key::R2),
+                };
+                let was = self.triggers[i];
+                let now = match value {
+                    v if v >= STICK_PRESS => true,
+                    v if v < STICK_LET_GO => false,
+                    _ => was,
+                };
+                self.triggers[i] = now;
+                match (was, now) {
+                    (false, true) => Some(Input::Press(key)),
+                    (true, false) => Some(Input::Release(key)),
+                    _ => None,
+                }
+            }
             Event::ControllerAxisMotion { axis, value, .. } => {
                 let (i, keys) = match axis {
                     Axis::LeftX => (0, [Key::Left, Key::Right]),
@@ -189,6 +218,8 @@ fn keyboard(key: Keycode) -> Option<Key> {
         Keycode::F => Key::Y,
         Keycode::L | Keycode::PageUp => Key::L,
         Keycode::R | Keycode::PageDown => Key::R,
+        Keycode::LeftBracket => Key::L2,
+        Keycode::RightBracket => Key::R2,
         Keycode::S => Key::Select,
         Keycode::D => Key::Start,
         _ => return None,
