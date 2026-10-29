@@ -38,9 +38,9 @@ const PRESS: f32 = 16.0;
 const SPRING_SECS: f32 = 0.06;
 /// How quickly the carts and the grid catch up with the selection, per second.
 const FOLLOW: f32 = 14.0;
-/// A flick of the grid or the list carries on after the finger lifts, slowing as iOS's lists
-/// do (its normal deceleration, 0.998 a millisecond), from at least this fast and at most this
-/// fast, in screen units a second; it stops once slower than the last.
+/// A flick of the carts, the grid or the list carries on after the finger lifts, slowing as
+/// iOS's lists do (its normal deceleration, 0.998 a millisecond), from at least this fast and at
+/// most this fast, in screen units a second; it stops once slower than the last.
 const FLING_DECAY: f32 = 2.0;
 const FLING_MIN: f32 = 300.0;
 const FLING_MAX: f32 = 8000.0;
@@ -113,8 +113,18 @@ struct Drag {
     on_cart: bool,
     /// It came down on a grid or list still moving from a flick: it stops it, and picks nothing.
     caught: bool,
-    /// Where it has been down the screen, and when, lately: how fast it lifts.
-    track: Vec<(Instant, f32)>,
+    /// Where it has been, and when, lately: how fast it lifts.
+    track: Vec<(Instant, (f32, f32))>,
+}
+
+/// The carts, the grid or the list moving on their own after a flick.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Fling {
+    /// The grid or the list, this many rows a second.
+    Rows(f32),
+    /// The carts, closing in on cart `to` at `rate` of the way left a second: they slow as they
+    /// near it, to come to rest on it.
+    Carts { to: usize, rate: f32 },
 }
 
 impl Drag {
@@ -129,25 +139,40 @@ impl Drag {
 
     /// Notes where the finger is now, forgetting what is too old to count.
     fn note(&mut self, at: Instant) {
-        self.track.push((at, self.at.1));
+        self.track.push((at, self.at));
         let from = at.checked_sub(FLING_WINDOW * 2).unwrap_or(at);
         self.track.retain(|&(t, _)| t >= from);
     }
 }
 
-/// How fast a finger was moving down the screen as it lifted at `at`, in screen units a second:
-/// over its last moments, so that a finger that stopped before lifting throws nothing.
-fn release_speed(track: &[(Instant, f32)], at: Instant) -> f32 {
+/// How fast a finger was moving across and down the screen as it lifted at `at`, in screen
+/// units a second: over its last moments, so that a finger that stopped before lifting throws
+/// nothing.
+fn release_speed(track: &[(Instant, (f32, f32))], at: Instant) -> (f32, f32) {
     let from = at.checked_sub(FLING_WINDOW).unwrap_or(at);
-    let recent: Vec<&(Instant, f32)> = track.iter().filter(|(t, _)| *t >= from).collect();
+    let recent: Vec<&(Instant, (f32, f32))> = track.iter().filter(|(t, _)| *t >= from).collect();
     let (Some(first), Some(last)) = (recent.first(), recent.last()) else {
-        return 0.0;
+        return (0.0, 0.0);
     };
     let secs = at.duration_since(first.0).as_secs_f32();
     if secs < 0.01 {
-        return 0.0;
+        return (0.0, 0.0);
     }
-    (last.1 - first.1) / secs
+    let ((x0, y0), (x1, y1)) = (first.1, last.1);
+    ((x1 - x0) / secs, (y1 - y0) / secs)
+}
+
+/// A flick of the carts from `at` at `speed` carts a second (a place in the list, and its way
+/// along it): it comes to rest on the cart nearest where it would stop, slowing as the grid
+/// does, held at the ends. None where there is nowhere further to go that way.
+fn glide(at: f32, speed: f32, last: usize) -> Option<Fling> {
+    let to = (at + speed / FLING_DECAY).round().clamp(0.0, last as f32);
+    let way = to - at;
+    // Starting out as fast as the finger was, it closes in on `to` exactly.
+    (way * speed > 0.0).then(|| Fling::Carts {
+        to: to as usize,
+        rate: (speed / way).clamp(FLING_DECAY, FOLLOW),
+    })
 }
 
 /// One frame of a flicked grid or list coasting: `scroll` rows down at `speed` rows a second,
@@ -179,8 +204,8 @@ struct State {
     carousel: f32,
     /// How many rows down the cover grid or the list is scrolled.
     scroll: f32,
-    /// The grid or list moving on its own after a flick, in rows a second.
-    fling: Option<f32>,
+    /// The carts, the grid or the list moving on their own after a flick.
+    fling: Option<Fling>,
     /// Seconds since the selected cart started into the slot, and whether its click is queued.
     insert: Option<f32>,
     clicked: bool,
@@ -967,20 +992,30 @@ impl State {
                 }
             } else {
                 // Flicked: it carries on, slowing. Dragged and let go: it stays.
-                let speed = release_speed(&d.track, Instant::now());
+                let speed = release_speed(&d.track, Instant::now()).1;
                 if speed.abs() >= FLING_MIN {
-                    self.fling = Some(-speed.clamp(-FLING_MAX, FLING_MAX) / row_h);
+                    let rows = -speed.clamp(-FLING_MAX, FLING_MAX) / row_h;
+                    self.fling = Some(Fling::Rows(rows));
                 }
                 self.keep_in_view(mode);
             }
         } else if d.on_cart && dy > PULL_TO_INSERT && dy > dx.abs() {
             self.insert = Some(0.0);
+        } else if d.is_tap() && d.caught {
+            // A tap on carts still moving stops them, on the nearest.
+            self.sel = self.carousel.round().clamp(0.0, last as f32) as usize;
         } else if d.is_tap() {
             // A tap on a neighbouring cart brings it to the centre.
             let side = ((d.start.0 - SW / 2.0) / pitch).round() as i32;
             self.sel = self.step(side);
         } else {
+            // Flicked: they carry on, slowing, to rest on a cart. Dragged and let go: the nearest.
             self.sel = self.carousel.round().clamp(0.0, last as f32) as usize;
+            let speed = release_speed(&d.track, Instant::now()).0;
+            if speed.abs() >= FLING_MIN {
+                let carts = -speed.clamp(-FLING_MAX, FLING_MAX) / pitch;
+                self.fling = glide(self.carousel, carts, last);
+            }
         }
     }
 
@@ -1012,6 +1047,11 @@ impl State {
         let (n, last) = (self.order.len(), self.last() as f32);
         let ease = 1.0 - (-dt * FOLLOW).exp();
         let mut pull = 0.0;
+        // A flick left over from another layout (the view changed under it) has nothing to move.
+        let carts = matches!(self.fling, Some(Fling::Carts { .. }));
+        if carts != (mode == Layout::Shelf) {
+            self.fling = None;
+        }
         match self.drag.as_ref().filter(|_| mode == Layout::Shelf) {
             Some(d) if d.on_cart && d.moved().1 > d.moved().0.abs() => pull = d.moved().1,
             Some(d) if d.moved().0.abs() > TAP_SLOP => {
@@ -1019,7 +1059,18 @@ impl State {
                 self.sel = self.carousel.round().clamp(0.0, last) as usize;
             }
             Some(_) => {}
-            None => self.carousel += (self.sel as f32 - self.carousel) * ease,
+            // Flicked: the selection goes along with them, until they are all but there.
+            None => match self.fling.filter(|_| mode == Layout::Shelf) {
+                Some(Fling::Carts { to, rate }) => {
+                    let to = to as f32;
+                    self.carousel += (to - self.carousel) * (1.0 - (-dt * rate).exp());
+                    self.sel = self.carousel.round().clamp(0.0, last) as usize;
+                    if (to - self.carousel).abs() * rate * pitch < FLING_STOP {
+                        (self.sel, self.fling) = (to as usize, None);
+                    }
+                }
+                _ => self.carousel += (self.sel as f32 - self.carousel) * ease,
+            },
         }
         if let Some((per_row, on_screen, row_h)) = rows(mode) {
             let most = n.div_ceil(per_row).saturating_sub(on_screen) as f32;
@@ -1039,14 +1090,15 @@ impl State {
                 }
                 (Some(_), _) => {}
                 // Flicked: coasting, slowing, the selection kept on screen as it goes.
-                (None, Some(speed)) => {
-                    (self.scroll, self.fling) = coast(self.scroll, speed, dt, most, row_h);
+                (None, Some(Fling::Rows(speed))) => {
+                    let (scroll, speed) = coast(self.scroll, speed, dt, most, row_h);
+                    (self.scroll, self.fling) = (scroll, speed.map(Fling::Rows));
                     self.keep_in_view(mode);
                 }
                 // Scroll just far enough to keep the selected row in view; in the list, with
                 // a row either side of it, so that what is next shows before it is reached.
                 // Back from past either end, too.
-                (None, None) => {
+                (None, _) => {
                     let row = (self.sel / per_row) as f32;
                     let margin = if per_row == 1 { 1.0 } else { 0.0 };
                     let to = self
@@ -1780,6 +1832,7 @@ fn show(
             && !busy
             && leaving.is_none()
             && state.drag.is_none()
+            && state.fling.is_none()
             && state.repeat.held().is_none()
             && found.is_empty()
             && !ui.waiting();
@@ -2033,17 +2086,44 @@ mod tests {
         let at = |ms: u64| t0 + Duration::from_millis(ms);
         // 600 units up the screen in the last 60 ms: 10 000 units a second.
         let flick = [
-            (at(0), 900.0),
-            (at(100), 800.0),
-            (at(140), 500.0),
-            (at(160), 200.0),
+            (at(0), (100.0, 900.0)),
+            (at(100), (100.0, 800.0)),
+            (at(140), (130.0, 500.0)),
+            (at(160), (160.0, 200.0)),
         ];
-        let speed = release_speed(&flick, at(160));
-        assert!((-10_100.0..-9_900.0).contains(&speed), "{speed}");
+        let (across, down) = release_speed(&flick, at(160));
+        assert!((-10_100.0..-9_900.0).contains(&down), "{down}");
+        assert!((990.0..1_010.0).contains(&across), "{across}");
         // The same, but held still for 100 ms before lifting: nothing.
-        let held = [(at(0), 800.0), (at(60), 200.0), (at(160), 200.0)];
-        assert_eq!(release_speed(&held, at(160)), 0.0);
-        assert_eq!(release_speed(&[], at(160)), 0.0);
+        let held = [
+            (at(0), (0.0, 800.0)),
+            (at(60), (0.0, 200.0)),
+            (at(160), (0.0, 200.0)),
+        ];
+        assert_eq!(release_speed(&held, at(160)), (0.0, 0.0));
+        assert_eq!(release_speed(&[], at(160)), (0.0, 0.0));
+    }
+
+    #[test]
+    fn flicked_carts_carry_on_and_come_to_rest_on_one() {
+        // 6 carts a second from cart 10: about 3 on, on a cart, setting off as fast.
+        let Some(Fling::Carts { to, rate }) = glide(10.0, 6.0, 100) else {
+            panic!("no glide");
+        };
+        assert_eq!(to, 13);
+        assert!((rate * 3.0 - 6.0).abs() < 0.01, "{rate}");
+        // Let go between two: still on a cart, the way it was going.
+        let Some(Fling::Carts { to, .. }) = glide(10.4, -6.0, 100) else {
+            panic!("no glide");
+        };
+        assert_eq!(to, 7);
+        // Held at the ends; and nothing past one, flicked further out.
+        assert!(matches!(
+            glide(95.0, 40.0, 100),
+            Some(Fling::Carts { to: 100, .. })
+        ));
+        assert_eq!(glide(-0.2, -6.0, 100), None);
+        assert_eq!(glide(100.2, 6.0, 100), None);
     }
 
     #[test]

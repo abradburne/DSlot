@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Flicked carts carry on**: on the shelf, a flick of the carts keeps them going after the
+  finger lifts, slowing as a flicked grid or list does, to rest on a cart (held at either end),
+  where before they stopped at the nearest one. The selection goes along with them; a tap while
+  they move stops them. A flick no longer goes on past three seconds without a touch.
 - **nibkit 0.2.2**: the menu's Achievements tab is wide enough for its label, with room either
   side; the other tabs stay as they were, and a tap finds the tab drawn there
   (`layout::tab_at`).
