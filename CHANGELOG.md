@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - **Sections in the menu**: a page with more than a screen's worth is cut into sections, in a
   row under the tabs (nibkit 0.3.0's `Menu::sections`); L2 / R2 (the triggers, read as SDL's
