@@ -22,6 +22,7 @@ Signed in:
 | Row | |
 |---|---|
 | Signed in as | The username as the service spells it, with the points the service reported (hardcore, and casual when there are any). |
+| Earned achievements | Every achievement earned, a row each in place of the page's rows: its title, then the game and its points; the title line has the highlighted one's description, or the count of them all. The latest DSlot saw earned come first, then the rest by game. It lists what the shelf's lookups have kept for the player (`achievements/<user>/` in DSlot's cache), so a game never shown on the shelf here isn't in it, and it reads no network. B comes back. |
 | Sign out | A, and A again to confirm: the token file is removed. The username stays typed for next time. |
 | Mode | As above (not shown yet). |
 

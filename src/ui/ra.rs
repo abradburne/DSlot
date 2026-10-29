@@ -1,7 +1,8 @@
 //! The menu's **Achievements** page: the RetroAchievements sign-in (achievements/). Signed out,
 //! the username typed on the keyboard, Sign in (which asks for the password) and Make an
 //! account (the sign-up page's address and a QR code of it, for a phone); signed in, who and
-//! their points, and Sign out. The Mode row (Casual or Hardcore) only while hardcore is
+//! their points, Earned achievements (every one earned in the games looked up here, a row each,
+//! in place of the rows) and Sign out. The Mode row (Casual or Hardcore) only while hardcore is
 //! offered.
 //!
 //! A [`RaPage`] holds what the page knows: the sign-in kept, the username typed so far, what
@@ -12,10 +13,19 @@
 //! for the last one. The menu keeps the rows' places and the keyboard.
 
 use super::menu::{Item, Value};
+use crate::achievements::set::{earned_summary, Earned};
 use crate::achievements::{self, Account, Error, Qr, Ra, SignedIn, Standing};
 use crate::settings::def;
 use std::cell::OnceCell;
 use std::sync::mpsc::Receiver;
+
+/// "1 point", "25 points".
+fn points(n: u32) -> String {
+    match n {
+        1 => "1 point".into(),
+        n => format!("{} points", achievements::grouped(n.into())),
+    }
+}
 
 /// What the request running is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +59,9 @@ pub struct RaPage {
     signing_up: bool,
     /// The sign-up page's QR code, made the first time it is shown.
     qr: OnceCell<Option<Qr>>,
+    /// Every achievement earned, open in place of the rows: read from what the lookups kept
+    /// when it is opened.
+    earned: Option<Vec<Earned>>,
 }
 
 impl RaPage {
@@ -65,6 +78,7 @@ impl RaPage {
             checked: false,
             signing_up: false,
             qr: OnceCell::new(),
+            earned: None,
         }
     }
 
@@ -94,12 +108,43 @@ impl RaPage {
         self.signing_up = open;
     }
 
+    /// The list of every achievement earned is open in place of the rows.
+    pub fn listing_earned(&self) -> bool {
+        self.earned.is_some()
+    }
+
+    /// Opens the list of every achievement earned, read now from what the lookups kept for
+    /// the player signed in; or closes it.
+    pub fn list_earned(&mut self, open: bool) {
+        self.earned = match (&self.account, open) {
+            (Some(a), true) => Some(self.ra.store.earned(&a.user)),
+            _ => None,
+        };
+    }
+
+    /// The sign-up page or the list of what was earned is open, in place of the rows.
+    pub fn aside(&self) -> bool {
+        self.signing_up || self.listing_earned()
+    }
+
     /// The rows: signed out, the username, Sign in, Mode and Make an account; signed in, who,
-    /// Sign out and Mode. Mode only while hardcore is offered (achievements::HARDCORE_OFFERED).
-    /// The sign-up view has the address alone, over the QR code.
+    /// Earned achievements, Sign out and Mode. Mode only while hardcore is offered
+    /// (achievements::HARDCORE_OFFERED). The sign-up view has the address alone, over the QR
+    /// code; the list of what was earned a row each, or one saying there is nothing yet.
     pub fn rows(&self) -> Vec<Item> {
         if self.signing_up {
             return vec![Item::RaLink];
+        }
+        if let Some(earned) = &self.earned {
+            if earned.is_empty() {
+                return vec![Item::RaNoneEarned];
+            }
+            return (earned.iter().enumerate())
+                .map(|(i, e)| Item::RaEarned {
+                    title: e.achievement.title.clone(),
+                    i,
+                })
+                .collect();
         }
         let mode = def::builtin(def::ACHIEVEMENTS)
             .filter(|_| achievements::HARDCORE_OFFERED)
@@ -107,7 +152,7 @@ impl RaPage {
         let mut items = Vec::new();
         match &self.account {
             Some(_) => {
-                items.extend([Item::RaAccount, Item::RaSignOut]);
+                items.extend([Item::RaAccount, Item::RaAllEarned, Item::RaSignOut]);
                 items.extend(mode);
             }
             None => {
@@ -119,10 +164,17 @@ impl RaPage {
         items
     }
 
-    /// The title line: who is signed in, or what the service said.
-    pub fn title(&self) -> String {
+    /// The title line: who is signed in, or what the service said. In the list of what was
+    /// earned, the highlighted one's description (`row`), or the count of them all.
+    pub fn title(&self, row: usize) -> String {
         if self.signing_up {
             return "Make an account on a phone: scan the code".into();
+        }
+        if let Some(earned) = &self.earned {
+            return match earned.get(row).map(|e| &e.achievement) {
+                Some(a) if !a.description.is_empty() => a.description.clone(),
+                _ => earned_summary(earned),
+            };
         }
         match (&self.said, &self.account, &self.job) {
             (Some(said), ..) => said.clone(),
@@ -156,7 +208,15 @@ impl RaPage {
                 }
             }
             Item::RaSignOut if armed => prompt("Press A again to sign out".into(), true),
-            Item::RaSignOut | Item::RaSignUp => press("Press A"),
+            Item::RaSignOut | Item::RaSignUp | Item::RaAllEarned => press("Press A"),
+            Item::RaEarned { i, .. } => match self.earned.as_ref().and_then(|e| e.get(*i)) {
+                Some(e) => prompt(
+                    format!("{} \u{b7} {}", e.game, points(e.achievement.points)),
+                    false,
+                ),
+                None => prompt(String::new(), false),
+            },
+            Item::RaNoneEarned => prompt("Play a game signed in".into(), false),
             Item::RaLink => prompt(
                 achievements::SIGN_UP
                     .trim_start_matches("https://")
@@ -237,13 +297,17 @@ impl RaPage {
             }
         };
         self.said = line.clone();
+        if self.account.is_none() {
+            self.earned = None;
+        }
         let changed = was.as_ref().map(|a| &a.user) != self.account.as_ref().map(|a| &a.user);
         Some(Heard { line, changed })
     }
 
-    /// Back as the menu leaves the page: the sign-up view closed.
+    /// Back as the menu leaves the page: the sign-up view and the list closed.
     pub fn leave(&mut self) {
         self.signing_up = false;
+        self.earned = None;
     }
 
     /// A request running that doesn't answer until the test lets it.

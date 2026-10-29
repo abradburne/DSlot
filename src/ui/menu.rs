@@ -168,6 +168,15 @@ pub enum Item {
     RaSignUp,
     /// The sign-up page's address, over the QR code; shown, not changed.
     RaLink,
+    /// Achievements: opens the list of every achievement earned.
+    RaAllEarned,
+    /// An achievement earned, by its title and its place in the list; shown, not changed.
+    RaEarned {
+        title: String,
+        i: usize,
+    },
+    /// The list of what was earned, with nothing in it; shown, not changed.
+    RaNoneEarned,
     /// A line of What's new; A goes back to the page.
     NoteLine(String),
     /// A line of the update's message, past what fits on the title line.
@@ -221,6 +230,9 @@ impl Item {
             Item::RaSignOut => "Sign out",
             Item::RaSignUp => "Make an account",
             Item::RaLink => "On a phone",
+            Item::RaAllEarned => "Earned achievements",
+            Item::RaEarned { title, .. } => title,
+            Item::RaNoneEarned => "Nothing earned yet",
             Item::NoteLine(line) | Item::Message(line) => line,
         }
     }
@@ -1138,8 +1150,9 @@ impl Menu {
         }
         self.clock_job_done(cx);
         self.ra_heard(cx);
-        // The sign-up page: B goes back to the Achievements page, on its row.
-        if self.ra.signing_up() && input.close {
+        // The sign-up page and the list of what was earned: B goes back to the Achievements
+        // page, on the row that opened it.
+        if self.ra.aside() && input.close {
             self.ra_back(cx);
             return Done::default();
         }
@@ -1718,6 +1731,9 @@ impl Menu {
             | Item::RaSignOut
             | Item::RaSignUp
             | Item::RaLink
+            | Item::RaAllEarned
+            | Item::RaEarned { .. }
+            | Item::RaNoneEarned
             | Item::Joined
             | Item::Address
             | Item::NetworkInfo
@@ -1890,7 +1906,7 @@ impl Menu {
         };
         let title = match (self.page, cx.game) {
             (Page::Update, _) => update_title(),
-            (Page::Achievements, _) => self.ra.title(),
+            (Page::Achievements, _) => self.ra.title(self.row),
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
@@ -1941,6 +1957,9 @@ impl Menu {
             (Page::Update, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             (Page::Achievements, _) if self.ra.signing_up() => {
                 "L / R  page   \u{b7}   B  back to Achievements".into()
+            }
+            (Page::Achievements, _) if self.ra.listing_earned() => {
+                "D-pad  move   \u{b7}   L / R  page   \u{b7}   B  back to Achievements".into()
             }
             (Page::Achievements, Some(Item::Setting(_))) => {
                 "D-pad  change   \u{b7}   L / R  page   \u{b7}   B  back".into()
@@ -2438,7 +2457,10 @@ impl Menu {
             | Item::RaAccount
             | Item::RaSignOut
             | Item::RaSignUp
-            | Item::RaLink => self.ra.value(item, r == self.row, self.armed == Some(r)),
+            | Item::RaLink
+            | Item::RaAllEarned
+            | Item::RaEarned { .. }
+            | Item::RaNoneEarned => self.ra.value(item, r == self.row, self.armed == Some(r)),
             Item::SpeakerTuning => text(match self.tuning {
                 Some(nibkit::audio::Tuning::Nibos) => "nibOS",
                 Some(nibkit::audio::Tuning::Official) => "Official",
@@ -2821,15 +2843,24 @@ impl Menu {
                 self.ra.sign_up(true);
                 (self.row, self.scroll, self.armed, self.note) = (0, 0, None, None);
             }
+            Item::RaAllEarned => {
+                self.ra.list_earned(true);
+                (self.row, self.scroll, self.armed, self.note) = (0, 0, None, None);
+            }
             _ => {}
         }
     }
 
-    /// B from the sign-up view: back to the page, on Make an account.
+    /// B from the sign-up view or the list of what was earned: back to the page, on the row
+    /// that opened it.
     fn ra_back(&mut self, cx: &Context) {
-        self.ra.sign_up(false);
+        let from = match self.ra.signing_up() {
+            true => Item::RaSignUp,
+            false => Item::RaAllEarned,
+        };
+        self.ra.leave();
         let items = self.items(cx);
-        self.row = items.iter().position(|i| *i == Item::RaSignUp).unwrap_or(0);
+        self.row = items.iter().position(|i| *i == from).unwrap_or(0);
         self.scroll = self.row.saturating_sub(VISIBLE - 1);
     }
 
@@ -2849,7 +2880,7 @@ impl Menu {
             return;
         };
         self.account_changed |= heard.changed;
-        if self.page == Page::Achievements && !self.ra.signing_up() {
+        if self.page == Page::Achievements && !self.ra.aside() {
             let items = self.items(cx);
             // Signed in: on the account row; refused: back on Sign in.
             let wanted = match self.ra.signed_in() {
@@ -3024,7 +3055,10 @@ mod tests {
         account.save(&token).unwrap();
         tx.send(Ok((account, standing))).unwrap();
         assert!(menu.update(&Input::default(), &mut cx).account);
-        assert_eq!(labels(&menu, &cx), ["Signed in as", "Sign out"]);
+        assert_eq!(
+            labels(&menu, &cx),
+            ["Signed in as", "Earned achievements", "Sign out"]
+        );
         assert_eq!(
             menu.shown(&cx).title,
             "RetroAchievements: signed in as Alan"
@@ -3037,6 +3071,45 @@ mod tests {
             }
         );
         assert!(!menu.update(&Input::default(), &mut cx).account, "once");
+        // Earned achievements: nothing kept yet, said so; B comes back to its row.
+        let close = Input {
+            close: true,
+            ..Input::default()
+        };
+        menu.row = 1;
+        menu.update(&press, &mut cx);
+        assert_eq!(labels(&menu, &cx), ["Nothing earned yet"]);
+        assert_eq!(menu.shown(&cx).title, "Nothing earned yet");
+        assert!(menu.shown(&cx).hint.contains("back to Achievements"));
+        assert!(!menu.update(&close, &mut cx).closed);
+        assert_eq!(menu.items(&cx)[menu.row], Item::RaAllEarned);
+        // A set kept by a lookup: what was earned in it, a row each, the highlighted one's
+        // description on the title line.
+        let kept = w.ra.store.cache.join("Alan/0123abcd.json");
+        std::fs::create_dir_all(kept.parent().unwrap()).unwrap();
+        let set = r#"{"fetched":0,"set":{"id":1,"title":"Golden Sun","achievements":[
+            {"id":1,"title":"Psynergy","description":"Learn Move","points":5,"badge":"1","unlocked":true},
+            {"id":2,"title":"Saturos","description":"","points":25,"badge":"2","unlocked":true},
+            {"id":3,"title":"Not yet","description":"","points":10,"badge":"3"}]}}"#;
+        std::fs::write(&kept, set).unwrap();
+        menu.update(&press, &mut cx);
+        assert_eq!(labels(&menu, &cx), ["Psynergy", "Saturos"]);
+        let shown = menu.shown(&cx);
+        assert_eq!(shown.title, "Learn Move");
+        assert_eq!(
+            shown.rows[1].value,
+            Value::Prompt {
+                text: "Golden Sun \u{b7} 25 points".into(),
+                warning: false
+            }
+        );
+        menu.row = 1;
+        assert_eq!(
+            menu.shown(&cx).title,
+            "2 earned \u{b7} 30 points \u{b7} in 1 game"
+        );
+        menu.update(&close, &mut cx);
+        assert_eq!(menu.items(&cx)[menu.row], Item::RaAllEarned);
         // Hardcore is not offered yet: no Mode row, and one set by hand in settings.toml
         // still starts games softcore.
         cx.settings
@@ -3051,10 +3124,10 @@ mod tests {
             ]
         );
         // Sign out asks, then removes the token; the username stays typed.
-        menu.row = 1;
+        menu.row = 2;
         assert!(!menu.update(&press, &mut cx).account);
         assert_eq!(
-            menu.shown(&cx).rows[1].value,
+            menu.shown(&cx).rows[2].value,
             Value::Prompt {
                 text: "Press A again to sign out".into(),
                 warning: true
@@ -3093,10 +3166,6 @@ mod tests {
         );
         assert!(shown.picture.is_some());
         assert!(shown.hint.contains("back to Achievements"));
-        let close = Input {
-            close: true,
-            ..Input::default()
-        };
         assert!(!menu.update(&close, &mut cx).closed);
         assert_eq!(menu.items(&cx)[menu.row], Item::RaSignUp);
     }

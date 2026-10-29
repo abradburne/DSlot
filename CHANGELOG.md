@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Earned achievements**, a row on the Achievements page while signed in: every achievement
+  earned in the games the shelf has looked up, the latest first, with the game and its points,
+  and the highlighted one's description on the title line. Read from what the lookups keep, so
+  it needs no network.
 - **RetroAchievements through nibkit's `nib-cheevos`** (nibkit 0.2.0), the same code the
   emulators use: a ROM's hash is rcheevos' rhash (`achievements/hash.rs` is gone), so the shelf
   now finds the sets of every console the service has, SNES, NES, Mega Drive, PC Engine,

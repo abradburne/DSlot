@@ -75,6 +75,34 @@ impl Set {
     }
 }
 
+/// An achievement the player has earned, and the game it is in: for the Achievements page's
+/// list of them all ([`Store::earned`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Earned {
+    pub game: String,
+    pub achievement: Achievement,
+}
+
+/// "42 earned · 380 points · in 7 games", or "Nothing earned yet".
+pub fn earned_summary(earned: &[Earned]) -> String {
+    if earned.is_empty() {
+        return "Nothing earned yet".into();
+    }
+    let points: u64 = earned.iter().map(|e| u64::from(e.achievement.points)).sum();
+    let games = earned
+        .iter()
+        .map(|e| e.game.as_str())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    format!(
+        "{} earned \u{b7} {} points \u{b7} in {} game{}",
+        super::grouped(earned.len() as u64),
+        super::grouped(points),
+        super::grouped(games as u64),
+        if games == 1 { "" } else { "s" },
+    )
+}
+
 /// What a lookup comes to, for the shelf.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
@@ -207,6 +235,44 @@ impl Store {
         if let Ok(text) = serde_json::to_string(cached) {
             let _ = write_whole(&self.file(user, hash), &text);
         }
+    }
+
+    /// Every achievement the player has earned in the games kept for them, however old what is
+    /// kept: those dated first, the latest at the top, then the rest by game, in set order.
+    /// Each once, though two ROMs of a game keep its set twice. Only what lookups have kept:
+    /// a game never shown on the shelf here isn't in it.
+    pub fn earned(&self, user: &str) -> Vec<Earned> {
+        let Ok(dir) = std::fs::read_dir(self.folder(user)) else {
+            return Vec::new();
+        };
+        let mut sets: Vec<Set> = dir
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().into_string().ok()?;
+                let hash = name.strip_suffix(".json")?;
+                self.cached(user, hash)?.set
+            })
+            .collect();
+        // The same order whatever order the folder lists them in.
+        sets.sort_by(|a, b| a.title.cmp(&b.title).then(a.id.cmp(&b.id)));
+        let mut seen = std::collections::HashSet::new();
+        let mut earned: Vec<Earned> = sets
+            .into_iter()
+            .flat_map(|set| {
+                let game = set.title;
+                set.achievements
+                    .into_iter()
+                    .filter(|a| a.unlocked)
+                    .map(move |a| Earned {
+                        game: game.clone(),
+                        achievement: a,
+                    })
+            })
+            .filter(|e| seen.insert(e.achievement.id))
+            .collect();
+        // Stable: undated ones keep the game order.
+        earned.sort_by_key(|e| std::cmp::Reverse(e.achievement.unlocked_at));
+        earned
     }
 
     /// The game was just played: what is kept of it for the player is asked about again next
@@ -497,6 +563,51 @@ mod tests {
         // A name is never a way out of the cache.
         assert_eq!(store.folder("../x"), store.cache.join("___x"));
         assert_eq!(store.folder(""), store.cache.join("_"));
+    }
+
+    /// Everything earned in the sets kept for the player: the dated latest first, then by
+    /// game; each once though a game is kept for two ROMs; another player's never.
+    #[test]
+    fn everything_earned_is_listed_once_the_latest_first() {
+        let dir = crate::testing::TempDir::new("ra-set-earned");
+        let store = store(&dir);
+        assert_eq!(store.earned("Alan"), []);
+        assert_eq!(earned_summary(&[]), "Nothing earned yet");
+        let keep = |user: &str, hash: &str, set: Option<Set>| {
+            store.keep(user, hash, &Cached { fetched: 0, set });
+        };
+        let mut wars = set(&[1, 3]);
+        wars.achievements[1].unlocked_at = Some(200);
+        let mut sun = set(&[1]);
+        (sun.id, sun.title) = (999, "Golden Sun".into());
+        sun.achievements[0].id = 7;
+        keep("Alan", "aaa", Some(wars.clone()));
+        keep("Alan", "bbb", Some(wars));
+        keep("Alan", "ccc", Some(sun));
+        keep("Alan", "ddd", None);
+        keep("Bea", "eee", Some(set(&[1, 3])));
+        std::fs::write(store.folder("Alan").join("notes.txt"), "not a set").unwrap();
+        let earned = store.earned("Alan");
+        let got: Vec<_> = earned
+            .iter()
+            .map(|e| (e.game.as_str(), e.achievement.id))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("Advance Wars: Days of Ruin", 3),
+                ("Advance Wars: Days of Ruin", 1),
+                ("Golden Sun", 7),
+            ]
+        );
+        assert_eq!(
+            earned_summary(&earned),
+            "3 earned \u{b7} 35 points \u{b7} in 2 games"
+        );
+        assert_eq!(
+            earned_summary(&earned[2..]),
+            "1 earned \u{b7} 5 points \u{b7} in 1 game"
+        );
     }
 
     #[test]
