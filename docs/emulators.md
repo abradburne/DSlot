@@ -71,7 +71,7 @@ delete = ["{saves}/*.auto.dss"]
 |---|---|---|
 | `name` | required | Shown in the menu's Emulator row. |
 | `priority` | default 0 | Each system's default is the installed emulator with the highest. The stock descriptions use 10 and 20; DSperate, 100. |
-| `[systems]` | required | A command for each system it plays, by the system's `Roms/` folder name: `NDS`, `GBA`, `GB`, `GBC`, `SFC` (SNES), `FC` (NES), `FDS`, `MD`, `SMS`, `SG1000`, `GG`, `PCE`, `PCECD`, `PS`, `LYNX`, `NGP`, `WS`, `GW` (Game & Watch). A system DSlot does not know is skipped. |
+| `[systems]` | required | A command for each system it plays, by the system's `Roms/` folder name: `NDS`, `GBA`, `GB`, `GBC`, `SFC` (SNES), `FC` (NES), `FDS`, `MD`, `SMS`, `SG1000`, `GG`, `PCE`, `PCECD`, `PS`, `PSP`, `LYNX`, `NGP`, `WS`, `GW` (Game & Watch). A system DSlot does not know is skipped. |
 | `requires` | optional | Files that must be there as well as the programs: `["/path/to/core.so"]`. |
 | `[env]` | optional | Environment variables for the emulator. |
 | `[achievements]` | optional | Where the emulator earns RetroAchievements: `systems = ["GB", "GBC"]`, some of its `[systems]` (another is an error), and `hardcore = false` (the default: Casual only; `true` when it can play hardcore, locking what hardcore forbids). When the player is signed in, a game of one of those systems gets `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE` in its environment (`RA_HARDCORE=1` only with `hardcore = true`, and once DSlot offers hardcore); a game of any other system, or in an emulator without the table, gets none. |
@@ -84,8 +84,8 @@ A command is a list of words, the program first. These placeholders are filled i
 
 | | |
 |---|---|
-| `{rom}` | The ROM file, as found (a `.zip` too). |
-| `{name}` | The ROM's file name without its extension. |
+| `{rom}` | The ROM file, as found (a `.zip` too; for a PSP download, its `EBOOT.PBP`). |
+| `{name}` | The ROM's file name without its extension (a PSP download's folder name). |
 | `{system}` | The system's folder name: `NDS`, `GBA`, ... |
 | `{saves}` | The game's saves folder, `<saves>/<system>/<ROM name>/`, made by DSlot before the game starts (nibOS: `/mnt/roms/Saves/...`, on whichever card the game is). It is the game's, shared by every emulator for its system (a game may move from one to another): keep the files other emulators put there, write your own resume state under your own name rather than over theirs, and never write battery RAM before reading what is there. Not on the stock OS, where the emulators keep their saves as they always have. |
 | `{options}` | The words of the emulator's options as set for the game (each declared option set at some level, then the extra words, `args`, set at each level, the system's first); nothing if none is set. Only as a word of its own. |

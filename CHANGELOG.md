@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **The PSP**: a page for the PlayStation Portable, `Roms/PSP`, played by nibcase with the
+  PPSSPP core (its package writes the emulator description). A game is a UMD's image (`.iso`,
+  `.cso`, `.chd`) or an `.pbp`, never zipped. A download in a folder of its own,
+  `Roms/PSP/<Name>/EBOOT.PBP`, is one game named after the folder; its box art and saves go by
+  that name, beside the other PSP games'. The games are drawn as discs, as the PlayStation's
+  are, and the PSP comes right after the PlayStation in the tabs and the system picker. Its
+  card has the PSP-1000's photo (Evan Amos, public domain). Its RetroAchievements sets show on
+  the shelf once DSlot moves to the nibkit release after 0.3.0, which hashes PSP games.
+
 ## 0.5.0
 
 - **Sections in the menu**: a page with more than a screen's worth is cut into sections, in a

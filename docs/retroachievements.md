@@ -80,9 +80,13 @@ starting a game never waits for a request to the service to finish.
   console's rule (the MD5 of the file for Game Boy, Game Boy Color, Game Boy Advance, Mega
   Drive and most others; headers left out for NES, FDS, SNES, PC Engine and Lynx; for a DS game
   its header, its two pieces of boot code and its icon/title block; for a PlayStation or PC
-  Engine CD disc, from its cue sheet or playlist, what rhash reads of it). A zip is its first
+  Engine CD disc, from its cue sheet or playlist, what rhash reads of it; for a PSP game, its
+  UMD's `PARAM.SFO` and `EBOOT.BIN`, or the whole of an `EBOOT.PBP`). A zip is its first
   entry with one of the console's extensions. CHD images and Game & Watch units have no hash
   yet (rhash reads no CHD, and has no Game & Watch rule), so the shelf shows nothing for them.
+  The PSP (the service's console 41) is in `nib-cheevos` after nibkit 0.3.0, with CSO images
+  through its `cso` feature and CHDs through `chd`. DSlot still builds with nibkit 0.3.0, so
+  until it moves to that release the shelf shows nothing for a PSP game.
   The shelf looks up any console's game, whether or not an emulator here earns achievements
   for it: it shows the set the service has. The hash is kept in `cache/achievements/hashes.tsv` against
   the file's path, size and date, so a ROM is read once. The index is anyone's, whoever is
@@ -207,14 +211,14 @@ toasts, an achievements list and account page in the pause menu, a stored sign-i
 - nibOS's package (`packaging/arch/PKGBUILD` in the fork) builds with `DSPERATE_CHEEVOS=ON` and
   depends on `curl` for `libcurl.so.4`.
 
-### nibcase (libretro cores: NES, SNES, Mega Drive, Master System, Game Gear, PC Engine, Lynx, Neo Geo Pocket, WonderSwan, PlayStation, Game & Watch)
+### nibcase (libretro cores: NES, SNES, Mega Drive, Master System, Game Gear, PC Engine, Lynx, Neo Geo Pocket, WonderSwan, PlayStation, PSP, Game & Watch)
 
 To do. The pieces the service needs are what libretro cores already expose, so the work is in the
 frontend, once for every core:
 
 - **Identity**: rcheevos' `rc_hash` knows each of these systems' hashing rules (MD5 of the file
   for most; headers skipped for NES, SNES, PC Engine and Lynx; a track hash for PlayStation
-  discs). nibcase hashes the file it was given before handing it to the core.
+  discs; a PSP UMD's `PARAM.SFO` and `EBOOT.BIN`). nibcase hashes the file it was given before handing it to the core.
 - **Memory**: `RETRO_ENVIRONMENT_SET_MEMORY_MAPS` from the core, or failing that
   `retro_get_memory_data`/`size` for RAM and SRAM, fed to rcheevos' `rc_libretro_memory_init`,
   which maps the service's address space for the console onto the core's regions and serves

@@ -5,7 +5,7 @@ A game shelf for the Anbernic RG DS+. The touch screen holds your carts over a c
 ![The shelf: a game's box on the top screen, carts over the slot on the touch screen](docs/shelf.png)
 
 - Carts and boxes for every game, from your own artwork or made from what the ROM carries
-- A page for each system with an emulator installed and games on a card: DS, GBA, Game Boy, Game Boy Color, SNES, NES, Famicom Disk System, Mega Drive, Master System, SG-1000, Game Gear, PC Engine, PC Engine CD, PlayStation, Atari Lynx, Neo Geo Pocket, WonderSwan and Game & Watch, and PortMaster's ports
+- A page for each system with an emulator installed and games on a card: DS, GBA, Game Boy, Game Boy Color, SNES, NES, Famicom Disk System, Mega Drive, Master System, SG-1000, Game Gear, PC Engine, PC Engine CD, PlayStation, PSP, Atari Lynx, Neo Geo Pocket, WonderSwan and Game & Watch, and PortMaster's ports
 - A system picker on Select, and a Top Trumps style card for each system, with its photo and cited facts; the Apps page's card is about the device itself
 - Where you left off: a game's resume point, as its emulator saved it, inset over its box
 - A cover grid or a list of names (with or without small boxes) as alternatives to the carts, all scrolling with momentum under a finger
@@ -148,8 +148,10 @@ Game & Watch units (`.mgw`) go in `Roms/GW`, named after their files. They have 
 their page shows boxes, as a grid or a list; `nibcase-gw` plays them, two-screen units across
 both panels. See [Game & Watch support](docs/game-watch.md).
 
-The Master System, SG-1000, PC Engine, PC Engine CD, PlayStation, Neo Geo Pocket, WonderSwan and Famicom Disk System
-have pages too, with boxes for now (no carts drawn for them yet). See
+The Master System, SG-1000, PC Engine, PC Engine CD, PlayStation, PSP, Neo Geo Pocket, WonderSwan and Famicom Disk System
+have pages too. The disc systems' games are drawn as discs; the others show boxes for now (no
+carts drawn for them yet). PSP games go in `Roms/PSP`: an `.iso`, `.cso`, `.chd` or `.pbp`, or
+a download's folder with its `EBOOT.PBP`, named after the folder. See
 [More systems](docs/more-systems.md).
 
 Games copied onto a card or deleted from it while DSlot is running show up or disappear on
