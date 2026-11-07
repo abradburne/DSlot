@@ -10,8 +10,9 @@
 //! others are silver. A game of several discs (an .m3u) carries a badge saying how many.
 //!
 //! A PSP game is drawn as its UMD: the 60 mm disc in its 64 x 65 mm shell, to the shell's
-//! proportions. The shell's top is a half circle round the disc and its bottom straight, with
-//! small rounded corners; it is milky clear plastic, the disc's print seen through it (the
+//! proportions (measured from a photograph of one). The shell's top is a half circle round the
+//! disc and its bottom an arc of 68 mm radius, the sides straight between them and 5 mm corners
+//! rounded into the arc; it is milky clear plastic, the disc's print seen through it (the
 //! game's label or box art), the hub a white cap with "UMD" on it, the PSP's mark in the bottom
 //! left corner, the shell's notch in the bottom right and its yellow arrow at the top left.
 
@@ -175,7 +176,9 @@ pub fn disc(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>
 /// A UMD's dimensions, in millimetres: the shell 64 wide and 65 tall, its bottom corners'
 /// radius, the disc 60 across, and its hub cap.
 const UMD_SHELL: (f32, f32) = (64.0, 65.0);
-const UMD_CORNER: f32 = 4.0;
+const UMD_CORNER: f32 = 5.0;
+/// The radius of the bottom's arc.
+const UMD_ARC: f32 = 68.0;
 const UMD_DISC: f32 = 60.0;
 const UMD_HUB: f32 = 21.0;
 
@@ -196,14 +199,19 @@ fn umd(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>) -> 
     let (fx, fy) = (cx - disc_r, cy - disc_r);
     // Distance outside the shell (negative inside): the half circle above the disc's centre,
     // a rectangle with rounded bottom corners below it.
+    // The bottom's arc, through the bottom's middle; how high it is where the sides meet it.
+    let arc = UMD_ARC * mm;
+    let arc_y = bottom - arc;
+    let bow = arc - (arc * arc - (half - corner).powi(2)).sqrt() + corner * 0.6;
     let shell = |x: f32, y: f32| -> f32 {
         let ax = (x - cx).abs();
         if y <= cy {
             (x - cx).hypot(y - cy) - half
-        } else if ax > half - corner && y > bottom - corner {
-            (ax - (half - corner)).hypot(y - (bottom - corner)) - corner
         } else {
-            (ax - half).max(y - bottom)
+            // The sides and the arc, met by a rounded corner.
+            let side = ax - (half - corner);
+            let under = (x - cx).hypot(y - arc_y) - arc + corner;
+            side.max(0.0).hypot(under.max(0.0)) + side.max(under).min(0.0) - corner
         }
     };
     let mut img = Img::new(w, h);
@@ -259,13 +267,13 @@ fn umd(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>) -> 
     img.stamp(
         &t,
         (cx - half + 2.5 * mm) as i32,
-        (bottom - 2.0 * mm - t.h as f32) as i32,
+        (bottom - bow - 2.6 * mm - t.h as f32) as i32,
         [110, 112, 120, 255],
     );
     // The shell's notch in the bottom right corner.
     img.rrect(
         cx + half - 9.0 * mm,
-        bottom - 4.6 * mm,
+        bottom - bow - 4.4 * mm,
         6.0 * mm,
         2.2 * mm,
         [1.1 * mm; 4],
@@ -331,11 +339,16 @@ mod tests {
         let img = disc(&game(&iso, Console::Psp), &fonts, None, None);
         assert_eq!((img.w, img.h), SIZE);
         let px = |x: usize, y: usize| &img.px[(y * img.w + x) * 4..(y * img.w + x) * 4 + 4];
-        // The top corners are outside the half circle; the bottom ones inside the shell.
+        // The top corners are outside the half circle; the bottom's arc is lower in the middle
+        // than at the sides.
         assert_eq!(px(12, 12)[3], 0);
         assert_eq!(px(img.w - 12, 12)[3], 0);
-        assert_eq!(px(22, img.h - 22)[3], 255);
-        assert_eq!(px(img.w - 22, img.h - 22)[3], 255);
+        assert_eq!(px(img.w / 2, img.h - 7)[3], 255);
+        assert_eq!(px(40, img.h - 7)[3], 0);
+        assert_eq!(px(img.w - 40, img.h - 7)[3], 0);
+        // The sides are straight down to the arc's corners, 10 mm above the bottom.
+        assert_eq!(px(30, img.h - 90)[3], 255);
+        assert_eq!(px(30, img.h - 40)[3], 0);
         // No hole: the hub is a white cap, solid.
         let (cx, cy) = (img.w / 2, 4 + (32.0 * (img.h as f32 - 8.0) / 65.0) as usize);
         let cap = px(cx, cy - 55);
