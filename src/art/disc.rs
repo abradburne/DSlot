@@ -9,8 +9,11 @@
 //! PlayStation disc shows its black side's colour where it isn't printed, as one does; the
 //! others are silver. A game of several discs (an .m3u) carries a badge saying how many.
 //!
-//! A PSP game, a UMD (a 60 mm disc in a shell), is drawn as the same disc, silver, its print
-//! its box art: a UMD's own look is not drawn yet.
+//! A PSP game is drawn as its UMD: the 60 mm disc in its 64 x 65 mm shell, to the shell's
+//! proportions. The shell's top is a half circle round the disc and its bottom straight, with
+//! small rounded corners; it is milky clear plastic, the disc's print seen through it (the
+//! game's label or box art), the hub a white cap with "UMD" on it, the PSP's mark in the bottom
+//! left corner, the shell's notch in the bottom right and its yellow arrow at the top left.
 
 use crate::gfx::{Fonts, Img, Rgba};
 use crate::rom::{Console, Game};
@@ -89,6 +92,9 @@ fn face(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>, si
 
 /// `game`'s disc: `label` its own print (`Labels/`), `cover` its box art.
 pub fn disc(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>) -> Img {
+    if game.console == Console::Psp {
+        return umd(game, fonts, label, cover);
+    }
     let (w, h) = SIZE;
     let face = face(game, fonts, label, cover, w);
     let dark = game.console == Console::PlayStation;
@@ -166,6 +172,127 @@ pub fn disc(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>
     img
 }
 
+/// A UMD's dimensions, in millimetres: the shell 64 wide and 65 tall, its bottom corners'
+/// radius, the disc 60 across, and its hub cap.
+const UMD_SHELL: (f32, f32) = (64.0, 65.0);
+const UMD_CORNER: f32 = 4.0;
+const UMD_DISC: f32 = 60.0;
+const UMD_HUB: f32 = 21.0;
+
+/// `game`'s UMD: its print (`label`, else `cover`) on the disc seen through the shell.
+fn umd(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>) -> Img {
+    let (w, h) = SIZE;
+    let mm = (h as f32 - 8.0) / UMD_SHELL.1;
+    let (cx, top) = (w as f32 / 2.0, 4.0);
+    let half = UMD_SHELL.0 / 2.0 * mm;
+    // The disc's centre: the shell's half circle round it, 2 mm wider than the disc.
+    let cy = top + half;
+    let bottom = top + UMD_SHELL.1 * mm;
+    let (disc_r, hub_r) = (UMD_DISC / 2.0 * mm, UMD_HUB / 2.0 * mm);
+    let corner = UMD_CORNER * mm;
+    // The print, square, over the disc.
+    let side = (disc_r * 2.0) as usize;
+    let print = face(game, fonts, label, cover, side);
+    let (fx, fy) = (cx - disc_r, cy - disc_r);
+    // Distance outside the shell (negative inside): the half circle above the disc's centre,
+    // a rectangle with rounded bottom corners below it.
+    let shell = |x: f32, y: f32| -> f32 {
+        let ax = (x - cx).abs();
+        if y <= cy {
+            (x - cx).hypot(y - cy) - half
+        } else if ax > half - corner && y > bottom - corner {
+            (ax - (half - corner)).hypot(y - (bottom - corner)) - corner
+        } else {
+            (ax - half).max(y - bottom)
+        }
+    };
+    let mut img = Img::new(w, h);
+    for py in 0..h {
+        for px in 0..w {
+            let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+            let out = shell(x, y);
+            let alpha = (0.5 - out).clamp(0.0, 1.0);
+            if alpha <= 0.0 {
+                continue;
+            }
+            let d = (x - cx).hypot(y - cy);
+            // The shell, milky, a little brighter toward the top left.
+            let light = 1.0 - 0.10 * ((x + y) / (w + h) as f32);
+            let mut c = [214.0 * light, 217.0 * light, 222.0 * light];
+            if d < disc_r {
+                c = if d < hub_r {
+                    // The hub's white cap, a grey ring round it.
+                    let ring = (1.0 - (d - (hub_r - 3.0)).abs() / 2.5).max(0.0);
+                    [246.0 - 70.0 * ring; 3]
+                } else if d > disc_r - 0.9 * mm {
+                    // The disc's edge through the shell.
+                    [168.0; 3]
+                } else {
+                    // The print, a little milky under the shell.
+                    let (ix, iy) = ((x - fx) as usize, (y - fy) as usize);
+                    let i = (iy.min(side - 1) * side + ix.min(side - 1)) * 4;
+                    let p = &print.px[i..i + 3];
+                    [0, 1, 2].map(|k| p[k] as f32 * 0.92 + c[k] * 0.08)
+                };
+            }
+            // The shell's edge, a fine darker line.
+            let edge = (1.0 - (out + 2.0).abs() / 2.0).max(0.0);
+            let c = c.map(|v| v * (1.0 - 0.3 * edge));
+            let i = (py * w + px) * 4;
+            for (k, v) in c.into_iter().enumerate() {
+                img.px[i + k] = v.clamp(0.0, 255.0) as u8;
+            }
+            img.px[i + 3] = (alpha * 255.0) as u8;
+        }
+    }
+    const INK: Rgba = [40, 42, 48, 255];
+    // "UMD" on the hub's cap.
+    let t = fonts.render("UMD", hub_r * 0.62, true);
+    img.stamp(
+        &t,
+        (cx - t.w as f32 / 2.0) as i32,
+        (cy - t.h as f32 / 2.0) as i32,
+        INK,
+    );
+    // The PSP's mark in the bottom left corner, beside the disc.
+    let t = fonts.render("PSP", 5.0 * mm, true);
+    img.stamp(
+        &t,
+        (cx - half + 2.5 * mm) as i32,
+        (bottom - 2.0 * mm - t.h as f32) as i32,
+        [110, 112, 120, 255],
+    );
+    // The shell's notch in the bottom right corner.
+    img.rrect(
+        cx + half - 9.0 * mm,
+        bottom - 4.6 * mm,
+        6.0 * mm,
+        2.2 * mm,
+        [1.1 * mm; 4],
+        [150, 153, 160, 255],
+    );
+    // The yellow arrow at the top left, pointing into the drive.
+    let (ax, ay, size) = (cx - 0.64 * half, cy - 0.64 * half, 3.6 * mm);
+    for py in (ay - size) as usize..(ay + size) as usize {
+        for px in (ax - size) as usize..(ax + size) as usize {
+            // A triangle pointing up and to the left, along the shell's diagonal.
+            let (u, v) = (px as f32 + 0.5 - ax, py as f32 + 0.5 - ay);
+            let (along, across) = (
+                (u + v) * std::f32::consts::FRAC_1_SQRT_2,
+                (v - u) * std::f32::consts::FRAC_1_SQRT_2,
+            );
+            let inside = along > -size * 0.7
+                && along < size * 0.7
+                && across.abs() < (along + size * 0.7) * 0.62;
+            if inside {
+                let i = (py * w + px) * 4;
+                img.px[i..i + 4].copy_from_slice(&[250, 206, 50, 255]);
+            }
+        }
+    }
+    img
+}
+
 /// A small badge low on the disc: how many discs the game is.
 fn badge(img: &mut Img, fonts: &Fonts, text: &str) {
     const INK: Rgba = [24, 26, 32, 255];
@@ -190,6 +317,30 @@ mod tests {
         let mut g = crate::rom::read_one(path).unwrap();
         g.console = console;
         g
+    }
+
+    /// A UMD: its shell's half circle at the top and square-ish bottom, no hole, the cap white.
+    #[test]
+    fn a_umd_and_its_shell() {
+        let dir = TempDir::new("umd");
+        let psp = dir.path().join("PSP");
+        std::fs::create_dir_all(&psp).unwrap();
+        let iso = psp.join("Lumen Drift (USA).iso");
+        std::fs::write(&iso, b"").unwrap();
+        let fonts = Fonts::load();
+        let img = disc(&game(&iso, Console::Psp), &fonts, None, None);
+        assert_eq!((img.w, img.h), SIZE);
+        let px = |x: usize, y: usize| &img.px[(y * img.w + x) * 4..(y * img.w + x) * 4 + 4];
+        // The top corners are outside the half circle; the bottom ones inside the shell.
+        assert_eq!(px(12, 12)[3], 0);
+        assert_eq!(px(img.w - 12, 12)[3], 0);
+        assert_eq!(px(22, img.h - 22)[3], 255);
+        assert_eq!(px(img.w - 22, img.h - 22)[3], 255);
+        // No hole: the hub is a white cap, solid.
+        let (cx, cy) = (img.w / 2, 4 + (32.0 * (img.h as f32 - 8.0) / 65.0) as usize);
+        let cap = px(cx, cy - 55);
+        assert_eq!(cap[3], 255);
+        assert!(cap[..3].iter().all(|&v| v > 230), "{cap:?}");
     }
 
     #[test]

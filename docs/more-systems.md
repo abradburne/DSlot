@@ -26,8 +26,11 @@ Its box art is `Roms/PSP/Imgs/<Name>.png`, beside the other PSP games', and its 
 with no `EBOOT.PBP` in it is passed over. A folder copied in while DSlot runs shows up when its
 `EBOOT.PBP` is in place by the time DSlot looks; if it doesn't, **Rescan games** finds it.
 
-The PlayStation's, PC Engine CD's and PSP's games are drawn as discs on the shelf, their print
-the box art (`Imgs/`) or a label (`Labels/`). A UMD is drawn as the same disc, silver.
+The PlayStation's and PC Engine CD's games are drawn as discs on the shelf, their print the box
+art (`Imgs/`) or a label (`Labels/`). The PSP's are drawn as UMDs, to a UMD's proportions: the
+60 mm disc in its 64 x 65 mm shell, half round at the top and square at the bottom, the same print
+seen through the milky shell, a white "UMD" cap on the hub, the PSP's mark at the bottom left,
+the shell's notch at the bottom right and its yellow arrow at the top left.
 
 DSlot draws no carts for the other systems yet: a disk is no cart, and the Master
 System's, PC Engine's, Neo Geo Pocket's and WonderSwan's carts have no shells drawn. Their pages

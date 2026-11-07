@@ -149,7 +149,7 @@ their page shows boxes, as a grid or a list; `nibcase-gw` plays them, two-screen
 both panels. See [Game & Watch support](docs/game-watch.md).
 
 The Master System, SG-1000, PC Engine, PC Engine CD, PlayStation, PSP, Neo Geo Pocket, WonderSwan and Famicom Disk System
-have pages too. The disc systems' games are drawn as discs; the others show boxes for now (no
+have pages too. The disc systems' games are drawn as discs, the PSP's as UMDs; the others show boxes for now (no
 carts drawn for them yet). PSP games go in `Roms/PSP`: an `.iso`, `.cso`, `.chd` or `.pbp`, or
 a download's folder with its `EBOOT.PBP`, named after the folder. See
 [More systems](docs/more-systems.md).

@@ -9,10 +9,11 @@
   PPSSPP core (its package writes the emulator description). A game is a UMD's image (`.iso`,
   `.cso`, `.chd`) or an `.pbp`, never zipped. A download in a folder of its own,
   `Roms/PSP/<Name>/EBOOT.PBP`, is one game named after the folder; its box art and saves go by
-  that name, beside the other PSP games'. The games are drawn as discs, as the PlayStation's
-  are, and the PSP comes right after the PlayStation in the tabs and the system picker. Its
+  that name, beside the other PSP games'. The games are drawn as UMDs: the 60 mm disc in its
+  64 x 65 mm shell, half round at the top, the print (label or box art) seen through the milky
+  shell, a white "UMD" cap on the hub, the PSP's mark, the notch and the yellow arrow. The PSP comes right after the PlayStation in the tabs and the system picker. Its
   card has the PSP-1000's photo (Evan Amos, public domain). Its RetroAchievements sets show on
-  the shelf once DSlot moves to the nibkit release after 0.3.0, which hashes PSP games.
+  the shelf (nibkit 0.3.1 hashes PSP games).
 
 ## 0.5.0
 
