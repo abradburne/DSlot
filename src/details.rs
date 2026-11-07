@@ -93,6 +93,7 @@ pub fn thumbnail_system(console: Console) -> Option<&'static str> {
         Console::NeoGeoPocket => "SNK - Neo Geo Pocket Color",
         Console::WonderSwan => "Bandai - WonderSwan",
         Console::GameWatch => "Handheld Electronic Game",
+        Console::Arcade => "FBNeo - Arcade Games",
         Console::Ports | Console::Apps => return None,
     })
 }
@@ -172,7 +173,13 @@ pub fn look_up(cache: &Path, game: &Game, again: bool) -> Looked {
         && due(kept.boxart_at, false);
     if due(kept.shots_at, shots_found) || wants_box {
         if let Some(system) = thumbnail_system(game.console) {
-            let name = thumbnail_name(&game.stem);
+            // An arcade set's pictures are named by its title (`Metal Slug - Super
+            // Vehicle-001`), as its emulator's list gives it, not by the set (`mslug`).
+            let name = thumbnail_name(if game.console == Console::Arcade {
+                game.name()
+            } else {
+                &game.stem
+            });
             let mut answered = false;
             let mut kinds = Vec::new();
             if due(kept.shots_at, shots_found) {

@@ -1,0 +1,9 @@
+# Arcade: the system card for the arcade boards FinalBurn Neo plays. Not one console, so (as
+# Ports) no stats or photo; what FinalBurn Neo is, from https://neo-source.com (read 7 November
+# 2026). The bio and fact are DSlot's own words.
+name = "Arcade"
+maker = "SNK, Capcom, Konami, Sega, Taito, Toaplan, Cave and more"
+source = "https://neo-source.com"
+bio = "Coin-op boards from the cabinets of the 1970s to the 2000s: Neo Geo, Capcom's CP System I, II and III, and hundreds more, played by FinalBurn Neo. Each game is a set named as the emulator names it, in Roms/ARCADE; a board's BIOS set goes in BIOS."
+fact = "A Neo Geo MVS cabinet could hold up to six games at once, and the arcade's owner swapped carts as tastes changed."
+stats = []

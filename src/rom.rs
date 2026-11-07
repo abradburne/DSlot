@@ -49,6 +49,10 @@ pub enum Console {
     WonderSwan,
     /// Nintendo's Game & Watch units: no carts, the unit is the game.
     GameWatch,
+    /// Arcade boards (Neo Geo, CPS and the others): each game a MAME-style set, a `.zip` or
+    /// `.7z` named by the set (`mslug.zip`), named on the shelf by its emulator's list
+    /// (`[games]`). No carts; a board's BIOS set (`neogeo.zip`) is no game and isn't shown.
+    Arcade,
     /// PortMaster's ports, from `Roms/PORTS`: each a script started by PortMaster's runner,
     /// its name and picture from its folder (rom/ports.rs).
     Ports,
@@ -57,7 +61,7 @@ pub enum Console {
 
 impl Console {
     /// The consoles, as against the apps, in tab order.
-    pub const ALL: [Console; 20] = [
+    pub const ALL: [Console; 21] = [
         Console::Ds,
         Console::Gba,
         Console::Gb,
@@ -77,10 +81,11 @@ impl Console {
         Console::NeoGeoPocket,
         Console::WonderSwan,
         Console::GameWatch,
+        Console::Arcade,
         Console::Ports,
     ];
     /// Every page there can be, in tab order: the consoles, then the apps.
-    pub const PAGES: [Console; 21] = [
+    pub const PAGES: [Console; 22] = [
         Console::Ds,
         Console::Gba,
         Console::Gb,
@@ -100,6 +105,7 @@ impl Console {
         Console::NeoGeoPocket,
         Console::WonderSwan,
         Console::GameWatch,
+        Console::Arcade,
         Console::Ports,
         Console::Apps,
     ];
@@ -128,6 +134,7 @@ impl Console {
             Console::NeoGeoPocket => "NGP",
             Console::WonderSwan => "WS",
             Console::GameWatch => "GW",
+            Console::Arcade => "ARCADE",
             Console::Ports => "PORTS",
             Console::Apps => "APPS",
         }
@@ -155,6 +162,7 @@ impl Console {
             Console::NeoGeoPocket => "Neo Geo Pocket",
             Console::WonderSwan => "WonderSwan",
             Console::GameWatch => "Game & Watch",
+            Console::Arcade => "Arcade",
             Console::Ports => "Ports",
             Console::Apps => "Apps",
         }
@@ -182,6 +190,7 @@ impl Console {
             Console::NeoGeoPocket => "NGP",
             Console::WonderSwan => "WS",
             Console::GameWatch => "G&W",
+            Console::Arcade => "Arcade",
             Console::Ports => "Ports",
             Console::Apps => "Apps",
         }
@@ -209,6 +218,7 @@ impl Console {
             Console::NeoGeoPocket => "neogeopocket",
             Console::WonderSwan => "wonderswan",
             Console::GameWatch => "gamewatch",
+            Console::Arcade => "arcade",
             Console::Ports => "ports",
             Console::Apps => "apps",
         }
@@ -245,6 +255,7 @@ impl Console {
             Console::NeoGeoPocket => "ngp",
             Console::WonderSwan => "ws",
             Console::GameWatch => "mgw",
+            Console::Arcade => "zip",
             Console::Ports => "sh",
             // Apps are folders, not ROM files: never scanned for.
             Console::Apps => "",
@@ -283,6 +294,8 @@ impl Console {
             Console::Ports => &["sh"],
             // A unit as a MAME set, zipped or 7-Zipped, as well as converted (.mgw).
             Console::GameWatch => &["mgw", "zip", "7z"],
+            // A set is its archive, zipped or 7-Zipped.
+            Console::Arcade => &["zip", "7z"],
             Console::Apps => &[],
         }
     }
@@ -309,6 +322,7 @@ impl Console {
             Console::NeoGeoPocket => "neogeopocket.bin",
             Console::WonderSwan => "wonderswan.bin",
             Console::GameWatch => "gamewatch.bin",
+            Console::Arcade => "arcade.bin",
             Console::Ports => "ports.bin",
             Console::Apps => "apps.bin",
         }
@@ -336,6 +350,7 @@ impl Console {
             Console::NeoGeoPocket => "",
             Console::WonderSwan => "",
             Console::GameWatch => "",
+            Console::Arcade => "",
             Console::Ports => "",
             Console::Apps => "",
         }
@@ -470,6 +485,10 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
             if stem.starts_with('.') || !console.takes(&ext) {
                 continue;
             }
+            // A board's BIOS set beside its games is no game of its own.
+            if console == Console::Arcade && is_bios_set(&stem) {
+                continue;
+            }
             // A card set up for slot CFW keeps its games in Games/: one that is in Roms/ as
             // well is listed once, as the one in Roms/.
             if nibkit::paths::slot_copy(&path, &roots) {
@@ -555,6 +574,17 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
         games.extend(ports::get_more());
     }
     games
+}
+
+/// The arcade BIOS sets FinalBurn Neo names (its libretro README's "BIOS" tables): there for the
+/// boards' games, never games of their own.
+const BIOS_SETS: [&str; 14] = [
+    "atarisy1", "bubsys", "cchip", "decocass", "isgsm", "midssio", "namcoc69", "namcoc70",
+    "namcoc75", "neogeo", "nmk004", "pgm", "skns", "ym2608",
+];
+
+fn is_bios_set(stem: &str) -> bool {
+    BIOS_SETS.iter().any(|b| stem.eq_ignore_ascii_case(b))
 }
 
 /// A PSP game downloaded from the PlayStation Store: a folder in `Roms/PSP` holding its
@@ -678,6 +708,8 @@ fn read_header(console: Console, path: &Path, stem: &str) -> (String, Vec<String
         | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => (String::new(), vec![tidy(stem)], None),
+        // A set's name says little (`mslug`): its emulator's list names it (`name_from_lists`).
+        Console::Arcade => (String::new(), vec![stem.to_owned()], None),
         // An app says nothing about itself in a header: its app.toml has been read, and a
         // port's folder (`scan`).
         Console::Apps | Console::Ports => (String::new(), vec![stem.to_owned()], None),
@@ -712,16 +744,20 @@ pub fn read_one(path: &Path) -> Option<Game> {
         .flatten()
         .map(str::to_ascii_lowercase);
     let rom_ext = inner.as_deref().unwrap_or(&ext);
-    let by_ext = Console::ALL.into_iter().find(|c| {
-        c.ext() == rom_ext
-            || (*c == Console::Snes && rom_ext == "smc")
-            || (*c == Console::Nes && matches!(rom_ext, "unf" | "unif"))
-            || (*c == Console::MegaDrive && matches!(rom_ext, "gen" | "bin" | "smd"))
-            || (*c == Console::NeoGeoPocket && rom_ext == "ngc")
-            || (*c == Console::WonderSwan && rom_ext == "wsc")
-            || (*c == Console::PcEngineCd && rom_ext == "chd")
-            || (*c == Console::Psp && rom_ext == "cso")
-    });
+    // An arcade set is known by its folder alone: a zip says nothing of its board.
+    let by_ext = Console::ALL
+        .into_iter()
+        .filter(|c| *c != Console::Arcade)
+        .find(|c| {
+            c.ext() == rom_ext
+                || (*c == Console::Snes && rom_ext == "smc")
+                || (*c == Console::Nes && matches!(rom_ext, "unf" | "unif"))
+                || (*c == Console::MegaDrive && matches!(rom_ext, "gen" | "bin" | "smd"))
+                || (*c == Console::NeoGeoPocket && rom_ext == "ngc")
+                || (*c == Console::WonderSwan && rom_ext == "wsc")
+                || (*c == Console::PcEngineCd && rom_ext == "chd")
+                || (*c == Console::Psp && rom_ext == "cso")
+        });
     let console = Console::from_folder(folder)
         .or(by_ext)
         .unwrap_or(Console::Ds);
@@ -1551,6 +1587,58 @@ mod tests {
         assert_eq!(ball.title, ["Ball"]);
         // Not listed: named by its file, as before.
         assert!(games.iter().any(|g| g.name() == "Parachute"));
+    }
+
+    /// Arcade sets named by their emulator's list; a board's BIOS set is no game.
+    #[test]
+    fn arcade_sets_named_by_a_list_bios_left_out() {
+        let dir = TempDir::new("arcade-sets");
+        let folder = dir.path().join("ARCADE");
+        fs::create_dir(&folder).unwrap();
+        for name in [
+            "mslug.zip",
+            "sf2.7z",
+            "neogeo.zip",
+            "PGM.zip",
+            "unknown.zip",
+        ] {
+            fs::write(folder.join(name), b"fixture").unwrap();
+        }
+        let list = dir.path().join("arcade.tsv");
+        fs::write(
+            &list,
+            "# a comment\nmslug\tMetal Slug - Super Vehicle-001\t\t1996\tNazca\nsf2\tStreet Fighter II\t\t1991\tCapcom\n",
+        )
+        .unwrap();
+        let text = format!(
+            "name = \"FinalBurn Neo (nibcase)\"\n[systems]\nARCADE = [\"/usr/bin/nibcase\", \"{{rom}}\"]\n[games]\nARCADE = \"{}\"\n",
+            list.display()
+        );
+        let emulators =
+            crate::emulator::Emulators::assume_installed([("nibcase-fbneo".to_owned(), text)]);
+        let cache = dir.path().join(Console::Arcade.known());
+        let mut games = scan(Console::Arcade, std::slice::from_ref(&folder), &cache);
+        let mut stems: Vec<&str> = games.iter().map(|g| g.stem.as_str()).collect();
+        stems.sort();
+        assert_eq!(stems, ["mslug", "sf2", "unknown"]);
+        name_from_lists(&mut games, &emulators);
+        let mslug = games.iter().find(|g| g.stem == "mslug").unwrap();
+        assert_eq!(
+            mslug.title,
+            ["Metal Slug - Super Vehicle-001", "1996  \u{b7}  Nazca"]
+        );
+        // A set it doesn't list keeps its file's name.
+        assert!(games.iter().any(|g| g.name() == "unknown"));
+        // A set is the arcade's by its folder; a zip elsewhere is not.
+        assert_eq!(
+            read_one(&folder.join("mslug.zip")).map(|g| g.console),
+            Some(Console::Arcade)
+        );
+        fs::write(dir.path().join("mslug.zip"), b"fixture").unwrap();
+        assert_ne!(
+            read_one(&dir.path().join("mslug.zip")).map(|g| g.console),
+            Some(Console::Arcade)
+        );
     }
 
     #[test]

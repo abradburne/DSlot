@@ -34,7 +34,7 @@ pub struct Stat {
 }
 
 /// The cards, by console: built into DSlot.
-const FILES: [(Console, &str); 20] = [
+const FILES: [(Console, &str); 21] = [
     (Console::Ds, include_str!("../data/systems/ds.toml")),
     (Console::Gba, include_str!("../data/systems/gba.toml")),
     (Console::Gb, include_str!("../data/systems/gb.toml")),
@@ -81,6 +81,7 @@ const FILES: [(Console, &str); 20] = [
         Console::GameWatch,
         include_str!("../data/systems/gamewatch.toml"),
     ),
+    (Console::Arcade, include_str!("../data/systems/arcade.toml")),
     (Console::Ports, include_str!("../data/systems/ports.toml")),
 ];
 
@@ -189,8 +190,8 @@ mod tests {
             let card = card(console).unwrap_or_else(|| panic!("{console:?}'s card doesn't read"));
             assert!(card.source.starts_with("https://"), "{console:?}");
             assert!(!card.bio.is_empty() && !card.fact.is_empty());
-            // Ports aren't a console: no stats to give.
-            if console != Console::Ports {
+            // Ports and the arcade's boards aren't one console: no stats to give.
+            if !matches!(console, Console::Ports | Console::Arcade) {
                 assert!(card.stats.len() >= 5, "{console:?}");
             }
         }
@@ -213,8 +214,11 @@ mod tests {
 
     #[test]
     fn every_card_has_its_photo() {
-        // Ports aren't a console: a neutral card, with no photo.
-        for (console, _) in FILES.into_iter().filter(|&(c, _)| c != Console::Ports) {
+        // Ports and the arcade's boards aren't one console: a neutral card, with no photo.
+        for (console, _) in FILES
+            .into_iter()
+            .filter(|&(c, _)| !matches!(c, Console::Ports | Console::Arcade))
+        {
             let photo = photo(console).unwrap_or_else(|| panic!("{console:?} has no photo"));
             let img = crate::gfx::decode_png(photo.png).expect("a PNG");
             assert!(photo.credit.starts_with("Photo: "));

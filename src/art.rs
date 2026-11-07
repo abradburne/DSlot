@@ -257,7 +257,8 @@ fn shell_of(console: Console) -> Option<fn() -> Frame> {
         | Console::PlayStation
         | Console::Psp
         | Console::NeoGeoPocket
-        | Console::WonderSwan => None,
+        | Console::WonderSwan
+        | Console::Arcade => None,
     }
 }
 
@@ -297,7 +298,8 @@ pub fn slot(console: Console) -> Slot {
         | Console::PlayStation
         | Console::Psp
         | Console::NeoGeoPocket
-        | Console::WonderSwan => Slot::Two,
+        | Console::WonderSwan
+        | Console::Arcade => Slot::Two,
     }
 }
 
@@ -440,7 +442,8 @@ pub fn cart_size(console: Console) -> (usize, usize) {
         | Console::Sg1000
         | Console::PcEngine
         | Console::NeoGeoPocket
-        | Console::WonderSwan => (GBA_CART_W, GBA_CART_H),
+        | Console::WonderSwan
+        | Console::Arcade => (GBA_CART_W, GBA_CART_H),
         Console::Gb | Console::Gbc => (GB_CART_W, GB_CART_H),
     }
 }
@@ -469,7 +472,8 @@ pub fn box_size(console: Console) -> (usize, usize) {
         | Console::PcEngineCd
         | Console::PlayStation
         | Console::NeoGeoPocket
-        | Console::WonderSwan => GBA_BOX,
+        | Console::WonderSwan
+        | Console::Arcade => GBA_BOX,
         Console::Psp => PSP_BOX,
     }
 }
@@ -1057,7 +1061,8 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
         | Console::PlayStation
         | Console::Psp
         | Console::NeoGeoPocket
-        | Console::WonderSwan => printed_gba(game, fonts, sw, sh, cover),
+        | Console::WonderSwan
+        | Console::Arcade => printed_gba(game, fonts, sw, sh, cover),
     });
     img.blit(&sticker, full(&sticker), frame.sticker, false);
     img.blit(

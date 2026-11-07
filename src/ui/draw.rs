@@ -2151,6 +2151,7 @@ pub(super) fn console_colour(console: Console) -> Color {
         Console::Psp => Color::RGB(42, 44, 52),
         Console::NeoGeoPocket => Color::RGB(40, 70, 120),
         Console::WonderSwan => Color::RGB(80, 100, 120),
+        Console::Arcade => Color::RGB(120, 40, 60),
         Console::Ports => Color::RGB(150, 70, 48),
         Console::Apps => Color::RGB(46, 88, 90),
     }
@@ -2241,7 +2242,8 @@ fn bar_for(console: Console) -> usize {
         | Console::Sg1000
         | Console::PcEngine
         | Console::NeoGeoPocket
-        | Console::WonderSwan => 1,
+        | Console::WonderSwan
+        | Console::Arcade => 1,
     }
 }
 
