@@ -121,6 +121,7 @@ pub fn cart_geometry(console: Console) -> (f32, f32, f32) {
         | Console::GameGear
         | Console::Lynx
         | Console::PlayStation
+        | Console::Psp
         | Console::PcEngineCd => (GB_SIZE, GB_STEP),
         _ => (SLOT2_SIZE, SLOT2_STEP),
     };

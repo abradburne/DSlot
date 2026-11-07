@@ -41,6 +41,9 @@ pub enum Console {
     PcEngineCd,
     /// The PlayStation's discs: no carts.
     PlayStation,
+    /// The PlayStation Portable's UMDs (small discs in a shell), and its downloads (an
+    /// EBOOT.PBP in a folder of its own): no carts.
+    Psp,
     Lynx,
     NeoGeoPocket,
     WonderSwan,
@@ -54,7 +57,7 @@ pub enum Console {
 
 impl Console {
     /// The consoles, as against the apps, in tab order.
-    pub const ALL: [Console; 19] = [
+    pub const ALL: [Console; 20] = [
         Console::Ds,
         Console::Gba,
         Console::Gb,
@@ -69,6 +72,7 @@ impl Console {
         Console::PcEngine,
         Console::PcEngineCd,
         Console::PlayStation,
+        Console::Psp,
         Console::Lynx,
         Console::NeoGeoPocket,
         Console::WonderSwan,
@@ -76,7 +80,7 @@ impl Console {
         Console::Ports,
     ];
     /// Every page there can be, in tab order: the consoles, then the apps.
-    pub const PAGES: [Console; 20] = [
+    pub const PAGES: [Console; 21] = [
         Console::Ds,
         Console::Gba,
         Console::Gb,
@@ -91,6 +95,7 @@ impl Console {
         Console::PcEngine,
         Console::PcEngineCd,
         Console::PlayStation,
+        Console::Psp,
         Console::Lynx,
         Console::NeoGeoPocket,
         Console::WonderSwan,
@@ -118,6 +123,7 @@ impl Console {
             Console::PcEngine => "PCE",
             Console::PcEngineCd => "PCECD",
             Console::PlayStation => "PS",
+            Console::Psp => "PSP",
             Console::Lynx => "LYNX",
             Console::NeoGeoPocket => "NGP",
             Console::WonderSwan => "WS",
@@ -144,6 +150,7 @@ impl Console {
             Console::PcEngine => "PC Engine",
             Console::PcEngineCd => "PC Engine CD",
             Console::PlayStation => "PlayStation",
+            Console::Psp => "PlayStation Portable",
             Console::Lynx => "Atari Lynx",
             Console::NeoGeoPocket => "Neo Geo Pocket",
             Console::WonderSwan => "WonderSwan",
@@ -170,6 +177,7 @@ impl Console {
             Console::PcEngine => "PCE",
             Console::PcEngineCd => "PCE CD",
             Console::PlayStation => "PS",
+            Console::Psp => "PSP",
             Console::Lynx => "Lynx",
             Console::NeoGeoPocket => "NGP",
             Console::WonderSwan => "WS",
@@ -196,6 +204,7 @@ impl Console {
             Console::PcEngine => "pcengine",
             Console::PcEngineCd => "pcenginecd",
             Console::PlayStation => "playstation",
+            Console::Psp => "psp",
             Console::Lynx => "lynx",
             Console::NeoGeoPocket => "neogeopocket",
             Console::WonderSwan => "wonderswan",
@@ -231,6 +240,7 @@ impl Console {
             Console::PcEngine => "pce",
             Console::PcEngineCd => "cue",
             Console::PlayStation => "pbp",
+            Console::Psp => "iso",
             Console::Lynx => "lnx",
             Console::NeoGeoPocket => "ngp",
             Console::WonderSwan => "ws",
@@ -266,6 +276,7 @@ impl Console {
             Console::PcEngine => &["pce", "zip"],
             Console::PcEngineCd => &["cue", "chd", "m3u"],
             Console::PlayStation => &["m3u", "chd", "cue", "pbp"],
+            Console::Psp => &["iso", "cso", "chd", "pbp"],
             Console::Lynx => &["lnx", "zip"],
             Console::NeoGeoPocket => &["ngp", "ngc", "zip"],
             Console::WonderSwan => &["ws", "wsc", "zip"],
@@ -293,6 +304,7 @@ impl Console {
             Console::PcEngine => "pcengine.bin",
             Console::PcEngineCd => "pcenginecd.bin",
             Console::PlayStation => "playstation.bin",
+            Console::Psp => "psp.bin",
             Console::Lynx => "lynx.bin",
             Console::NeoGeoPocket => "neogeopocket.bin",
             Console::WonderSwan => "wonderswan.bin",
@@ -319,6 +331,7 @@ impl Console {
             Console::PcEngine => "",
             Console::PcEngineCd => "",
             Console::PlayStation => "",
+            Console::Psp => "",
             Console::Lynx => "",
             Console::NeoGeoPocket => "",
             Console::WonderSwan => "",
@@ -396,8 +409,20 @@ impl Game {
         if let (Some(cover), "Imgs") = (&self.cover, folder) {
             return cover.clone();
         }
+        self.dir().join(folder).join(format!("{}.png", self.stem))
+    }
+
+    /// The console's folder it is in (`Roms/GBA`): its file's, or, for a PSP download (an
+    /// EBOOT.PBP in a folder of its own, named after it), the one that folder is in.
+    pub fn dir(&self) -> &Path {
         let dir = self.path.parent().unwrap_or(Path::new("."));
-        dir.join(folder).join(format!("{}.png", self.stem))
+        let download = self.console == Console::Psp
+            && is_eboot(&self.path)
+            && dir.file_name().and_then(|n| n.to_str()) == Some(self.stem.as_str());
+        match dir.parent() {
+            Some(up) if download => up,
+            _ => dir,
+        }
     }
 }
 
@@ -426,15 +451,22 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
             HashMap::new()
         };
         for entry in rd.flatten() {
-            let path = entry.path();
+            // A PSP download is a folder: its EBOOT.PBP, named after the folder.
+            let (path, stem) = match download(console, &entry) {
+                Some(found) => found,
+                None => {
+                    let path = entry.path();
+                    let Some(stem) = rom_name(&path) else {
+                        continue;
+                    };
+                    (path, stem)
+                }
+            };
             let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            let Some(stem) = rom_name(&path) else {
-                continue;
-            };
             if stem.starts_with('.') || !console.takes(&ext) {
                 continue;
             }
@@ -523,6 +555,28 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
         games.extend(ports::get_more());
     }
     games
+}
+
+/// A PSP game downloaded from the PlayStation Store: a folder in `Roms/PSP` holding its
+/// EBOOT.PBP (`Roms/PSP/<Name>/EBOOT.PBP`). The game is the EBOOT.PBP, its name the folder's.
+/// None for anything else, and for a folder with no EBOOT.PBP in it (`Imgs/`, say).
+fn download(console: Console, entry: &fs::DirEntry) -> Option<(PathBuf, String)> {
+    if console != Console::Psp || !entry.file_type().ok()?.is_dir() {
+        return None;
+    }
+    let eboot = fs::read_dir(entry.path())
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| is_eboot(p) && p.is_file())?;
+    Some((eboot, entry.file_name().to_str()?.to_owned()))
+}
+
+/// Whether `path` is named EBOOT.PBP, in any case.
+fn is_eboot(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("EBOOT.PBP"))
 }
 
 /// The discs the playlists among `games` list (an .m3u lists a game's discs, one file to a
@@ -621,6 +675,7 @@ fn read_header(console: Console, path: &Path, stem: &str) -> (String, Vec<String
         | Console::PcEngine
         | Console::PcEngineCd
         | Console::PlayStation
+        | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => (String::new(), vec![tidy(stem)], None),
         // An app says nothing about itself in a header: its app.toml has been read, and a
@@ -632,7 +687,24 @@ fn read_header(console: Console, path: &Path, stem: &str) -> (String, Vec<String
 /// One ROM file as a game, outside a scan (`dslot --launch`). Its console is its folder's
 /// (`Roms/GBA/...`), or else its extension's; a .zip outside a console's folder is a DS game.
 pub fn read_one(path: &Path) -> Option<Game> {
-    let folder = path.parent()?.file_name()?.to_str()?;
+    // A PSP download, `Roms/PSP/<Name>/EBOOT.PBP`: the game is named after its folder.
+    let up = path.parent()?;
+    let download = is_eboot(path)
+        && up.parent().and_then(Path::file_name) == Some(Console::Psp.folder().as_ref());
+    if download {
+        let stem = up.file_name()?.to_str()?.to_owned();
+        return Some(Game {
+            console: Console::Psp,
+            path: path.to_owned(),
+            title: vec![tidy(&stem)],
+            stem,
+            code: String::new(),
+            icon: None,
+            cover: None,
+            gone: false,
+        });
+    }
+    let folder = up.file_name()?.to_str()?;
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
     // A zip by the extension under it: `Tetris DX (World).gbc.zip`.
     let inner = (ext == "zip")
@@ -648,6 +720,7 @@ pub fn read_one(path: &Path) -> Option<Game> {
             || (*c == Console::NeoGeoPocket && rom_ext == "ngc")
             || (*c == Console::WonderSwan && rom_ext == "wsc")
             || (*c == Console::PcEngineCd && rom_ext == "chd")
+            || (*c == Console::Psp && rom_ext == "cso")
     });
     let console = Console::from_folder(folder)
         .or(by_ext)
@@ -1376,6 +1449,69 @@ mod tests {
         assert_eq!(console("x.chd"), Some(Console::PcEngineCd));
         assert_eq!(console("x.fds"), Some(Console::Fds));
         assert_eq!(Console::from_folder("SMS"), Some(Console::MasterSystem));
+    }
+
+    /// A PSP game is a UMD's image (.iso, .cso or .chd), never zipped, or an EBOOT.PBP: on its
+    /// own, or a download in a folder of its own, named after the folder rather than "EBOOT".
+    #[test]
+    fn psp_images_and_downloads() {
+        let dir = TempDir::new("psp");
+        let psp = dir.path().join("Roms").join(Console::Psp.folder());
+        let put = |name: &str| {
+            let p = psp.join(name);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, b"fixture").unwrap();
+            p
+        };
+        put("Lumen Drift (USA).iso");
+        put("Tiny Racers (Europe).cso");
+        put("Orbit Golf (Japan).chd");
+        put("Night Ferry (USA).pbp");
+        put("Not a Game (USA).zip");
+        let eboot = put("Pocket Pilots/EBOOT.PBP");
+        put("Pocket Pilots/ICON0.PNG");
+        put("Shadow Ink/eboot.pbp");
+        // Its box art's folder, and a folder with no EBOOT.PBP in it, are no games.
+        put("Imgs/Pocket Pilots.png");
+        put("Empty Folder/readme.txt");
+        let cache = dir.path().join(Console::Psp.known());
+        let games = scan(Console::Psp, std::slice::from_ref(&psp), &cache);
+        assert_eq!(
+            names(&games),
+            [
+                "Lumen Drift",
+                "Night Ferry",
+                "Orbit Golf",
+                "Pocket Pilots",
+                "Shadow Ink",
+                "Tiny Racers"
+            ]
+        );
+        let pilots = games.iter().find(|g| g.path == eboot).unwrap();
+        assert_eq!(pilots.stem, "Pocket Pilots");
+        assert_eq!(pilots.key(), "PSP/Pocket Pilots");
+        // Its art and the rest are beside the console's games, not in its own folder.
+        assert_eq!(pilots.dir(), psp);
+        assert_eq!(pilots.art("Imgs"), psp.join("Imgs/Pocket Pilots.png"));
+        // Read again from the cache, it is the same game.
+        let again = scan(Console::Psp, std::slice::from_ref(&psp), &cache);
+        assert_eq!(names(&again), names(&games));
+        // Started on its own (`dslot --launch`), too.
+        let one = read_one(&eboot).unwrap();
+        assert_eq!(
+            (one.console, one.stem.as_str()),
+            (Console::Psp, "Pocket Pilots")
+        );
+        assert_eq!(one.dir(), psp);
+        let iso = read_one(&psp.join("Lumen Drift (USA).iso")).unwrap();
+        assert_eq!((iso.console, iso.name()), (Console::Psp, "Lumen Drift"));
+        assert_eq!(iso.dir(), psp);
+        // Outside its folder, a .cso is the PSP's.
+        fs::write(dir.path().join("x.cso"), b"fixture").unwrap();
+        assert_eq!(
+            read_one(&dir.path().join("x.cso")).map(|g| g.console),
+            Some(Console::Psp)
+        );
     }
 
     /// MAME sets (zipped or 7-Zipped), named by the list an emulator gives (`[games]`).

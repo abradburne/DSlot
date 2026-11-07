@@ -253,6 +253,7 @@ fn shell_of(console: Console) -> Option<fn() -> Frame> {
         | Console::PcEngine
         | Console::PcEngineCd
         | Console::PlayStation
+        | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => None,
     }
@@ -292,6 +293,7 @@ pub fn slot(console: Console) -> Slot {
         | Console::PcEngine
         | Console::PcEngineCd
         | Console::PlayStation
+        | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => Slot::Two,
     }
@@ -426,7 +428,7 @@ pub fn cart_size(console: Console) -> (usize, usize) {
         Console::MegaDrive => MD_CART,
         Console::GameGear => GG_CART,
         Console::Lynx => LYNX_CART,
-        Console::PlayStation | Console::PcEngineCd => disc::SIZE,
+        Console::PlayStation | Console::Psp | Console::PcEngineCd => disc::SIZE,
         // A page without carts is a grid or a list: their size is asked for, never drawn.
         Console::GameWatch
         | Console::Apps
@@ -463,6 +465,7 @@ pub fn box_size(console: Console) -> (usize, usize) {
         | Console::PcEngine
         | Console::PcEngineCd
         | Console::PlayStation
+        | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => GBA_BOX,
     }
@@ -1049,6 +1052,7 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
         | Console::PcEngine
         | Console::PcEngineCd
         | Console::PlayStation
+        | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => printed_gba(game, fonts, sw, sh, cover),
     });

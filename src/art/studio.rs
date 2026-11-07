@@ -97,7 +97,7 @@ fn hex(s: &str) -> Option<[u8; 3]> {
 /// The root of the card a game is on: `<card>/Roms/<system>/<rom>`, or slot's
 /// `<card>/Games/<system>/<rom>`.
 fn card_of(game: &Game) -> Option<PathBuf> {
-    let roms = game.path.parent()?.parent()?;
+    let roms = game.dir().parent()?;
     let layout = roms.file_name()?;
     (layout == "Roms" || layout == "Games").then(|| roms.parent().map(Path::to_path_buf))?
 }
@@ -138,12 +138,7 @@ pub fn labels(game: &Game, cards: &[PathBuf]) -> Vec<(PathBuf, bool)> {
 /// the ROMs, then on each card in Studio's `Labels/<system>/` and `Labels/`, and at its root.
 pub fn shell_files(game: &Game, cards: &[PathBuf]) -> Vec<PathBuf> {
     let name = "cart_shell.txt";
-    let mut files: Vec<PathBuf> = game
-        .path
-        .parent()
-        .map(|d| d.join(name))
-        .into_iter()
-        .collect();
+    let mut files: Vec<PathBuf> = vec![game.dir().join(name)];
     for card in cards {
         let labels = card.join("Labels");
         files.push(labels.join(game.console.folder()).join(name));

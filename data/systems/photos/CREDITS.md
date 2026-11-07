@@ -5,7 +5,8 @@ Commons, downloaded on 21 October 2026 as Commons' 960-pixel-wide rendering. All
 by Evan Amos and released into the public domain; credited here all the same. The PC Engine
 CD's is by RetroEditor under the Creative Commons Attribution 4.0 licence
 (https://creativecommons.org/licenses/by/4.0/), cropped to the console (leaving out the desk,
-a television and a game case) before it was reduced; its card credits it.
+a television and a game case) before it was reduced; its card credits it. The PSP's was added
+on 7 November 2026, reduced from Commons' original (3840 × 2180), trimmed to the console.
 
 | Card | Photograph | Author | Licence | Source |
 |---|---|---|---|---|
@@ -20,6 +21,7 @@ a television and a game case) before it was reduced; its card credits it.
 | `lynx.png` | Atari-Lynx-Handheld-Angled.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Atari-Lynx-Handheld-Angled.jpg |
 | `gamewatch.png` | Game&watch-donkey-kong-2.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Game%26watch-donkey-kong-2.jpg |
 | `playstation.png` | PlayStation-SCPH-1000-with-Controller.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:PlayStation-SCPH-1000-with-Controller.jpg |
+| `psp.png` | Psp-1000.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Psp-1000.jpg |
 | `fds.png` | Nintendo-Famicom-Disk-System.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Nintendo-Famicom-Disk-System.jpg |
 | `mastersystem.png` | Sega-Master-System-Set.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Sega-Master-System-Set.jpg |
 | `sg1000.png` | Sega-SG-1000-Console-Set.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Sega-SG-1000-Console-Set.jpg |

@@ -88,6 +88,7 @@ pub fn thumbnail_system(console: Console) -> Option<&'static str> {
         Console::PcEngine => "NEC - PC Engine - TurboGrafx 16",
         Console::PcEngineCd => "NEC - PC Engine CD - TurboGrafx-CD",
         Console::PlayStation => "Sony - PlayStation",
+        Console::Psp => "Sony - PlayStation Portable",
         Console::Lynx => "Atari - Lynx",
         Console::NeoGeoPocket => "SNK - Neo Geo Pocket Color",
         Console::WonderSwan => "Bandai - WonderSwan",

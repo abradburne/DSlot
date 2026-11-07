@@ -34,7 +34,7 @@ pub struct Stat {
 }
 
 /// The cards, by console: built into DSlot.
-const FILES: [(Console, &str); 19] = [
+const FILES: [(Console, &str); 20] = [
     (Console::Ds, include_str!("../data/systems/ds.toml")),
     (Console::Gba, include_str!("../data/systems/gba.toml")),
     (Console::Gb, include_str!("../data/systems/gb.toml")),
@@ -67,6 +67,7 @@ const FILES: [(Console, &str); 19] = [
         Console::PlayStation,
         include_str!("../data/systems/playstation.toml"),
     ),
+    (Console::Psp, include_str!("../data/systems/psp.toml")),
     (Console::Lynx, include_str!("../data/systems/lynx.toml")),
     (
         Console::NeoGeoPocket,
@@ -119,7 +120,7 @@ macro_rules! photo {
 const EVAN_AMOS: &str = "Photo: Evan Amos, public domain (Wikimedia Commons)";
 const RETRO_EDITOR: &str = "Photo: RetroEditor, CC BY 4.0, cropped (Wikimedia Commons)";
 
-const PHOTOS: [(Console, Photo); 18] = [
+const PHOTOS: [(Console, Photo); 19] = [
     (Console::Ds, photo!("ds", EVAN_AMOS)),
     (Console::Gba, photo!("gba", EVAN_AMOS)),
     (Console::Gb, photo!("gb", EVAN_AMOS)),
@@ -134,6 +135,7 @@ const PHOTOS: [(Console, Photo); 18] = [
     (Console::PcEngine, photo!("pcengine", EVAN_AMOS)),
     (Console::PcEngineCd, photo!("pcenginecd", RETRO_EDITOR)),
     (Console::PlayStation, photo!("playstation", EVAN_AMOS)),
+    (Console::Psp, photo!("psp", EVAN_AMOS)),
     (Console::Lynx, photo!("lynx", EVAN_AMOS)),
     (Console::NeoGeoPocket, photo!("neogeopocket", EVAN_AMOS)),
     (Console::WonderSwan, photo!("wonderswan", EVAN_AMOS)),

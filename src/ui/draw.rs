@@ -2148,6 +2148,7 @@ pub(super) fn console_colour(console: Console) -> Color {
         Console::PcEngine => Color::RGB(96, 98, 104),
         Console::PcEngineCd => Color::RGB(64, 72, 96),
         Console::PlayStation => Color::RGB(110, 112, 122),
+        Console::Psp => Color::RGB(42, 44, 52),
         Console::NeoGeoPocket => Color::RGB(40, 70, 120),
         Console::WonderSwan => Color::RGB(80, 100, 120),
         Console::Ports => Color::RGB(150, 70, 48),
@@ -2226,6 +2227,7 @@ fn bar_for(console: Console) -> usize {
         | Console::GameGear
         | Console::Lynx
         | Console::PlayStation
+        | Console::Psp
         | Console::PcEngineCd => 2,
         Console::Gba
         | Console::Snes

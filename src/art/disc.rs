@@ -8,6 +8,9 @@
 //! print, square), else its box art filling the face, else its name on a colour field. A
 //! PlayStation disc shows its black side's colour where it isn't printed, as one does; the
 //! others are silver. A game of several discs (an .m3u) carries a badge saying how many.
+//!
+//! A PSP game, a UMD (a 60 mm disc in a shell), is drawn as the same disc, silver, its print
+//! its box art: a UMD's own look is not drawn yet.
 
 use crate::gfx::{Fonts, Img, Rgba};
 use crate::rom::{Console, Game};
@@ -24,7 +27,10 @@ const RIM: f32 = 0.985;
 
 /// Whether `console`'s games are discs.
 pub fn is_disc(console: Console) -> bool {
-    matches!(console, Console::PlayStation | Console::PcEngineCd)
+    matches!(
+        console,
+        Console::PlayStation | Console::Psp | Console::PcEngineCd
+    )
 }
 
 /// How many discs `game` is: an .m3u lists them, one a line; anything else is one.

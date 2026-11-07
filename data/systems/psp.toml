@@ -1,0 +1,43 @@
+# PlayStation Portable: the system card's facts, from
+# https://en.wikipedia.org/wiki/PlayStation_Portable (read 7 November 2026). The bio and fun fact
+# are DSlot's own words.
+name = "PlayStation Portable"
+maker = "Sony"
+source = "https://en.wikipedia.org/wiki/PlayStation_Portable"
+bio = "Sony's first handheld launched in Japan on 12 December 2004, with a 4.3-inch widescreen and games on UMD, a small optical disc in a plastic shell. Games came as downloads too. Around 1,370 games came out for it, and it sold about 80 million units."
+fact = "It is the only handheld console whose games came mainly on an optical disc."
+
+[[stats]]
+label = "Released"
+value = "2004"
+bar = 2004
+
+[[stats]]
+label = "Launch price"
+value = "US$249.99"
+bar = 249.99
+
+[[stats]]
+label = "Sold"
+value = "80 million"
+bar = 80
+
+[[stats]]
+label = "Processor"
+value = "Up to 333 MHz MIPS R4000"
+bar = 333
+
+[[stats]]
+label = "Memory"
+value = "32 MB (64 MB on later models)"
+bar = 32768
+
+[[stats]]
+label = "Screen"
+value = "480 × 272, 24-bit colour"
+bar = 130560
+
+[[stats]]
+label = "Games"
+value = "Around 1,370"
+bar = 1370
