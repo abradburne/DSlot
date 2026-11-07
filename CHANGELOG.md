@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- nibkit 0.3.1, with nib-cheevos' `chd` and `cso`: the shelf finds the sets of PSP games and of
+  every CHD disc image (PlayStation, PC Engine CD, PSP), which had no hash before.
+
 - **The PSP**: a page for the PlayStation Portable, `Roms/PSP`, played by nibcase with the
   PPSSPP core (its package writes the emulator description). A game is a UMD's image (`.iso`,
   `.cso`, `.chd`) or an `.pbp`, never zipped. A download in a folder of its own,

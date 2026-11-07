@@ -340,7 +340,7 @@ impl Store {
 
 /// The ROM's hash as the service spells it (32 lowercase hex digits), by rcheevos' rule for its
 /// console: none when the file can't be read, isn't shaped like the console's game, or is of a
-/// kind not hashed yet (a CHD image), which is logged.
+/// kind not hashed (a Game & Watch unit), which is logged.
 fn hash_of(console: Console, path: &Path) -> Option<String> {
     nib_cheevos::hash::file(console.folder(), path)
         .inspect_err(|e| {

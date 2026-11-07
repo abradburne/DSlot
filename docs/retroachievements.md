@@ -82,11 +82,10 @@ starting a game never waits for a request to the service to finish.
   its header, its two pieces of boot code and its icon/title block; for a PlayStation or PC
   Engine CD disc, from its cue sheet or playlist, what rhash reads of it; for a PSP game, its
   UMD's `PARAM.SFO` and `EBOOT.BIN`, or the whole of an `EBOOT.PBP`). A zip is its first
-  entry with one of the console's extensions. CHD images and Game & Watch units have no hash
-  yet (rhash reads no CHD, and has no Game & Watch rule), so the shelf shows nothing for them.
-  The PSP (the service's console 41) is in `nib-cheevos` after nibkit 0.3.0, with CSO images
-  through its `cso` feature and CHDs through `chd`. DSlot still builds with nibkit 0.3.0, so
-  until it moves to that release the shelf shows nothing for a PSP game.
+  entry with one of the console's extensions. A CHD image (a PlayStation, PC Engine CD or PSP
+  disc) is read through nib-cheevos' CHD reader and a PSP game's CSO through its CSO reader
+  (nibkit 0.3.1, features `chd` and `cso`). Game & Watch units have no hash (rhash has no rule
+  for them), so the shelf shows nothing for them.
   The shelf looks up any console's game, whether or not an emulator here earns achievements
   for it: it shows the set the service has. The hash is kept in `cache/achievements/hashes.tsv` against
   the file's path, size and date, so a ROM is read once. The index is anyone's, whoever is
