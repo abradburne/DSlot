@@ -1515,6 +1515,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         };
         let looks = |snes| Looks {
             case: Case::Region,
@@ -1552,6 +1553,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         };
         // Red at the top, blue at the bottom: a crop to the box's shape would lose both.
         let mut src = Img::new(100, 160);
@@ -1586,6 +1588,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         }
     }
 

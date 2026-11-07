@@ -6,19 +6,29 @@ use crate::stats::Stats;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+/// The section of a sectioned page's games that their list puts in no group of its own.
+pub const OTHER: &str = "Other";
+
 /// What a page shows.
 #[derive(Clone, Copy)]
-pub struct Filter {
+pub struct Filter<'a> {
     pub console: Console,
     pub sort: Sort,
     pub faves_only: bool,
+    /// One section of the page's games alone (`Game::group`: an arcade board), or all of them.
+    pub group: Option<&'a str>,
 }
 
 /// The games on the page, in order, as indices into `games`.
 pub fn order(games: &[Game], stats: &Stats, filter: Filter) -> Vec<usize> {
     let shown = |i: &usize| {
         let g = &games[*i];
-        g.console == filter.console && !g.gone && (!filter.faves_only || stats.fave(&g.path))
+        g.console == filter.console
+            && !g.gone
+            && (!filter.faves_only || stats.fave(&g.path))
+            && filter
+                .group
+                .is_none_or(|group| g.group == group || (group == OTHER && g.group.is_empty()))
     };
     let mut order: Vec<usize> = (0..games.len()).filter(shown).collect();
     // By name first: games found since DSlot started are at the end of `games`. The other sorts
@@ -105,6 +115,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         }
     }
 
@@ -117,6 +128,42 @@ mod tests {
             game(Console::Ds, "Bomber"),
             game(Console::Ds, "Castle"),
         ]
+    }
+
+    /// A sectioned page shows one section's games alone: its group's, and for Other also the
+    /// games their list puts in none.
+    #[test]
+    fn one_section_alone() {
+        let set = |name: &str, group: &str| Game {
+            group: group.into(),
+            ..game(Console::Arcade, name)
+        };
+        let games = vec![
+            set("Metal Slug", "Neo Geo"),
+            set("Street Fighter II", "CPS-1"),
+            set("Gridlee", "Other"),
+            set("Unlisted", ""),
+            set("Samurai Shodown", "Neo Geo"),
+        ];
+        let dir = TempDir::new("sections");
+        let stats = Stats::load(dir.path().join("stats.tsv"));
+        let arcade = Filter {
+            console: Console::Arcade,
+            sort: Sort::Name,
+            faves_only: false,
+            group: None,
+        };
+        assert_eq!(order(&games, &stats, arcade).len(), 5);
+        let neo = Filter {
+            group: Some("Neo Geo"),
+            ..arcade
+        };
+        assert_eq!(order(&games, &stats, neo), [0, 4]);
+        let other = Filter {
+            group: Some(OTHER),
+            ..arcade
+        };
+        assert_eq!(order(&games, &stats, other), [2, 3]);
     }
 
     /// PortMaster's tile (an app's folder, not a port's script) heads the Ports page whatever
@@ -142,6 +189,7 @@ mod tests {
                 console: Console::Ports,
                 sort,
                 faves_only: false,
+                group: None,
             };
             assert_eq!(order(&games, &stats, filter)[0], 2, "{sort:?}");
         }
@@ -156,6 +204,7 @@ mod tests {
             console: Console::Ds,
             sort: Sort::Name,
             faves_only: false,
+            group: None,
         };
         assert_eq!(order(&games, &stats, ds), [0, 1, 3, 4]);
         assert_eq!(
@@ -207,6 +256,7 @@ mod tests {
             console: Console::Ds,
             sort: Sort::Name,
             faves_only: false,
+            group: None,
         };
         // "Animal" deleted, "Apple" copied in; the GBA game untouched.
         let found = vec![

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Arcade**: a page for FinalBurn Neo's sets, `Roms/ARCADE` (`.zip`, `.7z`), played by nibcase
+  with `nibcase-fbneo`. Sets are named by the core's list: the title, and under it the maker,
+  year and board. A board's BIOS set beside the games (`neogeo.zip`) isn't shown. Boxes alone.
+- **Sections on the shelf**: the Arcade page has a row of sections under its tab, All and then
+  each board its games are on (Neo Geo, CPS-1, CPS-2, ...; the most games first, Other last),
+  stepped through with L2 / R2 or tapped, as the menu's sections are. The one chosen stays with
+  the page; All until one is. The grid and the list move down under the row.
 - nibkit 0.3.1, with nib-cheevos' `chd` and `cso`: the shelf finds the sets of PSP games and of
   every CHD disc image (PlayStation, PC Engine CD, PSP), which had no hash before.
 

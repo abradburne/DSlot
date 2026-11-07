@@ -41,21 +41,89 @@ const LIST_COVER_ROW: f32 = 92.0;
 /// The space a small box has at the start of its row.
 pub const LIST_COVER: (f32, f32) = (96.0, 80.0);
 
+/// A sectioned page's row of sections, under the tab strip (the arcade's boards): where its
+/// labels start and sit, their size, the gap between them, and how far down it moves the grid
+/// and the list (into the room the grid's last row leaves above the hint).
+pub const SECTIONS_AT: (f32, f32) = (TAB.0 + 4.0, 56.0);
+pub const SECTION_TEXT: f32 = 18.0;
+pub const SECTION_GAP: f32 = 28.0;
+pub const SECTIONS_SHIFT: f32 = 26.0;
+
+/// How far the grid and the list are moved down on the page on show: by [`SECTIONS_SHIFT`]
+/// while it shows sections, else not at all. Set once a frame, before drawing or a touch.
+static SHIFT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_sections_shown(shown: bool) {
+    SHIFT.store(shown, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How far down the grid and the list are moved now.
+pub fn shift() -> f32 {
+    if SHIFT.load(std::sync::atomic::Ordering::Relaxed) {
+        SECTIONS_SHIFT
+    } else {
+        0.0
+    }
+}
+
+/// The top of the grid and of the list, as moved.
+pub fn grid_top() -> f32 {
+    GRID_AT.1 + shift()
+}
+pub fn list_top() -> f32 {
+    LIST_AT.1 + shift()
+}
+
+/// The sections' labels laid out in their row: each one's left edge and width, `width` giving a
+/// label's width at [`SECTION_TEXT`]. A row wider than the screen is moved left as far as
+/// the one at `on` needs to be seen whole.
+pub fn section_spans(labels: &[&str], on: usize, width: impl Fn(&str) -> f32) -> Vec<(f32, f32)> {
+    let mut at = SECTIONS_AT.0;
+    let mut spans: Vec<(f32, f32)> = labels
+        .iter()
+        .map(|l| {
+            let w = width(l);
+            let span = (at, w);
+            at += w + SECTION_GAP;
+            span
+        })
+        .collect();
+    if let Some(&(x, w)) = spans.get(on) {
+        let over = (x + w - (SW - SECTIONS_AT.0)).max(0.0);
+        for s in &mut spans {
+            s.0 -= over;
+        }
+    }
+    spans
+}
+
+/// The section under a touch on the row laid out as `spans`: half the gap either side of a
+/// label is its own.
+pub fn section_hit((x, y): (f32, f32), spans: &[(f32, f32)]) -> Option<usize> {
+    if !(SECTIONS_AT.1 - 6.0..SECTIONS_AT.1 + SECTIONS_SHIFT + 4.0).contains(&y) {
+        return None;
+    }
+    let half = SECTION_GAP / 2.0;
+    spans
+        .iter()
+        .position(|&(at, w)| (at - half..at + w + half).contains(&x))
+}
+
 /// A list's row height and how many whole rows are on screen, with covers or without.
 pub fn list_rows(covers: bool) -> (f32, usize) {
     let h = if covers { LIST_COVER_ROW } else { LIST_ROW };
-    (h, (LIST_ROOM / h) as usize)
+    (h, ((LIST_ROOM - shift()) / h) as usize)
 }
 
 /// The top of a place in the list, `scroll` rows down.
 pub fn list_row(place: usize, scroll: f32, covers: bool) -> f32 {
-    LIST_AT.1 + (place as f32 - scroll) * list_rows(covers).0
+    list_top() + (place as f32 - scroll) * list_rows(covers).0
 }
 
 /// The place in the list under a touch, which may be past the last game.
 pub fn list_hit(at: (f32, f32), scroll: f32, covers: bool) -> Option<usize> {
     let (h, rows) = list_rows(covers);
-    let row = (at.1 - LIST_AT.1) / h;
+    let row = (at.1 - list_top()) / h;
     ((LIST_AT.0..LIST_AT.0 + LIST_W).contains(&at.0) && (0.0..rows as f32).contains(&row))
         .then_some((row + scroll) as usize)
 }
@@ -304,7 +372,7 @@ impl Blades {
 pub fn grid_cell(place: usize, scroll: f32) -> (f32, f32) {
     (
         GRID_AT.0 + (place % COLS) as f32 * GRID_STEP.0,
-        GRID_AT.1 + ((place / COLS) as f32 - scroll) * GRID_STEP.1,
+        grid_top() + ((place / COLS) as f32 - scroll) * GRID_STEP.1,
     )
 }
 
@@ -312,7 +380,7 @@ pub fn grid_cell(place: usize, scroll: f32) -> (f32, f32) {
 pub fn grid_hit(at: (f32, f32), scroll: f32) -> Option<usize> {
     let (col, row) = (
         (at.0 - GRID_AT.0) / GRID_STEP.0,
-        (at.1 - GRID_AT.1) / GRID_STEP.1 + scroll,
+        (at.1 - grid_top()) / GRID_STEP.1 + scroll,
     );
     (col >= 0.0 && (col as usize) < COLS && row >= 0.0).then(|| row as usize * COLS + col as usize)
 }

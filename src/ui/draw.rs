@@ -6,7 +6,7 @@
 use super::back::Back;
 use super::bouncer::{self, Bouncer};
 use super::cheevos::Cheevos;
-use super::layout::*;
+use super::layout::{self, *};
 use super::menu::{Shown, Value};
 use super::power;
 use crate::achievements::Ra;
@@ -1028,11 +1028,13 @@ impl Ui<'_> {
             return self.footer(v, HINT, fade, console);
         }
 
+        // Moved down under a page's sections, as far as the last row's covers reach.
+        let shift = layout::shift();
         self.canvases[v.c].set_clip_rect(v.rect(
             0.0,
-            GRID_AT.1 - 8.0,
+            GRID_AT.1 - 8.0 + shift,
             SW,
-            GRID_ROWS as f32 * GRID_STEP.1 - 8.0,
+            GRID_ROWS as f32 * GRID_STEP.1 - 8.0 - (shift - 18.0).max(0.0),
         ));
         let first = scroll.max(0.0) as usize * COLS;
         for (place, &g) in list
@@ -1099,7 +1101,8 @@ impl Ui<'_> {
 
         let (row_h, on_screen) = list_rows(covers);
         let (x0, w) = (LIST_AT.0, LIST_W);
-        self.canvases[v.c].set_clip_rect(v.rect(0.0, LIST_AT.1, SW, on_screen as f32 * row_h));
+        let list_top = layout::list_top();
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, list_top, SW, on_screen as f32 * row_h));
         // A small box, as the grid's cover is shaped, made to fit the room beside the name.
         let (bw, bh) = {
             let cell = (GRID_COVER.0 as usize, GRID_COVER.1 as usize);
@@ -1172,7 +1175,7 @@ impl Ui<'_> {
         // Where the list is, down its right edge, when it is longer than the screen.
         let n = list.len();
         if n > on_screen {
-            let (top, track) = (LIST_AT.1 + 4.0, on_screen as f32 * row_h - 8.0);
+            let (top, track) = (list_top + 4.0, on_screen as f32 * row_h - 8.0);
             let bar = (track * on_screen as f32 / n as f32).max(24.0);
             let at = (scroll / (n - on_screen) as f32).clamp(0.0, 1.0) * (track - bar);
             self.white[v.c].set_alpha_mod(255);
@@ -1242,6 +1245,38 @@ impl Ui<'_> {
         self.white[v.c].set_alpha_mod(255);
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         Ok(())
+    }
+
+    /// A sectioned page's sections under the tab strip (`labels`, All first), the one at `on`
+    /// white and underlined, the others dim, as the menu's sections are; "L2 / R2" faint after
+    /// them where there is room.
+    pub fn sections(&mut self, labels: &[&str], on: usize) -> Result<(), String> {
+        let v = self.bot;
+        let spans = layout::section_spans(labels, on, |l| self.section_width(l));
+        let (_, y) = layout::SECTIONS_AT;
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, y - 4.0, SW, layout::SECTIONS_SHIFT + 6.0));
+        for (i, (label, &(x, w))) in labels.iter().zip(&spans).enumerate() {
+            let ink = if i == on { WHITE } else { DIM };
+            self.text(v, label, (layout::SECTION_TEXT, true), (x, y), 0.0, ink)?;
+            if i == on {
+                self.white[v.c].set_color_mod(WHITE.r, WHITE.g, WHITE.b);
+                self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y + 23.0, w, 2.0))?;
+            }
+        }
+        if let Some(&(x, w)) = spans.last() {
+            let hint = "L2 / R2";
+            let end = x + w + layout::SECTION_GAP;
+            if end + self.fonts.width(hint, 16.0, false) < SW - layout::SECTIONS_AT.0 {
+                self.text(v, hint, (16.0, false), (SW - 30.0, y + 2.0), 1.0, FAINT)?;
+            }
+        }
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
+        Ok(())
+    }
+
+    /// A section's label's width, as [`Ui::sections`] draws it.
+    pub fn section_width(&self, label: &str) -> f32 {
+        self.fonts.width(label, layout::SECTION_TEXT, true)
     }
 
     /// How wide the heading is, as drawn: the room the tab strip leaves it.

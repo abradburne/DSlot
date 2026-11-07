@@ -246,6 +246,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         }
     }
 

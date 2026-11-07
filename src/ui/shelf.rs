@@ -7,7 +7,7 @@ use super::bouncer::{self, Bouncer};
 use super::draw::{Beside, Blade, Page, Ui, Yours, DIM, THUMBS, WHITE};
 use super::game::{self, GamePage};
 use super::input::{self, Input, Key, Reader};
-use super::layout::*;
+use super::layout::{self, *};
 use super::menu::{self, Menu};
 use super::pads::Pads;
 use super::power::{Choice, PowerMenu};
@@ -23,7 +23,7 @@ use crate::settings::{SaverLook, Settings, Show, Sort, View as Layout};
 use crate::stats::Stats;
 use nibkit::touch::{Panel, Pointer};
 use sdl2::event::Event;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -502,14 +502,52 @@ fn woken_by(event: &Event) -> bool {
     )
 }
 
-fn filter(settings: &Settings) -> Filter {
+fn filter<'a>(settings: &'a Settings, games: &[Game]) -> Filter<'a> {
     let console = settings.page;
     let faves_only = settings.show(console) == Show::Favourites;
+    // The section chosen, while the page has it (its games may have gone since).
+    let group = settings
+        .section(console)
+        .filter(|s| sections(games, console).iter().any(|x| x == s));
     Filter {
         console,
         sort: settings.sort(console),
         faves_only,
+        group,
     }
+}
+
+/// The section of a page's games that are in no other (`library::OTHER`).
+use crate::library::OTHER;
+
+/// Whether a page is in sections under its tab: the arcade's, by board.
+fn sectioned(console: Console) -> bool {
+    console == Console::Arcade
+}
+
+/// A sectioned page's sections, after All: its games' groups (`Game::group`, from their
+/// emulator's list), the one with the most games first, "Other" last. None for a page that
+/// isn't sectioned, or whose games are all in one.
+pub fn sections(games: &[Game], console: Console) -> Vec<String> {
+    if !sectioned(console) {
+        return Vec::new();
+    }
+    let mut count: HashMap<&str, usize> = HashMap::new();
+    for g in games.iter().filter(|g| g.console == console && !g.gone) {
+        // A game its list doesn't name is in Other.
+        let group = if g.group.is_empty() {
+            OTHER
+        } else {
+            g.group.as_str()
+        };
+        *count.entry(group).or_default() += 1;
+    }
+    if count.len() < 2 {
+        return Vec::new();
+    }
+    let mut groups: Vec<(&str, usize)> = count.into_iter().collect();
+    groups.sort_by_key(|&(g, n)| (g == OTHER, std::cmp::Reverse(n), g.to_lowercase()));
+    groups.into_iter().map(|(g, _)| g.to_owned()).collect()
 }
 
 /// How soon a held D-pad repeats, and then how often (the Button repeat setting).
@@ -712,7 +750,7 @@ impl State {
             away_from = Some(settings.page);
             settings.page = nearest(settings.page, &pages);
         }
-        let order = library::order(games, stats, filter(settings));
+        let order = library::order(games, stats, filter(settings, games));
         let sel = order
             .iter()
             .position(|&g| back_from == Some(g))
@@ -843,7 +881,7 @@ impl State {
         settings.page = to;
         settings.save();
         crate::mark(&format!("page {}", to.label()));
-        self.order = library::order(games, stats, filter(settings));
+        self.order = library::order(games, stats, filter(settings, games));
         self.sel = self.kept[to as usize]
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(0);
@@ -860,7 +898,7 @@ impl State {
     /// on the same game where it is still listed.
     fn relist(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
         let was = self.order.get(self.sel).copied();
-        self.order = library::order(games, stats, filter(settings));
+        self.order = library::order(games, stats, filter(settings, games));
         let sel = was.and_then(|g| self.order.iter().position(|&o| o == g));
         self.sel = sel.unwrap_or(self.sel.min(self.last()));
         self.carousel = self.sel as f32;
@@ -873,7 +911,7 @@ impl State {
     /// (or, if it went, the one now in its place), and nothing on screen moves on its account.
     fn rescanned(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
         let was = self.order.get(self.sel).copied();
-        self.order = library::order(games, stats, filter(settings));
+        self.order = library::order(games, stats, filter(settings, games));
         let sel = was
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(self.sel.min(self.last()));
@@ -1380,6 +1418,17 @@ fn show(
             .filter(|g| g.console == console && !g.gone)
             .count();
         let mode = mode(console, settings);
+        // A sectioned page's sections (All first, then each board), the one on show; the grid
+        // and the list move down under them.
+        let page_sections = sections(games, console);
+        let section_labels: Vec<&str> = std::iter::once("All")
+            .chain(page_sections.iter().map(String::as_str))
+            .collect();
+        let section_on = settings
+            .section(console)
+            .and_then(|s| page_sections.iter().position(|x| x == s))
+            .map_or(0, |i| i + 1);
+        layout::set_sections_shown(!page_sections.is_empty());
         let (first, next) = repeat_times(settings);
         // Each console's page may want its boxes in another case, or its carts another shape.
         if ui.looks != settings.look(console) {
@@ -1422,6 +1471,7 @@ fn show(
         let (mut power_moved, mut power_pick, mut power_cancel) = (0, false, false);
         let mut menu_input = menu::Input::default();
         let (mut fave, mut flip) = (false, None);
+        let mut section_step = 0i32;
         // The system picker: whether it goes to its blade, or closes.
         let (mut pick_go, mut pick_close) = (false, false);
         // With the panel read directly, SDL's copies of the same touches are ignored.
@@ -1535,6 +1585,9 @@ fn show(
                 }
                 Some(Input::Press(Key::L)) => flip = Some(state.beside(console, -1)),
                 Some(Input::Press(Key::R)) => flip = Some(state.beside(console, 1)),
+                // L2 / R2: a sectioned page's sections, round from the last to All.
+                Some(Input::Press(Key::L2)) if !page_sections.is_empty() => section_step -= 1,
+                Some(Input::Press(Key::R2)) if !page_sections.is_empty() => section_step += 1,
                 Some(Input::Press(_)) if n == 0 => {}
                 Some(Input::Press(key)) => fave |= state.press(games, key, mode),
             }
@@ -1755,6 +1808,30 @@ fn show(
                 _ => true,
             });
         }
+        // A section tapped, or stepped to with L2 / R2: the page lists that one's games alone
+        // (All: every game), kept for the page.
+        if !page_sections.is_empty() && state.menu.is_none() && state.picker.is_none() && !busy {
+            let spans = layout::section_spans(&section_labels, section_on, |l| ui.section_width(l));
+            let mut to = None;
+            pointers.retain(|ptr| match *ptr {
+                Pointer::Down(x, y) => match layout::section_hit((x, y), &spans) {
+                    Some(i) => {
+                        to = Some(i);
+                        false
+                    }
+                    None => true,
+                },
+                _ => true,
+            });
+            if section_step != 0 {
+                let n = section_labels.len() as i32;
+                to = Some((section_on as i32 + section_step).rem_euclid(n) as usize);
+            }
+            if let Some(i) = to.filter(|&i| i != section_on) {
+                settings.set_section(console, (i > 0).then(|| page_sections[i - 1].as_str()));
+                relist = true;
+            }
+        }
         // Turned at the top of the next frame, before anything is worked out for this page. A
         // page chosen is the one to stay on.
         if let Some(p) = flip.filter(|&p| p != settings.page && !busy) {
@@ -1871,6 +1948,9 @@ fn show(
         if on_page == 0 {
             ui.empty(&opts.searched[console as usize], console)?;
             ui.tab(console, &state.pages, &strip)?;
+            if !page_sections.is_empty() {
+                ui.sections(&section_labels, section_on)?;
+            }
             let hold = (first..list.len()).collect();
             settled = ui.load(games, &list, blade_wants(), &hold, 0)?;
             was_settled = settled;
@@ -1976,6 +2056,9 @@ fn show(
             }
             if (state.menu.is_none() && state.game_page.is_none()) || sheet.is_some() {
                 ui.tab(console, &state.pages, &strip)?;
+                if !page_sections.is_empty() {
+                    ui.sections(&section_labels, section_on)?;
+                }
             }
         }
         if let Some(p) = state.picker {
@@ -2083,6 +2166,46 @@ fn show(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The arcade's page is in sections when its games are on more than one board: the board
+    /// with the most first, Other (a game no list names, too) last; no row for one board.
+    #[test]
+    fn arcade_sections_by_board() {
+        let set = |stem: &str, group: &str| Game {
+            console: Console::Arcade,
+            path: PathBuf::from(format!("/r/ARCADE/{stem}.zip")),
+            stem: stem.into(),
+            code: String::new(),
+            title: vec![stem.into()],
+            icon: None,
+            cover: None,
+            gone: false,
+            group: group.into(),
+        };
+        let mut games = vec![
+            set("sf2", "CPS-1"),
+            set("mslug", "Neo Geo"),
+            set("gridlee", ""),
+            set("kof98", "Neo Geo"),
+        ];
+        assert_eq!(
+            sections(&games, Console::Arcade),
+            ["Neo Geo", "CPS-1", "Other"]
+        );
+        assert!(sections(&games, Console::Ds).is_empty());
+        games.retain(|g| g.group == "Neo Geo");
+        assert!(sections(&games, Console::Arcade).is_empty());
+        // The row's labels side by side; one off the right edge is brought into view.
+        let spans = layout::section_spans(&["All", "Neo Geo"], 0, |l| l.len() as f32 * 10.0);
+        assert_eq!(spans[0].0, layout::SECTIONS_AT.0);
+        assert_eq!(spans[1].0, spans[0].0 + 30.0 + layout::SECTION_GAP);
+        assert_eq!(
+            layout::section_hit((spans[1].0 + 5.0, layout::SECTIONS_AT.1 + 8.0), &spans),
+            Some(1)
+        );
+        let wide = layout::section_spans(&["All", "Neo Geo"], 1, |l| l.len() as f32 * 300.0);
+        assert!(wide[1].0 + wide[1].1 <= SW - layout::SECTIONS_AT.0);
+    }
 
     #[test]
     fn a_flick_is_as_fast_as_the_finger_was_as_it_lifted() {

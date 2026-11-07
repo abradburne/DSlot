@@ -518,6 +518,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         };
         let own = game.art("Imgs");
         assert_eq!(crate::art::box_art(&game, &cache), own);

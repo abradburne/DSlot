@@ -3080,6 +3080,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         };
         World {
             ra: Ra::new(dir.path().join("retroachievements.token"), dir.path()),

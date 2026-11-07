@@ -373,6 +373,9 @@ pub struct Game {
     /// goes keeps its place in the list, so that every index into it stays good while DSlot
     /// runs; the shelf doesn't show it.
     pub gone: bool,
+    /// The group its emulator's list puts it in (`[games]`' last column): an arcade set's
+    /// board, "Neo Geo", "CPS-2". Empty where there is none.
+    pub group: String,
 }
 
 impl Game {
@@ -505,6 +508,7 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
                     icon: None,
                     cover: None,
                     gone: false,
+                    group: String::new(),
                 });
                 continue;
             }
@@ -526,6 +530,7 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
                     icon: None,
                     cover: port.picture,
                     gone: false,
+                    group: String::new(),
                 });
                 continue;
             }
@@ -551,6 +556,7 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
                 icon,
                 cover: None,
                 gone: false,
+                group: String::new(),
             });
         }
     }
@@ -647,6 +653,7 @@ pub fn name_from_lists(games: &mut [Game], emulators: &crate::emulator::Emulator
             g.title = std::iter::once(u.title.clone())
                 .chain((!about.is_empty()).then(|| about.join("  \u{b7}  ")))
                 .collect();
+            g.group = u.series.clone();
         }
     }
 }
@@ -669,6 +676,7 @@ pub fn apps(found: &[nibkit::dslot::Found]) -> Vec<Game> {
             icon: None,
             cover: f.icon.clone(),
             gone: false,
+            group: String::new(),
         }
     };
     found.iter().map(game).collect()
@@ -734,6 +742,7 @@ pub fn read_one(path: &Path) -> Option<Game> {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         });
     }
     let folder = up.file_name()?.to_str()?;
@@ -782,6 +791,7 @@ pub fn read_one(path: &Path) -> Option<Game> {
         icon,
         cover: None,
         gone: false,
+        group: String::new(),
     })
 }
 
@@ -1607,7 +1617,7 @@ mod tests {
         let list = dir.path().join("arcade.tsv");
         fs::write(
             &list,
-            "# a comment\nmslug\tMetal Slug - Super Vehicle-001\t\t1996\tNazca\nsf2\tStreet Fighter II\t\t1991\tCapcom\n",
+            "# a comment\nmslug\tMetal Slug - Super Vehicle-001\tNazca\t1996\tNeo Geo\nsf2\tStreet Fighter II\tCapcom\t1991\tCPS-1\n",
         )
         .unwrap();
         let text = format!(
@@ -1625,8 +1635,13 @@ mod tests {
         let mslug = games.iter().find(|g| g.stem == "mslug").unwrap();
         assert_eq!(
             mslug.title,
-            ["Metal Slug - Super Vehicle-001", "1996  \u{b7}  Nazca"]
+            [
+                "Metal Slug - Super Vehicle-001",
+                "Nazca  \u{b7}  1996  \u{b7}  Neo Geo"
+            ]
         );
+        // Its board's family, the section of the page it is in.
+        assert_eq!(mslug.group, "Neo Geo");
         // A set it doesn't list keeps its file's name.
         assert!(games.iter().any(|g| g.name() == "unknown"));
         // A set is the arcade's by its folder; a zip elsewhere is not.

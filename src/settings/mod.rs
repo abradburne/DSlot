@@ -169,6 +169,29 @@ impl Settings {
         self.choice(&console_chain(console), def::VIEW, View::parse)
     }
 
+    /// The section of `console`'s page on show (an arcade board), None for all its games: kept
+    /// with the page, so it is the one left after a game, and all of them until one is chosen.
+    pub fn section(&self, console: Console) -> Option<&str> {
+        self.store
+            .state
+            .get(&format!("section.{}", console.key()))
+            .and_then(Value::as_str)
+    }
+
+    /// Shows `section` of `console`'s page (None: all its games), and saves it.
+    pub fn set_section(&mut self, console: Console, section: Option<&str>) {
+        let key = format!("section.{}", console.key());
+        match section {
+            Some(s) => {
+                self.store.state.insert(key, Value::from(s));
+            }
+            None => {
+                self.store.state.remove(&key);
+            }
+        }
+        self.save();
+    }
+
     pub fn sort(&self, console: Console) -> Sort {
         self.choice(&console_chain(console), def::SORT, Sort::parse)
     }
@@ -257,6 +280,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         }
     }
 

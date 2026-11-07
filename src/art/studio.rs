@@ -234,6 +234,7 @@ mod tests {
             icon: None,
             cover: None,
             gone: false,
+            group: String::new(),
         };
         assert_eq!(card_of(&game), Some(one.clone()));
         // A game in slot's own layout, Games/<system>/, is on its card just the same.
