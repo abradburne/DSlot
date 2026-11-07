@@ -39,6 +39,8 @@ pub const LYNX_CART: (usize, usize) = (560, 583);
 const SEGA_BOX: (usize, usize) = (400, 560);
 const LYNX_BOX: (usize, usize) = (400, 520);
 const GW_BOX: (usize, usize) = (480, 300);
+/// A PSP game's case (a UMD keep case), 104 x 177 mm: tall and narrow, as high as an NES box.
+const PSP_BOX: (usize, usize) = (330, 560);
 /// A DS case seen from the front, 137 x 125 mm, and the plastic showing around the cover.
 pub const CASE_SIZE: (usize, usize) = (482, 440);
 const CASE_EDGE: usize = 7;
@@ -457,7 +459,8 @@ pub fn box_size(console: Console) -> (usize, usize) {
         // A Game & Watch box shows the unit, landscape, about as wide as a Wide Screen one.
         Console::GameWatch | Console::Ports => GW_BOX,
         // GB and GBC boxes are card and about square too, as the PC Engine's, the Neo Geo
-        // Pocket's and the WonderSwan's are near enough; a CD's case is square.
+        // Pocket's and the WonderSwan's are near enough; a CD's case is square. A PSP's case is
+        // tall.
         Console::Gba
         | Console::Gb
         | Console::Gbc
@@ -465,9 +468,9 @@ pub fn box_size(console: Console) -> (usize, usize) {
         | Console::PcEngine
         | Console::PcEngineCd
         | Console::PlayStation
-        | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan => GBA_BOX,
+        Console::Psp => PSP_BOX,
     }
 }
 

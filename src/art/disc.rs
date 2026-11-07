@@ -13,8 +13,8 @@
 //! proportions (measured from a photograph of one). The shell's top is a half circle round the
 //! disc and its bottom an arc of 68 mm radius, the sides straight between them and 5 mm corners
 //! rounded into the arc; it is milky clear plastic, the disc's print seen through it (the
-//! game's label or box art), the hub a white cap with "UMD" on it, the PSP's mark in the bottom
-//! left corner, the shell's notch in the bottom right and its yellow arrow at the top left.
+//! game's label or box art), the hub a white cap with "UMD" on it, the shell's notch in the
+//! bottom right and its yellow arrow at the top left.
 
 use crate::gfx::{Fonts, Img, Rgba};
 use crate::rom::{Console, Game};
@@ -261,14 +261,6 @@ fn umd(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>) -> 
         (cx - t.w as f32 / 2.0) as i32,
         (cy - t.h as f32 / 2.0) as i32,
         INK,
-    );
-    // The PSP's mark in the bottom left corner, beside the disc.
-    let t = fonts.render("PSP", 5.0 * mm, true);
-    img.stamp(
-        &t,
-        (cx - half + 2.5 * mm) as i32,
-        (bottom - bow - 2.6 * mm - t.h as f32) as i32,
-        [110, 112, 120, 255],
     );
     // The shell's notch in the bottom right corner.
     img.rrect(

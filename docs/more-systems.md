@@ -29,8 +29,9 @@ with no `EBOOT.PBP` in it is passed over. A folder copied in while DSlot runs sh
 The PlayStation's and PC Engine CD's games are drawn as discs on the shelf, their print the box
 art (`Imgs/`) or a label (`Labels/`). The PSP's are drawn as UMDs, to a UMD's proportions: the
 60 mm disc in its 64 x 65 mm shell, half round at the top and a wide arc at the bottom, the same print
-seen through the milky shell, a white "UMD" cap on the hub, the PSP's mark at the bottom left,
-the shell's notch at the bottom right and its yellow arrow at the top left.
+seen through the milky shell, a white "UMD" cap on the hub, the shell's notch at the bottom
+right and its yellow arrow at the top left. Their boxes on the top screen are a UMD keep case's
+shape, 104 x 177 mm, tall and narrow.
 
 DSlot draws no carts for the other systems yet: a disk is no cart, and the Master
 System's, PC Engine's, Neo Geo Pocket's and WonderSwan's carts have no shells drawn. Their pages

@@ -11,7 +11,8 @@
   `Roms/PSP/<Name>/EBOOT.PBP`, is one game named after the folder; its box art and saves go by
   that name, beside the other PSP games'. The games are drawn as UMDs: the 60 mm disc in its
   64 x 65 mm shell, half round at the top and a wide arc at the bottom, the print (label or box art) seen through the milky
-  shell, a white "UMD" cap on the hub, the PSP's mark, the notch and the yellow arrow. The PSP comes right after the PlayStation in the tabs and the system picker. Its
+  shell, a white "UMD" cap on the hub, the notch and the yellow arrow. Its box on the top
+  screen is a UMD keep case's shape, 104 x 177 mm, tall and narrow. The PSP comes right after the PlayStation in the tabs and the system picker. Its
   card has the PSP-1000's photo (Evan Amos, public domain). Its RetroAchievements sets show on
   the shelf (nibkit 0.3.1 hashes PSP games).
 
