@@ -94,7 +94,8 @@ fn header(path: &Path) -> Option<[u8; HEADER_LEN]> {
     let mut zip = zip::ZipArchive::new(file).ok()?;
     for index in 0..zip.len() {
         let mut rom = zip.by_index(index).ok()?;
-        let ext = Path::new(rom.name()).extension().and_then(|e| e.to_str());
+        let name = rom.name().ok()?.into_owned();
+        let ext = Path::new(&name).extension().and_then(|e| e.to_str());
         if rom.is_dir()
             || !ext.is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "sfc" | "smc"))
         {

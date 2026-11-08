@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **zip 9.4** (from 2.x), here and through nibkit 0.4.1's nib-cheevos, for the zip crate's
+  advisories (zip cloaking, the AES HMAC check at an early end of file, unbounded symlink
+  targets). Zipped games are only read into memory, never extracted to disk.
+
 - **Mega-CD, 32X and Pico**: three pages for PicoDrive's other systems, played by nibcase with
   `nibcase-picodrive`. Mega-CD discs (`.chd`, `.cue`, `.iso`, `.m3u`) in `Roms/SEGACD`, drawn as
   discs; their folder's README names the BIOS one a region (`bios_CD_U.bin`, `_E` or `_J`). 32X
