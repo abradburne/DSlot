@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Both screens lit when the shelf comes back**: a player turns off a screen it doesn't use
+  and lights it again before it exits; one that is killed or crashes left the bottom screen
+  dark. DSlot now powers both backlights on when a game or app returns, and when it starts (a
+  player killed along with the DSlot that started it).
 - **zip 9.4** (from 2.x), here and through nibkit 0.4.1's nib-cheevos, for the zip crate's
   advisories (zip cloaking, the AES HMAC check at an early end of file, unbounded symlink
   targets). Zipped games are only read into memory, never extracted to disk.

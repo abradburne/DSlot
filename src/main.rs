@@ -56,6 +56,16 @@ const USAGE: &str = "usage: dslot [--roms DIR]... [--swap] [--shot FILE.png] [--
   DSLOT_SWAP=1     as --swap
   DSLOT_FPS=1      log the frame rate";
 
+/// Powers both screens' backlights on.
+fn light_both_screens() {
+    for screen in [
+        nibkit::screens::Screen::Top,
+        nibkit::screens::Screen::Bottom,
+    ] {
+        nibkit::backlight::set_off(screen, false);
+    }
+}
+
 /// Logs a stage of start-up against the kernel's clock, to show where the time goes.
 /// The clock is CLOCK_BOOTTIME, to the millisecond (/proc/uptime only gives hundredths).
 pub fn mark(stage: &str) {
@@ -159,6 +169,9 @@ fn run() -> Result<(), String> {
 
     mark("started");
     platform::check_user()?;
+    // A player killed along with the DSlot that started it (a restart of the service) left a
+    // screen it turned off dark: the shelf comes back on both.
+    light_both_screens();
     // A long press of power (nibOS) asks for the power menu, from now on.
     let power = nibkit::power::watch();
     platform::refresh_power_on_hook();
@@ -382,12 +395,7 @@ fn run() -> Result<(), String> {
                 mark("game exited");
                 // A player turns a screen it doesn't use off and on again before it exits; one
                 // that didn't (killed, crashed, or its own slip) doesn't leave the shelf dark.
-                for screen in [
-                    nibkit::screens::Screen::Top,
-                    nibkit::screens::Screen::Bottom,
-                ] {
-                    nibkit::backlight::set_off(screen, false);
-                }
+                light_both_screens();
                 // Its achievements are asked about again: the game may have earned some.
                 if !game.is_app() {
                     ra.played(&game.path);
