@@ -380,6 +380,14 @@ fn run() -> Result<(), String> {
                     }
                 };
                 mark("game exited");
+                // A player turns a screen it doesn't use off and on again before it exits; one
+                // that didn't (killed, crashed, or its own slip) doesn't leave the shelf dark.
+                for screen in [
+                    nibkit::screens::Screen::Top,
+                    nibkit::screens::Screen::Bottom,
+                ] {
+                    nibkit::backlight::set_off(screen, false);
+                }
                 // Its achievements are asked about again: the game may have earned some.
                 if !game.is_app() {
                     ra.played(&game.path);

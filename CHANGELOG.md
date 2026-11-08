@@ -16,6 +16,11 @@
   each board its games are on (Neo Geo, CPS-1, CPS-2, ...; the most games first, Other last),
   stepped through with L2 / R2 or tapped, as the menu's sections are. The one chosen stays with
   the page; All until one is. The grid and the list move down under the row.
+- **The volume and brightness indicator** (nibkit 0.4.0's `menu::level`): on the shelf, when
+  the volume keys or Menu + volume change a level, nibkit's indicator shows at the bottom right
+  of the top screen (a speaker or a sun, a bar, the percent) and fades 1.5 s after the last
+  press.
+
 - nibkit 0.3.1, with nib-cheevos' `chd` and `cso`: the shelf finds the sets of PSP games and of
   every CHD disc image (PlayStation, PC Engine CD, PSP), which had no hash before.
 

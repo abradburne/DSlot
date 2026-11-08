@@ -165,6 +165,10 @@ pub struct Ui<'a> {
     radio_boxes: Vec<(bool, (f32, f32, f32, f32))>,
     /// The menu rows' small pictures, by picture and height in pixels.
     glyphs: HashMap<(nibkit::menu::Glyph, usize), Texture>,
+    /// The volume and brightness indicator (nibkit's `menu::level`, every app's): its faces,
+    /// loaded the first time it shows, and its picture for the level on show.
+    level_fonts: Option<nibkit::menu::raster::Fonts>,
+    level: Option<(nibkit::levels::Level, Texture)>,
 }
 
 /// Resume points' pictures (resume.rs), read by a worker of their own and kept by game.
@@ -282,7 +286,49 @@ impl<'a> Ui<'a> {
             back: Back::new(cache.clone()),
             radio_boxes: Vec::new(),
             glyphs: HashMap::new(),
+            level_fonts: None,
+            level: None,
         })
+    }
+
+    /// The volume and brightness indicator over the top screen's bottom right corner, where
+    /// every app puts it, at `opacity` (it fades): nibkit's picture, made into a texture when
+    /// the level changes.
+    pub fn draw_level(
+        &mut self,
+        indicator: &mut nibkit::menu::level::Indicator,
+        opacity: f32,
+    ) -> Result<(), String> {
+        let v = self.top;
+        let Some(level) = indicator.level() else {
+            return Ok(());
+        };
+        let fonts = self
+            .level_fonts
+            .get_or_insert_with(nibkit::menu::raster::Fonts::new);
+        let Some(panel) = indicator.draw(fonts, v.s) else {
+            return Ok(());
+        };
+        let (pw, ph) = (panel.width(), panel.height());
+        if self.level.as_ref().is_none_or(|(l, _)| *l != level) {
+            let img = Img {
+                w: pw,
+                h: ph,
+                px: panel.rgba().to_vec(),
+            };
+            let made = texture(&self.creators[v.c], &img)?;
+            if let Some((_, old)) = self.level.replace((level, made)) {
+                destroy(old);
+            }
+        }
+        let Some((_, tex)) = self.level.as_mut() else {
+            return Ok(());
+        };
+        tex.set_alpha_mod((opacity.clamp(0.0, 1.0) * 255.0).round() as u8);
+        let (w, h) = (pw as f32 / v.s, ph as f32 / v.s);
+        let m = nibkit::menu::toast::MARGIN;
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
+        self.canvases[v.c].copy(tex, None, v.rect(SW - m - w, SH - m - h, w, h))
     }
 
     /// Clears every canvas to black.

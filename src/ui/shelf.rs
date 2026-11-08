@@ -1310,6 +1310,12 @@ fn show(
     // only drawn when that changes (the clock's minute, the battery, the radios).
     let mut was_settled = false;
     let mut drawn_status = None;
+    // The volume and brightness indicator: what the volume keys set (nibOS announces it), over
+    // the top screen for a moment; and whether the last frame drawn had it, so the frame after
+    // it has faded is drawn without it.
+    let mut levels = nibkit::levels::watch();
+    let mut indicator = nibkit::menu::level::Indicator::new();
+    let mut level_drawn = false;
     loop {
         // A game chosen (or one put away carrying on): this frame is drawn, then the shelf
         // goes.
@@ -1351,6 +1357,10 @@ fn show(
             if power.take() {
                 wake = true;
                 state.power = Some(PowerMenu::open(None));
+            }
+            // A press under the screensaver isn't shown when it goes.
+            if let Some(w) = levels.as_mut() {
+                w.changed();
             }
             if wake {
                 saver = None;
@@ -1902,6 +1912,11 @@ fn show(
                 idle = Instant::now();
             }
         }
+        // A level the keys just set: shown from now, then faded.
+        if let Some(level) = levels.as_mut().and_then(|w| w.changed()) {
+            indicator.show(level, Instant::now());
+        }
+        let level_opacity = indicator.tick(Instant::now());
         // Resting: the screens stay as they are, and the loop only looks for input, a few
         // times a second, until something changes. A held direction, a finger down, a cart
         // moving, games found, artwork coming in or a report on its way keep it drawing.
@@ -1916,6 +1931,8 @@ fn show(
             && state.fling.is_none()
             && state.repeat.held().is_none()
             && found.is_empty()
+            && level_opacity <= 0.0
+            && !level_drawn
             && !ui.waiting();
         let status = ui.status();
         if resting && status.is_some() && status == drawn_status {
@@ -2095,6 +2112,14 @@ fn show(
         if let Some(open) = &state.power {
             let labels: Vec<&str> = open.choices.iter().map(|c| c.label()).collect();
             ui.draw_power(&labels, open.row)?;
+        }
+        // The indicator over everything, but not on the frame kept while a game starts.
+        level_drawn = level_opacity > 0.0 && leaving.is_none();
+        if level_drawn {
+            soft(
+                "the level indicator",
+                ui.draw_level(&mut indicator, level_opacity),
+            );
         }
         if frame == 0 {
             crate::mark("first frame drawn");
