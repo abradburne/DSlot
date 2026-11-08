@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 - **Both screens lit when the shelf comes back**: a player turns off a screen it doesn't use
   and lights it again before it exits; one that is killed or crashes left the bottom screen
