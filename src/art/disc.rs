@@ -33,7 +33,7 @@ const RIM: f32 = 0.985;
 pub fn is_disc(console: Console) -> bool {
     matches!(
         console,
-        Console::PlayStation | Console::Psp | Console::PcEngineCd
+        Console::PlayStation | Console::Psp | Console::PcEngineCd | Console::MegaCd
     )
 }
 

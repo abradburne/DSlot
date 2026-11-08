@@ -34,7 +34,7 @@ pub struct Stat {
 }
 
 /// The cards, by console: built into DSlot.
-const FILES: [(Console, &str); 21] = [
+const FILES: [(Console, &str); 24] = [
     (Console::Ds, include_str!("../data/systems/ds.toml")),
     (Console::Gba, include_str!("../data/systems/gba.toml")),
     (Console::Gb, include_str!("../data/systems/gb.toml")),
@@ -82,6 +82,12 @@ const FILES: [(Console, &str); 21] = [
         include_str!("../data/systems/gamewatch.toml"),
     ),
     (Console::Arcade, include_str!("../data/systems/arcade.toml")),
+    (Console::MegaCd, include_str!("../data/systems/megacd.toml")),
+    (
+        Console::Sega32x,
+        include_str!("../data/systems/sega32x.toml"),
+    ),
+    (Console::Pico, include_str!("../data/systems/pico.toml")),
     (Console::Ports, include_str!("../data/systems/ports.toml")),
 ];
 
@@ -121,7 +127,9 @@ macro_rules! photo {
 const EVAN_AMOS: &str = "Photo: Evan Amos, public domain (Wikimedia Commons)";
 const RETRO_EDITOR: &str = "Photo: RetroEditor, CC BY 4.0, cropped (Wikimedia Commons)";
 
-const PHOTOS: [(Console, Photo); 19] = [
+const MUBAND: &str = "Photo: Muband, CC BY-SA 3.0 (Wikimedia Commons)";
+
+const PHOTOS: [(Console, Photo); 22] = [
     (Console::Ds, photo!("ds", EVAN_AMOS)),
     (Console::Gba, photo!("gba", EVAN_AMOS)),
     (Console::Gb, photo!("gb", EVAN_AMOS)),
@@ -130,6 +138,9 @@ const PHOTOS: [(Console, Photo); 19] = [
     (Console::Nes, photo!("nes", EVAN_AMOS)),
     (Console::Fds, photo!("fds", EVAN_AMOS)),
     (Console::MegaDrive, photo!("megadrive", EVAN_AMOS)),
+    (Console::MegaCd, photo!("megacd", EVAN_AMOS)),
+    (Console::Sega32x, photo!("sega32x", EVAN_AMOS)),
+    (Console::Pico, photo!("pico", MUBAND)),
     (Console::MasterSystem, photo!("mastersystem", EVAN_AMOS)),
     (Console::Sg1000, photo!("sg1000", EVAN_AMOS)),
     (Console::GameGear, photo!("gamegear", EVAN_AMOS)),

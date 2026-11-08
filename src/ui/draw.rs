@@ -2174,6 +2174,9 @@ pub(super) fn console_colour(console: Console) -> Color {
         Console::Snes => Color::RGB(104, 96, 136),
         Console::Nes => Color::RGB(136, 52, 52),
         Console::MegaDrive => Color::RGB(44, 44, 50),
+        Console::MegaCd => Color::RGB(40, 50, 78),
+        Console::Sega32x => Color::RGB(112, 36, 36),
+        Console::Pico => Color::RGB(56, 108, 150),
         Console::GameGear => Color::RGB(70, 72, 82),
         Console::Lynx => Color::RGB(50, 66, 70),
         Console::GameWatch => Color::RGB(146, 116, 58),
@@ -2264,7 +2267,8 @@ fn bar_for(console: Console) -> usize {
         | Console::Lynx
         | Console::PlayStation
         | Console::Psp
-        | Console::PcEngineCd => 2,
+        | Console::PcEngineCd
+        | Console::MegaCd => 2,
         Console::Gba
         | Console::Snes
         | Console::Nes
@@ -2278,7 +2282,9 @@ fn bar_for(console: Console) -> usize {
         | Console::PcEngine
         | Console::NeoGeoPocket
         | Console::WonderSwan
-        | Console::Arcade => 1,
+        | Console::Arcade
+        | Console::Sega32x
+        | Console::Pico => 1,
     }
 }
 

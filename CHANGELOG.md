@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Mega-CD, 32X and Pico**: three pages for PicoDrive's other systems, played by nibcase with
+  `nibcase-picodrive`. Mega-CD discs (`.chd`, `.cue`, `.iso`, `.m3u`) in `Roms/SEGACD`, drawn as
+  discs; their folder's README names the BIOS one a region (`bios_CD_U.bin`, `_E` or `_J`). 32X
+  carts (`.32x`) in `Roms/32X`, drawn as Mega Drive carts. Pico carts (Mega Drive dumps) in
+  `Roms/PICO`, known by their folder: boxes alone. Box art from libretro's thumbnails, and a
+  system card each (the Pico's photo by Muband, CC BY-SA 3.0). A `.cue` or `.md` outside these
+  folders is still the PC Engine CD's or the Mega Drive's.
 - **Arcade**: a page for FinalBurn Neo's sets, `Roms/ARCADE` (`.zip`, `.7z`), played by nibcase
   with `nibcase-fbneo`. Sets are named by the core's list: the title, and under it the maker,
   year and board. A board's BIOS set beside the games (`neogeo.zip`) isn't shown. Boxes alone.

@@ -240,7 +240,8 @@ fn shell_of(console: Console) -> Option<fn() -> Frame> {
         Console::Gbc => Some(gbc_frame),
         Console::Snes => Some(shells::snes_us_frame),
         Console::Nes => Some(nes_frame),
-        Console::MegaDrive => Some(shells::md_frame),
+        // A 32X cart is a Mega Drive cart's shape.
+        Console::MegaDrive | Console::Sega32x => Some(shells::md_frame),
         Console::GameGear => Some(shells::gg_frame),
         Console::Lynx => Some(lynx_frame),
         // A Game & Watch unit is the game itself, a disk or a disc is no cart, and apps are
@@ -258,7 +259,9 @@ fn shell_of(console: Console) -> Option<fn() -> Frame> {
         | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan
-        | Console::Arcade => None,
+        | Console::Arcade
+        | Console::MegaCd
+        | Console::Pico => None,
     }
 }
 
@@ -299,7 +302,10 @@ pub fn slot(console: Console) -> Slot {
         | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan
-        | Console::Arcade => Slot::Two,
+        | Console::Arcade
+        | Console::MegaCd
+        | Console::Sega32x
+        | Console::Pico => Slot::Two,
     }
 }
 
@@ -429,10 +435,10 @@ pub fn cart_size(console: Console) -> (usize, usize) {
         Console::Gba => (GBA_CART_W, GBA_CART_H),
         Console::Snes => SNES_CART,
         Console::Nes => NES_CART,
-        Console::MegaDrive => MD_CART,
+        Console::MegaDrive | Console::Sega32x => MD_CART,
         Console::GameGear => GG_CART,
         Console::Lynx => LYNX_CART,
-        Console::PlayStation | Console::Psp | Console::PcEngineCd => disc::SIZE,
+        Console::PlayStation | Console::Psp | Console::PcEngineCd | Console::MegaCd => disc::SIZE,
         // A page without carts is a grid or a list: their size is asked for, never drawn.
         Console::GameWatch
         | Console::Apps
@@ -443,7 +449,8 @@ pub fn cart_size(console: Console) -> (usize, usize) {
         | Console::PcEngine
         | Console::NeoGeoPocket
         | Console::WonderSwan
-        | Console::Arcade => (GBA_CART_W, GBA_CART_H),
+        | Console::Arcade
+        | Console::Pico => (GBA_CART_W, GBA_CART_H),
         Console::Gb | Console::Gbc => (GB_CART_W, GB_CART_H),
     }
 }
@@ -454,9 +461,12 @@ pub fn box_size(console: Console) -> (usize, usize) {
         Console::Ds => CASE_SIZE,
         Console::Snes => SNES_BOX,
         Console::Nes => NES_BOX,
-        Console::MegaDrive | Console::GameGear | Console::MasterSystem | Console::Sg1000 => {
-            SEGA_BOX
-        }
+        Console::MegaDrive
+        | Console::Sega32x
+        | Console::Pico
+        | Console::GameGear
+        | Console::MasterSystem
+        | Console::Sg1000 => SEGA_BOX,
         Console::Fds => NES_BOX,
         Console::Lynx => LYNX_BOX,
         // A Game & Watch box shows the unit, landscape, about as wide as a Wide Screen one.
@@ -470,6 +480,7 @@ pub fn box_size(console: Console) -> (usize, usize) {
         | Console::Apps
         | Console::PcEngine
         | Console::PcEngineCd
+        | Console::MegaCd
         | Console::PlayStation
         | Console::NeoGeoPocket
         | Console::WonderSwan
@@ -1040,7 +1051,7 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
         // A Lynx label frames its art in black: a deep band at the top, a strip at the bottom.
         Console::Lynx => lynx_label(game, fonts, sw, sh, cover),
         // As each system's labels lay their art out.
-        Console::MegaDrive => shells::md_label(game, fonts, sw, sh, cover),
+        Console::MegaDrive | Console::Sega32x => shells::md_label(game, fonts, sw, sh, cover),
         Console::GameGear => shells::gg_label(game, fonts, sw, sh, cover),
         Console::Snes if us => shells::us_label(game, fonts, sw, sh, cover),
         Console::Snes => shells::famicom_label(game, fonts, sw, sh, cover),
@@ -1062,7 +1073,9 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
         | Console::Psp
         | Console::NeoGeoPocket
         | Console::WonderSwan
-        | Console::Arcade => printed_gba(game, fonts, sw, sh, cover),
+        | Console::Arcade
+        | Console::MegaCd
+        | Console::Pico => printed_gba(game, fonts, sw, sh, cover),
     });
     img.blit(&sticker, full(&sticker), frame.sticker, false);
     img.blit(

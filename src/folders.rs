@@ -98,14 +98,17 @@ pub fn make(cards: &[PathBuf], systems: &[String], ours: impl Fn(&Path) -> bool)
     made
 }
 
-/// The BIOS a system's emulator needs in `BIOS/` (nibcase's), and ones it plays better with.
-fn bios(console: Console) -> (Option<&'static str>, &'static [&'static str]) {
+/// The BIOS a system's emulator needs in `BIOS/` (nibcase's), any one of them, and ones it
+/// plays better with.
+fn bios(console: Console) -> (&'static [&'static str], &'static [&'static str]) {
     match console {
-        Console::Lynx => (Some("lynxboot.img"), &[]),
-        Console::PcEngineCd => (Some("syscard3.pce"), &[]),
-        Console::Fds => (Some("disksys.rom"), &[]),
-        Console::PlayStation => (None, &["scph5501.bin", "scph1001.bin", "scph7001.bin"]),
-        _ => (None, &[]),
+        Console::Lynx => (&["lynxboot.img"], &[]),
+        Console::PcEngineCd => (&["syscard3.pce"], &[]),
+        Console::Fds => (&["disksys.rom"], &[]),
+        // One a region: the US, Europe and Japan's (PicoDrive's names).
+        Console::MegaCd => (&["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"], &[]),
+        Console::PlayStation => (&[], &["scph5501.bin", "scph1001.bin", "scph7001.bin"]),
+        _ => (&[], &[]),
     }
 }
 
@@ -135,12 +138,19 @@ pub fn readme(system: &str) -> String {
         files.join(", ")
     );
     match bios(console) {
-        (Some(need), _) => {
+        ([need], _) => {
             text += &format!(
             "BIOS: {name} needs {need} in the BIOS folder at the card's root (your own copy).\n"
         )
         }
-        (None, better) if !better.is_empty() => {
+        (need, _) if !need.is_empty() => {
+            text += &format!(
+                "BIOS: {name} needs one of {} in the BIOS folder at the card's root (your own \
+                 copy, for your discs' region).\n",
+                need.join(", ")
+            )
+        }
+        (_, better) if !better.is_empty() => {
             text += &format!(
                 "BIOS: none needed; with one of {} in the BIOS folder at the card's root, \
                  games play more accurately.\n",

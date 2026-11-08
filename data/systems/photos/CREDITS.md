@@ -1,12 +1,17 @@
 # Photos on the system cards
 
 Each photo is a reduced copy (fitted to 340 × 224 on white) of a photograph on Wikimedia
-Commons, downloaded on 21 October 2026 as Commons' 960-pixel-wide rendering. All but one are
+Commons, downloaded on 21 October 2026 as Commons' 960-pixel-wide rendering. All but two are
 by Evan Amos and released into the public domain; credited here all the same. The PC Engine
 CD's is by RetroEditor under the Creative Commons Attribution 4.0 licence
-(https://creativecommons.org/licenses/by/4.0/), cropped to the console (leaving out the desk,
-a television and a game case) before it was reduced; its card credits it. The PSP's was added
-on 7 November 2026, reduced from Commons' original (3840 × 2180), trimmed to the console.
+(https://creativecommons.org/licenses/by/4.0/), cropped to the console (leaving out the
+desk, a television and a game case) before it was reduced; its card credits it. The PSP's
+was added on 7 November 2026, reduced from Commons' original (3840 × 2180), trimmed to the
+console. The Mega-CD, 32X and Pico photos were added on 7 November 2026; the Mega-CD's and
+32X's are Evan Amos's public-domain photos. The Pico's is by Muband (Japanese Wikipedia)
+under the Creative Commons Attribution-ShareAlike 3.0 licence
+(https://creativecommons.org/licenses/by-sa/3.0/), reduced from Commons' original (400 ×
+300); it shows the Japanese Kids Computer Pico, and its card credits it.
 
 | Card | Photograph | Author | Licence | Source |
 |---|---|---|---|---|
@@ -29,3 +34,6 @@ on 7 November 2026, reduced from Commons' original (3840 × 2180), trimmed to th
 | `pcenginecd.png` | NEC_PC_Engine_CDROM2.jpg (cropped) | RetroEditor | CC BY 4.0 | https://commons.wikimedia.org/wiki/File:NEC_PC_Engine_CDROM2.jpg |
 | `neogeopocket.png` | Neo-Geo-Pocket-Color-Blue-Left.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Neo-Geo-Pocket-Color-Blue-Left.jpg |
 | `wonderswan.png` | WonderSwan-Black-Left.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:WonderSwan-Black-Left.jpg |
+| `megacd.png` | Sega-CD-Model1-Set.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Sega-CD-Model1-Set.jpg |
+| `sega32x.png` | Sega-Genesis-Model2-32X.jpg | Evan Amos | Public domain | https://commons.wikimedia.org/wiki/File:Sega-Genesis-Model2-32X.jpg |
+| `pico.png` | Kids_Computer_Pico-01.jpg | Muband | CC BY-SA 3.0 | https://commons.wikimedia.org/wiki/File:Kids_Computer_Pico-01.jpg |

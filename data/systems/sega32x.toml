@@ -1,0 +1,42 @@
+# 32X: the system card's facts, from https://en.wikipedia.org/wiki/32X
+# (read 7 November 2026). The bio and fun fact are DSlot's own words.
+name = "32X"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/32X"
+bio = "Codenamed Project Mars, Sega's cartridge add-on for the Genesis reached North America on 21 November 1994, meant to bridge the gap until the Saturn. Two Hitachi SH-2 processors at 23 MHz sit inside, and it still plays Genesis games. Only 40 games were made for it, six of which also need the Sega CD."
+fact = "After a cut to US$99, the last 32X units were cleared out of shops at US$19.95."
+
+[[stats]]
+label = "Released"
+value = "1994"
+bar = 1994
+
+[[stats]]
+label = "Launch price"
+value = "US$159.99"
+bar = 159.99
+
+[[stats]]
+label = "Sold"
+value = "665,000 by the end of 1994"
+bar = 0.665
+
+[[stats]]
+label = "Processor"
+value = "2 × 23 MHz Hitachi SH-2"
+bar = 23
+
+[[stats]]
+label = "Memory"
+value = "256 KB + 256 KB video RAM"
+bar = 256
+
+[[stats]]
+label = "Screen"
+value = "320 × 240, 32,768 colours"
+bar = 76800
+
+[[stats]]
+label = "Games"
+value = "40"
+bar = 40

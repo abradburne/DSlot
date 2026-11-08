@@ -190,7 +190,8 @@ pub fn cart_geometry(console: Console) -> (f32, f32, f32) {
         | Console::Lynx
         | Console::PlayStation
         | Console::Psp
-        | Console::PcEngineCd => (GB_SIZE, GB_STEP),
+        | Console::PcEngineCd
+        | Console::MegaCd => (GB_SIZE, GB_STEP),
         _ => (SLOT2_SIZE, SLOT2_STEP),
     };
     match art::slot(console) {

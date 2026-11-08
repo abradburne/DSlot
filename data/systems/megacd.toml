@@ -1,0 +1,37 @@
+# Mega-CD / Sega CD: the system card's facts, from https://en.wikipedia.org/wiki/Sega_CD
+# (read 7 November 2026). The bio and fun fact are DSlot's own words.
+name = "Mega-CD / Sega CD"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/Sega_CD"
+bio = "Sega's CD-ROM add-on for the Mega Drive came out in Japan on 12 December 1991, and in North America as the Sega CD on 15 October 1992. Designed with JVC, it adds a 12.5 MHz Motorola 68000 and a custom chip for scaling and rotating sprites, and plays audio CDs and CD+G karaoke discs. It sold 2.24 million units."
+fact = "One of its full-motion video games, Night Trap, ended up being debated in both the US Congress and the UK Parliament."
+
+[[stats]]
+label = "Released"
+value = "1991"
+bar = 1991
+
+[[stats]]
+label = "Launch price"
+value = "US$299"
+bar = 299
+
+[[stats]]
+label = "Sold"
+value = "2.24 million"
+bar = 2.24
+
+[[stats]]
+label = "Processor"
+value = "12.5 MHz Motorola 68000"
+bar = 12.5
+
+[[stats]]
+label = "Memory"
+value = "6.5 Mbit for programs, pictures and sound"
+bar = 6.5
+
+[[stats]]
+label = "Games"
+value = "More than 200"
+bar = 200

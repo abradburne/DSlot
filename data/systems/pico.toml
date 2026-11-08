@@ -1,0 +1,37 @@
+# Pico: the system card's facts, from https://en.wikipedia.org/wiki/Sega_Pico
+# (read 7 November 2026). The bio and fun fact are DSlot's own words.
+name = "Pico"
+maker = "Sega"
+source = "https://en.wikipedia.org/wiki/Sega_Pico"
+bio = "Sega Toys' educational console for children aged 3 to 7 came out in Japan in June 1993 and in North America in November 1994. Shaped like a small laptop, it uses the Mega Drive's processor and graphics chip, and is played with the Magic Pen on a drawing pad and picture-book cartridges called Storyware. Sega says it sold 3.4 million."
+fact = "Joe Miller, once a Sega of America vice president, says he named his dog after the Pico."
+
+[[stats]]
+label = "Released"
+value = "1993"
+bar = 1993
+
+[[stats]]
+label = "Launch price"
+value = "US$139"
+bar = 139
+
+[[stats]]
+label = "Sold"
+value = "3.4 million"
+bar = 3.4
+
+[[stats]]
+label = "Processor"
+value = "7.6 MHz Motorola 68000"
+bar = 7.6
+
+[[stats]]
+label = "Memory"
+value = "64 KB + 64 KB video RAM"
+bar = 64
+
+[[stats]]
+label = "Screen"
+value = "320 × 224, 61 of 512 colours"
+bar = 71680

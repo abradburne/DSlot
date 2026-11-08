@@ -33,6 +33,13 @@ pub enum Console {
     /// The Famicom Disk System's disks: no carts.
     Fds,
     MegaDrive,
+    /// Sega's Mega-CD (Sega CD)'s discs, from `Roms/SEGACD`: no carts.
+    MegaCd,
+    /// Sega's 32X: Mega Drive-shaped carts, `.32x`.
+    Sega32x,
+    /// Sega's Pico: its carts (Storyware books) are Mega Drive dumps, so known by their folder,
+    /// `Roms/PICO`. No carts drawn.
+    Pico,
     MasterSystem,
     Sg1000,
     GameGear,
@@ -61,7 +68,7 @@ pub enum Console {
 
 impl Console {
     /// The consoles, as against the apps, in tab order.
-    pub const ALL: [Console; 21] = [
+    pub const ALL: [Console; 24] = [
         Console::Ds,
         Console::Gba,
         Console::Gb,
@@ -70,6 +77,9 @@ impl Console {
         Console::Nes,
         Console::Fds,
         Console::MegaDrive,
+        Console::MegaCd,
+        Console::Sega32x,
+        Console::Pico,
         Console::MasterSystem,
         Console::Sg1000,
         Console::GameGear,
@@ -85,7 +95,7 @@ impl Console {
         Console::Ports,
     ];
     /// Every page there can be, in tab order: the consoles, then the apps.
-    pub const PAGES: [Console; 22] = [
+    pub const PAGES: [Console; 25] = [
         Console::Ds,
         Console::Gba,
         Console::Gb,
@@ -94,6 +104,9 @@ impl Console {
         Console::Nes,
         Console::Fds,
         Console::MegaDrive,
+        Console::MegaCd,
+        Console::Sega32x,
+        Console::Pico,
         Console::MasterSystem,
         Console::Sg1000,
         Console::GameGear,
@@ -123,6 +136,9 @@ impl Console {
             Console::Nes => "FC",
             Console::Fds => "FDS",
             Console::MegaDrive => "MD",
+            Console::MegaCd => "SEGACD",
+            Console::Sega32x => "32X",
+            Console::Pico => "PICO",
             Console::MasterSystem => "SMS",
             Console::Sg1000 => "SG1000",
             Console::GameGear => "GG",
@@ -151,6 +167,9 @@ impl Console {
             Console::Nes => "NES / Famicom",
             Console::Fds => "Famicom Disk System",
             Console::MegaDrive => "Mega Drive / Genesis",
+            Console::MegaCd => "Mega-CD / Sega CD",
+            Console::Sega32x => "32X",
+            Console::Pico => "Pico",
             Console::MasterSystem => "Master System",
             Console::Sg1000 => "SG-1000",
             Console::GameGear => "Game Gear",
@@ -179,6 +198,9 @@ impl Console {
             Console::Nes => "NES",
             Console::Fds => "FDS",
             Console::MegaDrive => "MD",
+            Console::MegaCd => "MCD",
+            Console::Sega32x => "32X",
+            Console::Pico => "Pico",
             Console::MasterSystem => "SMS",
             Console::Sg1000 => "SG",
             Console::GameGear => "GG",
@@ -207,6 +229,9 @@ impl Console {
             Console::Nes => "nes",
             Console::Fds => "fds",
             Console::MegaDrive => "megadrive",
+            Console::MegaCd => "megacd",
+            Console::Sega32x => "sega32x",
+            Console::Pico => "pico",
             Console::MasterSystem => "mastersystem",
             Console::Sg1000 => "sg1000",
             Console::GameGear => "gamegear",
@@ -244,6 +269,9 @@ impl Console {
             Console::Nes => "nes",
             Console::Fds => "fds",
             Console::MegaDrive => "md",
+            Console::MegaCd => "cue",
+            Console::Sega32x => "32x",
+            Console::Pico => "md",
             Console::MasterSystem => "sms",
             Console::Sg1000 => "sg",
             Console::GameGear => "gg",
@@ -281,6 +309,9 @@ impl Console {
             Console::Nes => &["nes", "unf", "unif", "zip"],
             Console::Fds => &["fds", "zip"],
             Console::MegaDrive => &["md", "gen", "bin", "smd", "zip"],
+            Console::MegaCd => &["cue", "chd", "m3u", "iso"],
+            Console::Sega32x => &["32x", "zip"],
+            Console::Pico => &["md", "bin", "zip"],
             Console::MasterSystem => &["sms", "zip"],
             Console::Sg1000 => &["sg", "zip"],
             Console::GameGear => &["gg", "zip"],
@@ -311,6 +342,9 @@ impl Console {
             Console::Nes => "nes.bin",
             Console::Fds => "fds.bin",
             Console::MegaDrive => "megadrive.bin",
+            Console::MegaCd => "megacd.bin",
+            Console::Sega32x => "sega32x.bin",
+            Console::Pico => "pico.bin",
             Console::MasterSystem => "mastersystem.bin",
             Console::Sg1000 => "sg1000.bin",
             Console::GameGear => "gamegear.bin",
@@ -339,6 +373,9 @@ impl Console {
             Console::Nes => "NES",
             Console::Fds => "",
             Console::MegaDrive => "",
+            Console::MegaCd => "",
+            Console::Sega32x => "",
+            Console::Pico => "",
             Console::MasterSystem => "",
             Console::Sg1000 => "",
             Console::GameGear => "",
@@ -704,6 +741,9 @@ fn read_header(console: Console, path: &Path, stem: &str) -> (String, Vec<String
         // systems' names come from their files too.
         Console::Nes
         | Console::MegaDrive
+        | Console::MegaCd
+        | Console::Sega32x
+        | Console::Pico
         | Console::GameGear
         | Console::Lynx
         | Console::GameWatch
@@ -753,10 +793,12 @@ pub fn read_one(path: &Path) -> Option<Game> {
         .flatten()
         .map(str::to_ascii_lowercase);
     let rom_ext = inner.as_deref().unwrap_or(&ext);
-    // An arcade set is known by its folder alone: a zip says nothing of its board.
+    // An arcade set is known by its folder alone: a zip says nothing of its board. So are a
+    // Mega-CD disc (a .cue or .chd is the PC Engine CD's elsewhere, as it was before) and a
+    // Pico cart (a Mega Drive dump).
     let by_ext = Console::ALL
         .into_iter()
-        .filter(|c| *c != Console::Arcade)
+        .filter(|c| !matches!(c, Console::Arcade | Console::MegaCd | Console::Pico))
         .find(|c| {
             c.ext() == rom_ext
                 || (*c == Console::Snes && rom_ext == "smc")
@@ -1654,6 +1696,45 @@ mod tests {
             read_one(&dir.path().join("mslug.zip")).map(|g| g.console),
             Some(Console::Arcade)
         );
+    }
+
+    /// PicoDrive's pages: Mega-CD discs and Pico carts by their folders, 32X carts by their
+    /// extension too.
+    #[test]
+    fn mega_cd_32x_and_pico_by_folder() {
+        let dir = TempDir::new("sega-addons");
+        for (folder, file, console) in [
+            ("SEGACD", "Sonic CD.chd", Console::MegaCd),
+            ("SEGACD", "Lunar.cue", Console::MegaCd),
+            ("32X", "Knuckles Chaotix.32x", Console::Sega32x),
+            ("PICO", "Sonic Gameworld.md", Console::Pico),
+        ] {
+            let at = dir.path().join(folder);
+            fs::create_dir_all(&at).unwrap();
+            fs::write(at.join(file), b"fixture").unwrap();
+            assert_eq!(
+                read_one(&at.join(file)).map(|g| g.console),
+                Some(console),
+                "{file}"
+            );
+            let cache = dir.path().join(console.known());
+            let games = scan(console, std::slice::from_ref(&at), &cache);
+            assert!(games.iter().any(|g| g.path.ends_with(file)), "{file}");
+        }
+        // Outside their folders a .cue stays the PC Engine CD's, a .md the Mega Drive's, and a
+        // .32x is the 32X's.
+        for (file, console) in [
+            ("x.cue", Console::PcEngineCd),
+            ("x.md", Console::MegaDrive),
+            ("x.32x", Console::Sega32x),
+        ] {
+            fs::write(dir.path().join(file), b"fixture").unwrap();
+            assert_eq!(
+                read_one(&dir.path().join(file)).map(|g| g.console),
+                Some(console),
+                "{file}"
+            );
+        }
     }
 
     #[test]
