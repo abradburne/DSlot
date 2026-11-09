@@ -40,6 +40,7 @@ mod sleepoff;
 mod sound;
 mod sysinfo;
 
+pub(crate) use draw::console_colour;
 pub use screens::{open, Screens};
 pub use shelf::run;
 pub use skeleton::skeleton;

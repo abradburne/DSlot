@@ -460,6 +460,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         }
     }
 

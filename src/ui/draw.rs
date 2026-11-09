@@ -842,6 +842,10 @@ impl Ui<'_> {
             self.text(v, &line, (26.0, false), (x, y), 0.0, DIM)?;
             y += 34.0;
         }
+        // A folder of games: its name and how many games are in it, no more.
+        if game.folder {
+            return self.shade(v, fade);
+        }
         self.text(v, &game.serial(), (22.0, false), (x, y + 4.0), 0.0, FAINT)?;
 
         let rows = [
@@ -1029,6 +1033,7 @@ impl Ui<'_> {
             heading,
             strip,
             fade,
+            inside: _,
         } = *page;
         let (cart_w, cart_h, pitch) = cart_geometry(console);
         let v = self.bot;
@@ -1053,7 +1058,7 @@ impl Ui<'_> {
             }
         }
 
-        self.footer(v, HINT, fade, console)
+        self.footer(v, &page.hint(), fade, console)
     }
 
     /// A wall of boxes in place of the carts, `scroll` rows down.
@@ -1066,12 +1071,13 @@ impl Ui<'_> {
             heading,
             strip,
             fade,
+            inside: _,
         } = *page;
         let v = self.bot;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         self.heading(heading, &strip)?;
         if list.is_empty() {
-            return self.footer(v, HINT, fade, console);
+            return self.footer(v, &page.hint(), fade, console);
         }
 
         // Moved down under a page's sections, as far as the last row's covers reach.
@@ -1117,7 +1123,7 @@ impl Ui<'_> {
                 self.heart(v, x + w - ICON - 10.0, y + 9.0, RED)?;
             }
         }
-        self.footer(v, HINT, fade, console)
+        self.footer(v, &page.hint(), fade, console)
     }
 
     /// The games as a list of names, `scroll` rows down; with `covers`, a small box beside
@@ -1137,12 +1143,13 @@ impl Ui<'_> {
             heading,
             strip,
             fade,
+            inside: _,
         } = *page;
         let v = self.bot;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         self.heading(heading, &strip)?;
         if list.is_empty() {
-            return self.footer(v, HINT, fade, console);
+            return self.footer(v, &page.hint(), fade, console);
         }
 
         let (row_h, on_screen) = list_rows(covers);
@@ -1232,7 +1239,7 @@ impl Ui<'_> {
                 v.rect(SW - 12.0, top + at, 4.0, bar),
             )?;
         }
-        self.footer(v, HINT, fade, console)
+        self.footer(v, &page.hint(), fade, console)
     }
 
     /// The shelf's page tabs, the page on show lit, in their strip: scrolled as it is, faded
@@ -1886,6 +1893,7 @@ impl Ui<'_> {
             row: menu.row,
             scroll: menu.scroll,
             hint: menu.hint.clone(),
+            reading: menu.reading,
         };
         let battery = stats::battery();
         let status = Status {
@@ -2211,7 +2219,7 @@ pub(super) fn dim_by(c: Color, k: f32) -> Color {
 }
 
 /// A system's colour: the field its blade's art sits on, and all a blade shows without art.
-pub(super) fn console_colour(console: Console) -> Color {
+pub(crate) fn console_colour(console: Console) -> Color {
     match console {
         Console::Ds => Color::RGB(58, 68, 92),
         Console::Gba => Color::RGB(76, 58, 128),
@@ -2256,6 +2264,30 @@ pub struct Page<'a> {
     pub strip: Strip,
     /// How far the screens have faded to black as a game starts.
     pub fade: f32,
+    /// Whether a folder of games is open, which B goes back out of.
+    pub inside: bool,
+}
+
+impl Page<'_> {
+    /// The buttons under the shelf: A opens a folder of games rather than inserting it, and
+    /// B goes back out of the one open.
+    pub fn hint(&self) -> String {
+        let hint = if art::has_shell(self.console) {
+            HINT
+        } else {
+            START_HINT
+        };
+        let folder = self
+            .list
+            .get(self.sel)
+            .is_some_and(|&g| self.games[g].folder);
+        let (a, rest) = hint.split_once("  \u{b7}  ").unwrap_or((hint, ""));
+        let a = if folder { "A  open" } else { a };
+        match self.inside {
+            true => format!("{a}  \u{b7}  B  back  \u{b7}  {rest}"),
+            false => format!("{a}  \u{b7}  {rest}"),
+        }
+    }
 }
 
 /// Lets go of a texture. The `unsafe_textures` build of SDL2 leaves that to DSlot, which
@@ -2295,6 +2327,9 @@ fn menu_row(row: &super::menu::Row) -> nibkit::menu::Row {
             warning: *warning,
         },
     };
+    if row.heading {
+        return nibkit::menu::Row::heading(row.label.clone());
+    }
     let laid_out = nibkit::menu::Row::new(row.label.clone(), value);
     match &row.source {
         Some(note) => laid_out.with_note(note.clone()),

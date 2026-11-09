@@ -13,7 +13,10 @@
 //!   read-only page of the device and what it is using: `sysinfo.rs`); and **Update** (nibOS):
 //!   the version, the update channel, checking for an update, downloading it in the background
 //!   (paused and resumed), restarting into it, what's new, and going back to the version
-//!   before; the work is nibOS's updater's (`update.rs`).
+//!   before; the work is nibOS's updater's (`update.rs`). **Help** (nibOS) lists What's new in
+//!   the running release and the help topics nibOS keeps (nibkit's `guide`), each read as a
+//!   page of text: up and down scroll it a line, left and right a screen, a finger drags it, B
+//!   goes back to the list.
 //! - **Network** (nibOS), **Wi-Fi** and **Bluetooth**: the networks in range, joining one (its
 //!   passphrase typed on nibkit's keyboard), leaving and forgetting; Bluetooth on and off, the
 //!   paired devices to connect and disconnect, forgetting one, and pairing a new one. The work
@@ -45,14 +48,16 @@ use crate::settings::def::{self, Def, Kind, Levels};
 use crate::settings::{console_chain, game_chain, Scope, Settings};
 use crate::stats::Stats;
 use crate::update::{self, Status};
+use nibkit::menu::help::{self, Help};
 use nibkit::menu::keyboard::{self, Keyboard, Purpose, Typed};
+use nibkit::touch::Pointer;
 use std::time::{Duration, Instant};
 use toml::Value as Toml;
 
 // Where the rows and tabs are: nibkit's menu layout, which draws them too.
-use nibkit::menu::layout::{row_hit, section_at, tab_at, VISIBLE};
+use nibkit::menu::layout::{row_hit, section_at, tab_at, ROW_STEP, VISIBLE};
 #[cfg(test)]
-use nibkit::menu::layout::{row_y, LEFT, ROW_STEP, SECTIONS_Y, TABS, TOP};
+use nibkit::menu::layout::{row_y, LEFT, SECTIONS_Y, TABS, TOP};
 /// How often the System page reads the battery again while it is shown.
 const BATTERY_EVERY: Duration = Duration::from_secs(3);
 /// How often the Update page reads the updater's status again while it is shown.
@@ -98,6 +103,9 @@ pub enum Part {
     About,
     /// Wi-Fi: what a player is asked for when something won't connect (netinfo.rs).
     NetInfo,
+    /// System: What's new in the running nibOS and the help topics, from the files nibOS keeps
+    /// (nibkit::guide), each read as a page of text.
+    Help,
 }
 
 /// Every page's parts, in the order they go under its tab. A tab holds its own page's and those
@@ -114,6 +122,7 @@ const SECTIONS: &[(Page, Part)] = &[
     (Page::System, Part::Time),
     (Page::System, Part::About),
     (Page::Update, Part::Whole),
+    (Page::System, Part::Help),
     (Page::Wifi, Part::Whole),
     (Page::Bluetooth, Part::Whole),
     (Page::Wifi, Part::NetInfo),
@@ -232,6 +241,12 @@ pub enum Item {
     NoteLine(String),
     /// A line of the update's message, past what fits on the title line.
     Message(String),
+    /// Help: a topic (or What's new), by its label: A reads it.
+    HelpTopic(String),
+    /// Help: a line of the topic being read; shown, not changed.
+    HelpLine(String),
+    /// Help: a heading in the topic being read.
+    HelpHeading(String),
 }
 
 impl Item {
@@ -282,6 +297,7 @@ impl Item {
             Item::RaEarned { title, .. } => title,
             Item::RaNoneEarned => "Nothing earned yet",
             Item::NoteLine(line) | Item::Message(line) => line,
+            Item::HelpTopic(label) | Item::HelpLine(label) | Item::HelpHeading(label) => label,
         }
     }
 
@@ -498,6 +514,8 @@ pub struct Row {
     pub value: Value,
     /// Where an inheriting row's value comes from: "from System", "set here", ...
     pub source: Option<String>,
+    /// A heading over the rows after it (in a help topic), not a row.
+    pub heading: bool,
 }
 
 /// The menu as drawn.
@@ -519,6 +537,8 @@ pub struct Shown {
     pub keyboard: Option<Keyboard>,
     /// A QR code under the rows (the sign-up page's address).
     pub picture: Option<achievements::Qr>,
+    /// A page of text to read (a help topic): no row is highlighted.
+    pub reading: bool,
 }
 
 /// What a row on a console's or a game's page goes back to when not set there: where from (a
@@ -584,6 +604,8 @@ pub struct Input {
     pub close: bool,
     /// Where taps came down on the touch screen.
     pub taps: Vec<(f32, f32)>,
+    /// Every touch, down, moved and lifted: a finger drags a help topic being read.
+    pub pointers: Vec<Pointer>,
     /// Every button pressed, for the keyboard while typing.
     pub keys: Vec<keyboard::Key>,
 }
@@ -712,6 +734,13 @@ pub struct Menu {
     update_notes: Option<(String, String)>,
     /// What's new is open on the Update page, in place of its rows.
     reading_notes: bool,
+    /// System's Help: What's new in the running nibOS and the help topics, read when the menu
+    /// opens (they change only with the system).
+    help: Help,
+    /// The list's row the topic being read was opened from, to go back to.
+    help_row: usize,
+    /// A finger dragging the topic being read: where it came down, and the scroll then.
+    help_drag: Option<(f32, usize)>,
     /// The network's facts, read on a thread while the Wi-Fi page is up (nibOS).
     netinfo: Option<netinfo::Watch>,
     net: netinfo::Info,
@@ -767,6 +796,7 @@ fn section(page: Page, part: Part, cx: &Context) -> &'static str {
         Part::Time => return "Time",
         Part::About => return "About",
         Part::NetInfo => return "Network info",
+        Part::Help => return "Help",
         Part::Whole => {}
     }
     match page {
@@ -846,6 +876,9 @@ impl Menu {
             update_notice: None,
             update_notes: None,
             reading_notes: false,
+            help: Help::load(),
+            help_row: 0,
+            help_drag: None,
             netinfo: None,
             net: netinfo::Info::default(),
             clock: None,
@@ -1091,6 +1124,14 @@ impl Menu {
                     items.push(Item::Sys(SysRow::Board));
                 }
             }
+            (Page::System, Part::Help) => {
+                let reading = self.help.reading().is_some();
+                items.extend(self.help.rows().into_iter().map(|r| match r {
+                    r if !reading => Item::HelpTopic(r.label),
+                    r if r.heading => Item::HelpHeading(r.label),
+                    r => Item::HelpLine(r.label),
+                }));
+            }
             (Page::System, _) => {}
             (Page::Wifi, Part::NetInfo) => {
                 items.extend(InfoRow::ALL.into_iter().map(Item::Info));
@@ -1221,7 +1262,10 @@ impl Menu {
             } else if let Some(i) = section_at(x, y, &names).filter(|_| names.len() > 1) {
                 (page_turn, section_turn) = (0, 0);
                 self.go(sections[i]);
-            } else if let Some(r) = row_hit(y).map(|r| r + self.scroll) {
+            } else if let Some(r) = row_hit(y)
+                .map(|r| r + self.scroll)
+                .filter(|_| !self.help_reading())
+            {
                 (self.row, turn, pressed) = (r, turn + 1, true);
             }
         }
@@ -1329,6 +1373,12 @@ impl Menu {
             return Done::default();
         }
 
+        // A help topic being read: the D-pad and a finger scroll it, B goes back to the list.
+        if self.help_reading() && self.page == Page::System && self.part == Part::Help {
+            self.read_help(input, cx);
+            return Done::default();
+        }
+
         let items = self.items(cx);
         let was = self.row;
         let n = items.len() as i32;
@@ -1372,6 +1422,10 @@ impl Menu {
         } else if self.page == Page::Achievements && !matches!(item, Item::Setting(_)) {
             let item = item.clone();
             self.ra_row(&item, chosen);
+        } else if matches!(item, Item::HelpTopic(_)) {
+            if chosen && self.help.choose(self.row) {
+                (self.help_row, self.row, self.scroll, self.help_drag) = (self.row, 0, 0, None);
+            }
         } else if *item == Item::Rescan {
             if pressed && was == self.row {
                 done.rescan = true;
@@ -1411,6 +1465,40 @@ impl Menu {
             done.changed = self.step(item, turn.signum(), cx);
         }
         done
+    }
+
+    /// Whether a help topic is being read (System → Help).
+    fn help_reading(&self) -> bool {
+        self.part == Part::Help && self.help.reading().is_some()
+    }
+
+    /// A help topic being read: up / down scroll it a line, left / right a screen, a finger
+    /// drags it a line at a time, B goes back to the list on the row it was opened from.
+    fn read_help(&mut self, input: &Input, cx: &Context) {
+        if input.close {
+            self.help.back();
+            let n = self.items(cx).len();
+            (self.row, self.help_drag) = (self.help_row.min(n.saturating_sub(1)), None);
+            self.scroll = self.row.saturating_sub(VISIBLE - 1);
+            return;
+        }
+        let most = self.items(cx).len().saturating_sub(VISIBLE) as i64;
+        let screen = VISIBLE as i64 - 1;
+        let by = input.moved as i64 + input.turn as i64 * screen;
+        let mut scroll = (self.scroll as i64 + by).clamp(0, most);
+        for p in &input.pointers {
+            match *p {
+                Pointer::Down(_, y) => self.help_drag = Some((y, scroll as usize)),
+                Pointer::Move(_, y) => {
+                    if let Some((from, at)) = self.help_drag {
+                        let lines = ((y - from) / ROW_STEP).round() as i64;
+                        scroll = (at as i64 - lines).clamp(0, most);
+                    }
+                }
+                Pointer::Up => self.help_drag = None,
+            }
+        }
+        (self.scroll, self.row) = (scroll as usize, 0);
     }
 
     /// Reads the updater's status, at most every [`UPDATE_EVERY`]. A one-time notice (updated, or
@@ -1653,6 +1741,11 @@ impl Menu {
     /// are), Network info with its checks run again.
     fn enter(&mut self, part: Part) {
         (self.part, self.row, self.scroll) = (part, 0, 0);
+        if part == Part::Help {
+            // On the list, not in the topic last read.
+            self.help.back();
+            self.help_drag = None;
+        }
         (self.armed, self.note, self.forget) = (None, None, None);
         self.clock_view = match part {
             Part::Time if clock::available() => ClockView::Page,
@@ -1886,7 +1979,10 @@ impl Menu {
             | Item::WhatsNew
             | Item::Rollback
             | Item::NoteLine(_)
-            | Item::Message(_) => return false,
+            | Item::Message(_)
+            | Item::HelpTopic(_)
+            | Item::HelpLine(_)
+            | Item::HelpHeading(_) => return false,
         }
         true
     }
@@ -2051,6 +2147,7 @@ impl Menu {
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
             (Page::System, _) if here.1 == Part::About => self.sys.summary(),
+            (Page::System, _) if here.1 == Part::Help => self.help.title(),
             (Page::System, _) => "DSlot and the device".to_owned(),
             (Page::View, _) if cx.console == Console::Apps => "How Apps are shown".to_owned(),
             (Page::View, _) => format!("How the {} page is shown", cx.console.label()),
@@ -2094,6 +2191,8 @@ impl Menu {
                 "D-pad  change   \u{b7}   A  set the clock   \u{b7}   B  back".into()
             }
             (Page::System, Some(Item::Sys(_))) => "L / R  page   \u{b7}   B  back".into(),
+            (Page::System, _) if self.help_reading() => help::READING_HINT.into(),
+            (Page::System, Some(Item::HelpTopic(_))) => help::HINT.into(),
             (Page::Update, _) => "A  choose   \u{b7}   L / R  page   \u{b7}   B  back".into(),
             (Page::Achievements, _) if self.ra.signing_up() => {
                 "L / R  page   \u{b7}   B  back to Achievements".into()
@@ -2124,6 +2223,7 @@ impl Menu {
             label: item.label().to_owned(),
             value: self.value(item, r, cx),
             source: self.source(item, cx),
+            heading: matches!(item, Item::HelpHeading(_)),
         };
         let rows = items.iter().enumerate().map(row).collect();
         Shown {
@@ -2138,6 +2238,7 @@ impl Menu {
             picture: (self.page == Page::Achievements)
                 .then(|| self.ra.picture())
                 .flatten(),
+            reading: here.1 == Part::Help && self.help_reading(),
         }
     }
 
@@ -2578,8 +2679,18 @@ impl Menu {
                 },
                 warning: false,
             },
-            Item::NoteLine(_) | Item::Message(_) => Value::Prompt {
-                text: String::new(),
+            Item::NoteLine(_) | Item::Message(_) | Item::HelpLine(_) | Item::HelpHeading(_) => {
+                Value::Prompt {
+                    text: String::new(),
+                    warning: false,
+                }
+            }
+            Item::HelpTopic(_) => Value::Prompt {
+                text: if r == self.row {
+                    "Press A".into()
+                } else {
+                    String::new()
+                },
                 warning: false,
             },
             Item::RaUser
@@ -3081,6 +3192,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         };
         World {
             ra: Ra::new(dir.path().join("retroachievements.token"), dir.path()),
@@ -3459,9 +3572,12 @@ mod tests {
             shown.tabs.iter().filter(|t| t.1).collect::<Vec<_>>(),
             [&("System".to_owned(), true)]
         );
-        // Back past the first: the last, Update where there is one.
+        // Back past the first: the last, Help where the system has its files, else Update where
+        // there is one.
         menu.update(&step(-3, 0), &mut cx);
-        let last = if update::there() {
+        let last = if !menu.help.is_empty() {
+            (Page::System, Part::Help)
+        } else if update::there() {
             (Page::Update, Part::Whole)
         } else {
             (Page::System, Part::About)
@@ -3689,6 +3805,100 @@ mod tests {
         menu.update(&moved(1), &mut cx);
         assert!(!menu.update(&press, &mut cx).power_off);
         assert!(menu.update(&press, &mut cx).power_off);
+    }
+
+    /// System's Help: the topics listed, one read with the D-pad and a finger, B back to the
+    /// list on its row, B again closes the menu.
+    #[test]
+    fn help_topics() {
+        let mut w = world("menu-help", false);
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Ds,
+            game: None,
+        };
+        let mut menu = Menu::open(false, &w.ra);
+        let topic = |name: &str, text: &str| nibkit::guide::parse(name, text).unwrap();
+        let long: String = (0..30).map(|i| format!("Line {i}.\n\n")).collect();
+        menu.help = Help::from_topics(
+            Some(topic("whats-new", "What's new in nibOS 9.9\n- Help.")),
+            vec![
+                topic("10-controls", "Controls\n# The D-pad\nIt moves."),
+                topic("20-long", &format!("A long one\n{long}")),
+            ],
+        );
+        menu.go((Page::System, Part::Help));
+        let shown = menu.shown(&cx);
+        assert!(shown.sections.contains(&("Help".to_owned(), true)));
+        let labels: Vec<&str> = shown.rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(labels, ["What's new", "Controls", "A long one"]);
+        assert_eq!(shown.title, "Help");
+        assert!(!shown.reading);
+
+        let key = |moved: i32, turn: i32, pressed: bool, close: bool| Input {
+            moved,
+            turn,
+            pressed,
+            close,
+            ..Input::default()
+        };
+        menu.update(&key(2, 0, false, false), &mut cx);
+        menu.update(&key(0, 0, true, false), &mut cx);
+        let shown = menu.shown(&cx);
+        assert!(shown.reading);
+        assert_eq!(shown.title, "A long one");
+        assert_eq!(shown.hint, help::READING_HINT);
+        assert_eq!(shown.scroll, 0);
+        menu.update(&key(1, 0, false, false), &mut cx);
+        assert_eq!(menu.scroll, 1, "down a line");
+        menu.update(&key(0, 1, false, false), &mut cx);
+        assert_eq!(menu.scroll, VISIBLE, "right a screen less a line");
+        menu.update(&key(-30, 0, false, false), &mut cx);
+        assert_eq!(menu.scroll, 0, "no further than the top");
+        // A finger drags it up three lines; a tap on a line does nothing.
+        let touch = |pointers: Vec<Pointer>| Input {
+            taps: pointers
+                .iter()
+                .filter_map(|p| match *p {
+                    Pointer::Down(x, y) => Some((x, y)),
+                    _ => None,
+                })
+                .collect(),
+            pointers,
+            ..Input::default()
+        };
+        let y = row_y(5);
+        menu.update(&touch(vec![Pointer::Down(500.0, y)]), &mut cx);
+        menu.update(
+            &touch(vec![Pointer::Move(500.0, y - ROW_STEP * 3.0)]),
+            &mut cx,
+        );
+        menu.update(&touch(vec![Pointer::Up]), &mut cx);
+        assert_eq!(menu.scroll, 3);
+        assert!(menu.shown(&cx).reading, "still reading after the tap");
+        let most = menu.items(&cx).len() - VISIBLE;
+        menu.update(&touch(vec![Pointer::Down(500.0, y)]), &mut cx);
+        menu.update(
+            &touch(vec![Pointer::Move(500.0, y - ROW_STEP * 99.0)]),
+            &mut cx,
+        );
+        assert_eq!(menu.scroll, most, "no further than the end");
+
+        let done = menu.update(&key(0, 0, false, true), &mut cx);
+        assert!(!done.closed, "B goes back to the list");
+        let shown = menu.shown(&cx);
+        assert!(!shown.reading);
+        assert_eq!(menu.row, 2, "on the row it was opened from");
+        // A heading in a topic is drawn as one.
+        menu.row = 1;
+        menu.update(&key(0, 0, true, false), &mut cx);
+        let shown = menu.shown(&cx);
+        assert!(shown.rows[0].heading && shown.rows[0].label == "The D-pad");
+        assert!(!shown.rows[1].heading);
+        menu.update(&key(0, 0, false, true), &mut cx);
+        assert!(menu.update(&key(0, 0, false, true), &mut cx).closed);
     }
 
     #[test]

@@ -522,6 +522,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         };
         let own = game.art("Imgs");
         assert_eq!(crate::art::box_art(&game, &cache), own);

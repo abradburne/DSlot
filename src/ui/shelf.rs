@@ -235,6 +235,10 @@ struct State {
     /// The page the shelf had to leave (its games gone, or not there yet at the start): turned
     /// back to when its games are, unless another page has been chosen since.
     away_from: Option<Console>,
+    /// The folder of games open on each page (`Game::sub`): empty for the console's folder.
+    dirs: [String; Console::COUNT],
+    /// B pressed on the shelf: out of the folder of games open, to the one it is in.
+    up: bool,
 }
 
 /// The notice of a game that came straight back: why, and a bug report about it, where one can
@@ -502,7 +506,7 @@ fn woken_by(event: &Event) -> bool {
     )
 }
 
-fn filter<'a>(settings: &'a Settings, games: &[Game]) -> Filter<'a> {
+fn filter<'a>(settings: &'a Settings, games: &[Game], dirs: &'a [String]) -> Filter<'a> {
     let console = settings.page;
     let faves_only = settings.show(console) == Show::Favourites;
     // The section chosen, while the page has it (its games may have gone since).
@@ -514,6 +518,7 @@ fn filter<'a>(settings: &'a Settings, games: &[Game]) -> Filter<'a> {
         sort: settings.sort(console),
         faves_only,
         group,
+        dir: &dirs[console as usize],
     }
 }
 
@@ -533,7 +538,10 @@ pub fn sections(games: &[Game], console: Console) -> Vec<String> {
         return Vec::new();
     }
     let mut count: HashMap<&str, usize> = HashMap::new();
-    for g in games.iter().filter(|g| g.console == console && !g.gone) {
+    for g in games
+        .iter()
+        .filter(|g| g.console == console && !g.gone && !g.folder)
+    {
         // A game its list doesn't name is in Other.
         let group = if g.group.is_empty() {
             OTHER
@@ -581,7 +589,7 @@ fn pages(
     searched: &[Vec<PathBuf>; Console::COUNT],
     show_empty: bool,
 ) -> Vec<Console> {
-    let has = |c: Console| games.iter().any(|g| g.console == c && !g.gone);
+    let has = |c: Console| games.iter().any(|g| g.console == c && !g.gone && !g.folder);
     let looked = |c: Console| !searched[c as usize].is_empty();
     let any = Console::ALL.into_iter().any(|c| looked(c) && has(c));
     Console::PAGES
@@ -600,7 +608,7 @@ fn blade(games: &[Game], stats: &Stats, console: Console, cache: &Path) -> Blade
         games
             .iter()
             .enumerate()
-            .filter(move |(_, g)| g.console == console && !g.gone)
+            .filter(move |(_, g)| g.console == console && !g.gone && !g.folder)
     };
     let last = mine()
         .map(|(i, g)| (stats.last(&g.path), i))
@@ -690,7 +698,7 @@ fn soft(what: &str, drawn: Result<(), String>) {
 fn yours(games: &[Game], stats: &Stats, console: Console) -> Yours {
     let mine: Vec<&Game> = games
         .iter()
-        .filter(|g| g.console == console && !g.gone)
+        .filter(|g| g.console == console && !g.gone && !g.folder)
         .collect();
     // An app's play time says little: the one used last, for apps.
     let (by, most_is): (fn(&Stats, &Game) -> i64, _) = if console == Console::Apps {
@@ -750,7 +758,12 @@ impl State {
             away_from = Some(settings.page);
             settings.page = nearest(settings.page, &pages);
         }
-        let order = library::order(games, stats, filter(settings, games));
+        // Back from a game in a folder of games: in that folder.
+        let mut dirs: [String; Console::COUNT] = std::array::from_fn(|_| String::new());
+        if let Some(g) = back_from.and_then(|i| games.get(i)) {
+            dirs[g.console as usize] = g.sub.clone();
+        }
+        let order = library::order(games, stats, filter(settings, games, &dirs));
         let sel = order
             .iter()
             .position(|&g| back_from == Some(g))
@@ -787,6 +800,8 @@ impl State {
             strip_on: None,
             picker: None,
             away_from,
+            dirs,
+            up: false,
         }
     }
 
@@ -881,7 +896,7 @@ impl State {
         settings.page = to;
         settings.save();
         crate::mark(&format!("page {}", to.label()));
-        self.order = library::order(games, stats, filter(settings, games));
+        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
         self.sel = self.kept[to as usize]
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(0);
@@ -898,10 +913,55 @@ impl State {
     /// on the same game where it is still listed.
     fn relist(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
         let was = self.order.get(self.sel).copied();
-        self.order = library::order(games, stats, filter(settings, games));
+        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
         let sel = was.and_then(|g| self.order.iter().position(|&o| o == g));
         self.sel = sel.unwrap_or(self.sel.min(self.last()));
         self.carousel = self.sel as f32;
+        self.repeat.stop();
+        self.drag = None;
+        self.fling = None;
+    }
+
+    /// Opens the folder of games `games[g]` on this page, on its first entry.
+    fn open_folder(&mut self, games: &[Game], g: usize, stats: &Stats, settings: &Settings) {
+        let folder = &games[g];
+        let into = match folder.sub.is_empty() {
+            true => folder.stem.clone(),
+            false => format!("{}/{}", folder.sub, folder.stem),
+        };
+        crate::mark(&format!("folder {into}"));
+        self.dirs[settings.page as usize] = into;
+        self.show_dir(games, None, stats, settings);
+    }
+
+    /// Back out of the folder of games open on this page to the one it is in, on the folder
+    /// just left. Nothing in the console's folder itself, nor where favourites alone or a
+    /// section are shown (no folders there).
+    fn leave_folder(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
+        let page = settings.page;
+        let open = self.dirs[page as usize].clone();
+        if open.is_empty() || filter(settings, games, &self.dirs).flat() {
+            return;
+        }
+        let (up, name) = parent_dir(&open);
+        crate::mark(&format!("folder {up}"));
+        self.dirs[page as usize] = up.to_owned();
+        let left = games.iter().position(|g| {
+            g.folder && !g.gone && g.console == page && g.sub == up && g.stem == name
+        });
+        self.show_dir(games, left, stats, settings);
+    }
+
+    /// Lists the folder of games just opened, on `on` where it is listed (else the first).
+    fn show_dir(&mut self, games: &[Game], on: Option<usize>, stats: &Stats, settings: &Settings) {
+        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        self.sel = on
+            .and_then(|g| self.order.iter().position(|&o| o == g))
+            .unwrap_or(0);
+        self.carousel = self.sel as f32;
+        self.scroll = rows(mode(settings.page, settings)).map_or(0.0, |(per_row, ..)| {
+            (self.sel / per_row).saturating_sub(1) as f32
+        });
         self.repeat.stop();
         self.drag = None;
         self.fling = None;
@@ -911,7 +971,14 @@ impl State {
     /// (or, if it went, the one now in its place), and nothing on screen moves on its account.
     fn rescanned(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
         let was = self.order.get(self.sel).copied();
-        self.order = library::order(games, stats, filter(settings, games));
+        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        // The folder of games open has gone (its games with it): out to the nearest one left.
+        let page = settings.page as usize;
+        while self.order.is_empty() && !self.dirs[page].is_empty() {
+            let (up, _) = parent_dir(&self.dirs[page]);
+            self.dirs[page] = up.to_owned();
+            self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        }
         let sel = was
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(self.sel.min(self.last()));
@@ -945,7 +1012,9 @@ impl State {
                 let dir = self.hold(key);
                 self.sel = self.vertical(games, dir, mode);
             }
-            Key::A | Key::B => (self.insert, self.fling) = (Some(0.0), None),
+            Key::A => (self.insert, self.fling) = (Some(0.0), None),
+            // B never plays a game: it comes out of a folder of games.
+            Key::B => self.up = true,
             Key::Y => return true,
             Key::X | Key::L | Key::R | Key::L2 | Key::R2 | Key::Select | Key::Start | Key::Back => {
             }
@@ -1242,13 +1311,25 @@ impl State {
     }
 }
 
+/// A folder of games' place (`Game::sub`) split at its last `/`: the folder it is in (empty for
+/// the console's folder) and its own name.
+fn parent_dir(dir: &str) -> (&str, &str) {
+    dir.rsplit_once('/').unwrap_or(("", dir))
+}
+
 /// The line at the top of the touch screen: where the selection is, and what is filtering or
 /// sorting the list.
 fn heading(state: &State, settings: &Settings) -> String {
     let n = state.order.len();
     let place = (n > 0).then(|| format!("{} / {n}", state.sel + 1));
     let (show, sort) = (settings.show(settings.page), settings.sort(settings.page));
+    // The folder of games open, by its name.
+    let open = &state.dirs[settings.page as usize];
+    let folder =
+        (!open.is_empty() && show != Show::Favourites && settings.section(settings.page).is_none())
+            .then(|| parent_dir(open).1);
     let notes = [
+        folder,
         (show == Show::Favourites).then_some("Favourites"),
         (sort != Sort::Name).then_some(sort.label()),
     ];
@@ -1425,7 +1506,7 @@ fn show(
         // Games on this page before the favourites filter: none at all is its own screen.
         let on_page = games
             .iter()
-            .filter(|g| g.console == console && !g.gone)
+            .filter(|g| g.console == console && !g.gone && !g.folder)
             .count();
         let mode = mode(console, settings);
         // A sectioned page's sections (All first, then each board), the one on show; the grid
@@ -1579,10 +1660,19 @@ fn show(
                     state.repeat.stop();
                 }
                 Some(Input::Press(Key::Back)) if !games.is_empty() => {
-                    state.menu = Some(Menu::open(state.order.get(state.sel).is_some(), shelf.ra))
+                    let game = state
+                        .order
+                        .get(state.sel)
+                        .is_some_and(|&g| !games[g].folder);
+                    state.menu = Some(Menu::open(game, shelf.ra))
                 }
                 // X: the selected game's page.
-                Some(Input::Press(Key::X)) if state.order.get(state.sel).is_some() => {
+                Some(Input::Press(Key::X))
+                    if state
+                        .order
+                        .get(state.sel)
+                        .is_some_and(|&g| !games[g].folder) =>
+                {
                     let game = &games[state.order[state.sel]];
                     state.game_page = Some(GamePage::open(game, shelf.ra.account().is_some()));
                     ui.open_back(game, state.order[state.sel]);
@@ -1658,13 +1748,19 @@ fn show(
         }
 
         let mut relist = false;
-        let current = state.order.get(state.sel).map(|&g| &games[g]);
+        // The game selected: none on a folder of games.
+        let current = state
+            .order
+            .get(state.sel)
+            .map(|&g| &games[g])
+            .filter(|g| !g.folder);
         if let (true, Some(game)) = (fave, current) {
             stats.toggle_fave(&game.path);
             relist = true;
         }
         if let Some(open) = state.menu.as_mut() {
             state.drag = None;
+            menu_input.pointers = pointers.clone();
             let taps: Vec<_> = pointers
                 .drain(..)
                 .filter_map(|p| match p {
@@ -1860,7 +1956,10 @@ fn show(
                 _ => None,
             });
             if let Some(bluetooth) = hit {
-                let game = state.order.get(state.sel).is_some();
+                let game = state
+                    .order
+                    .get(state.sel)
+                    .is_some_and(|&g| !games[g].folder);
                 state.menu = Some(Menu::open_radio(game, bluetooth, shelf.ra));
                 pointers.clear();
             }
@@ -1885,6 +1984,18 @@ fn show(
             saver = Some(Saver::start(settings.saver_look()));
             state.repeat.stop();
             continue;
+        }
+
+        // A folder of games picked to play (A, a tap, a pull): into it, with no cart moving.
+        // B: out of the one open.
+        if state.insert == Some(0.0) {
+            if let Some(&g) = state.order.get(state.sel).filter(|&&g| games[g].folder) {
+                state.insert = None;
+                state.open_folder(games, g, stats, settings);
+            }
+        }
+        if std::mem::take(&mut state.up) {
+            state.leave_folder(games, stats, settings);
         }
 
         let pull = state.follow(dt, mode, geometry.2);
@@ -1994,7 +2105,9 @@ fn show(
             match current {
                 _ if paged.is_some() => {}
                 Some(g) => {
-                    let resume = resume_of(shelf, settings, &games[g]);
+                    let resume = (!games[g].folder)
+                        .then(|| resume_of(shelf, settings, &games[g]))
+                        .flatten();
                     let beside = if viewing {
                         Beside::Sheet
                     } else {
@@ -2033,6 +2146,8 @@ fn show(
                 heading: &heading,
                 strip,
                 fade,
+                inside: !state.dirs[console as usize].is_empty()
+                    && !filter(settings, games, &state.dirs).flat(),
             };
             // The View sheet leaves the shelf on the touch screen, to be seen changing.
             let sheet = state.menu.as_ref().filter(|m| m.page == menu::Page::View);
@@ -2206,6 +2321,8 @@ mod tests {
             cover: None,
             gone: false,
             group: group.into(),
+            folder: false,
+            sub: String::new(),
         };
         let mut games = vec![
             set("sf2", "CPS-1"),

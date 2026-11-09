@@ -413,6 +413,13 @@ pub struct Game {
     /// The group its emulator's list puts it in (`[games]`' last column): an arcade set's
     /// board, "Neo Geo", "CPS-2". Empty where there is none.
     pub group: String,
+    /// A folder of games in the console's folder (`Roms/GB/_chromatic`), not a game: the shelf
+    /// shows it among the games, and A goes into it. Its `path` is the folder, its `stem` its
+    /// name, and its title's second line how many games are in it.
+    pub folder: bool,
+    /// The folder it is in under the console's folder, `/` between folders: `_chromatic`,
+    /// `_chromatic/Hacks`; empty for one in the console's folder itself.
+    pub sub: String,
 }
 
 impl Game {
@@ -459,12 +466,33 @@ impl Game {
         nibkit::settings::Scope::game_key(self.console.folder(), &self.stem)
     }
 
-    /// `<rom dir>/<folder>/<rom name>.png`; an app's own icon for its box (`Imgs`).
+    /// `<rom dir>/<folder>/<rom name>.png`; an app's own icon for its box (`Imgs`). A game in a
+    /// folder of games may have its art beside it or in the console's folder: the first there.
     pub fn art(&self, folder: &str) -> PathBuf {
         if let (Some(cover), "Imgs") = (&self.cover, folder) {
             return cover.clone();
         }
-        self.dir().join(folder).join(format!("{}.png", self.stem))
+        let file = format!("{}.png", self.stem);
+        let own = self.dir().join(folder).join(&file);
+        if self.sub.is_empty() || self.folder {
+            return own;
+        }
+        let top = self.root_dir().join(folder).join(&file);
+        if !own.is_file() && top.is_file() {
+            top
+        } else {
+            own
+        }
+    }
+
+    /// The console's folder (`Roms/GB`), for a game in a folder of games as well.
+    pub fn root_dir(&self) -> &Path {
+        let up = if self.sub.is_empty() {
+            0
+        } else {
+            self.sub.split('/').count()
+        };
+        self.dir().ancestors().nth(up).unwrap_or(self.dir())
     }
 
     /// The console's folder it is in (`Roms/GBA`): its file's, or, for a PSP download (an
@@ -497,7 +525,15 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
         .iter()
         .filter_map(|d| d.parent().map(Path::to_path_buf))
         .collect();
-    for dir in dirs {
+    // Each console folder, then the folders of games found in it (`sub` is where one is).
+    let mut todo: Vec<(PathBuf, String)> = dirs
+        .iter()
+        .rev()
+        .map(|d| (d.clone(), String::new()))
+        .collect();
+    let mut folders: Vec<(PathBuf, String, String)> = Vec::new();
+    while let Some((dir, sub)) = todo.pop() {
+        let dir = &dir;
         let Ok(rd) = fs::read_dir(dir) else { continue };
         // A port's name and picture are its folder's, read afresh each time (rom/ports.rs).
         let ports = if console == Console::Ports {
@@ -509,6 +545,16 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
             // A PSP download is a folder: its EBOOT.PBP, named after the folder.
             let (path, stem) = match download(console, &entry) {
                 Some(found) => found,
+                None if game_folder(console, &entry, &sub) => {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    let inner = match sub.is_empty() {
+                        true => name.clone(),
+                        false => format!("{sub}/{name}"),
+                    };
+                    folders.push((entry.path(), sub.clone(), name));
+                    todo.push((entry.path(), inner));
+                    continue;
+                }
                 None => {
                     let path = entry.path();
                     let Some(stem) = rom_name(&path) else {
@@ -546,6 +592,8 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
                     cover: None,
                     gone: false,
                     group: String::new(),
+                    folder: false,
+                    sub: sub.clone(),
                 });
                 continue;
             }
@@ -568,6 +616,8 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
                     cover: port.picture,
                     gone: false,
                     group: String::new(),
+                    folder: false,
+                    sub: sub.clone(),
                 });
                 continue;
             }
@@ -594,6 +644,8 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
                 cover: None,
                 gone: false,
                 group: String::new(),
+                folder: false,
+                sub: sub.clone(),
             });
         }
     }
@@ -611,12 +663,142 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
             eprintln!("dslot: cannot write {}: {e}", known.display());
         }
     }
+    games.extend(folder_entries(console, &games, folders));
     games.sort_by_key(|g| g.name().to_lowercase());
     // PortMaster itself heads the Ports page, to get more: there with no ports yet too.
     if console == Console::Ports {
         games.extend(ports::get_more());
     }
     games
+}
+
+/// The folders DSlot keeps a console's artwork in, beside its games: never folders of games.
+const ART_FOLDERS: [&str; 3] = ["Imgs", "Labels", "Carts"];
+
+/// How deep folders of games go in a console's folder.
+const FOLDER_DEPTH: usize = 6;
+
+/// Whether `entry`, in the console folder's folder `sub`, is a folder that may hold games: not
+/// a hidden one, nor one of DSlot's artwork, nor on the Ports page (a port's folder is its
+/// data) or the Apps page.
+fn game_folder(console: Console, entry: &fs::DirEntry, sub: &str) -> bool {
+    let name = entry.file_name();
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    !matches!(console, Console::Ports | Console::Apps)
+        && !name.starts_with('.')
+        && !ART_FOLDERS.iter().any(|a| name.eq_ignore_ascii_case(a))
+        && (sub.is_empty() || sub.split('/').count() < FOLDER_DEPTH)
+        && entry.file_type().is_ok_and(|t| t.is_dir())
+}
+
+/// The folders of games among `folders` (each its path, the folder it is in and its name), as
+/// entries for the shelf: those with games in them (or in folders in them), the one of a name
+/// on each card listed once.
+fn folder_entries(
+    console: Console,
+    games: &[Game],
+    folders: Vec<(PathBuf, String, String)>,
+) -> Vec<Game> {
+    let mut entries: Vec<Game> = Vec::new();
+    for (path, sub, name) in folders {
+        let inner = match sub.is_empty() {
+            true => name.clone(),
+            false => format!("{sub}/{name}"),
+        };
+        if entries.iter().any(|e| e.sub == sub && e.stem == name) {
+            continue;
+        }
+        let n = games
+            .iter()
+            .filter(|g| g.sub == inner || g.sub.starts_with(&format!("{inner}/")))
+            .count();
+        if n == 0 {
+            continue;
+        }
+        entries.push(Game {
+            console,
+            path,
+            title: vec![
+                name.clone(),
+                format!("{n} {}", if n == 1 { "game" } else { "games" }),
+            ],
+            stem: name,
+            code: String::new(),
+            icon: None,
+            cover: None,
+            gone: false,
+            group: String::new(),
+            folder: true,
+            sub,
+        });
+    }
+    entries
+}
+
+/// Up to `most` of the games in the folder of games `folder`, by name, for its picture: those
+/// right in it first, then those in the folders in it. Each knows its place, so its art is
+/// found as the shelf finds it.
+pub fn folder_samples(folder: &Game, most: usize) -> Vec<Game> {
+    let inner = match folder.sub.is_empty() {
+        true => folder.stem.clone(),
+        false => format!("{}/{}", folder.sub, folder.stem),
+    };
+    let mut found = Vec::new();
+    let mut todo = vec![(folder.path.clone(), inner)];
+    while let Some((dir, sub)) = todo.pop() {
+        let Ok(rd) = fs::read_dir(&dir) else { continue };
+        let mut entries: Vec<fs::DirEntry> = rd.flatten().collect();
+        entries.sort_by_key(|e| e.file_name().to_ascii_lowercase());
+        let mut deeper = Vec::new();
+        for entry in entries {
+            if found.len() >= most {
+                return found;
+            }
+            if game_folder(folder.console, &entry, &sub) {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                deeper.push((entry.path(), format!("{sub}/{name}")));
+                continue;
+            }
+            let path = entry.path();
+            let Some(stem) = rom_name(&path) else {
+                continue;
+            };
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if stem.starts_with('.') || !folder.console.takes(&ext) || !path.is_file() {
+                continue;
+            }
+            let (code, title, icon) = match folder.console == Console::Ds && ext == "zip" {
+                true => (String::new(), Vec::new(), None),
+                false => read_header(folder.console, &path, &stem),
+            };
+            found.push(Game {
+                console: folder.console,
+                path,
+                title: if title.is_empty() {
+                    vec![stem.clone()]
+                } else {
+                    title
+                },
+                stem,
+                code,
+                icon,
+                cover: None,
+                gone: false,
+                group: String::new(),
+                folder: false,
+                sub: sub.clone(),
+            });
+        }
+        // The folders in it after its own games, the first of them first.
+        todo.extend(deeper.into_iter().rev());
+    }
+    found
 }
 
 /// The arcade BIOS sets FinalBurn Neo names (its libretro README's "BIOS" tables): there for the
@@ -714,6 +896,8 @@ pub fn apps(found: &[nibkit::dslot::Found]) -> Vec<Game> {
             cover: f.icon.clone(),
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         }
     };
     found.iter().map(game).collect()
@@ -783,6 +967,8 @@ pub fn read_one(path: &Path) -> Option<Game> {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         });
     }
     let folder = up.file_name()?.to_str()?;
@@ -834,6 +1020,8 @@ pub fn read_one(path: &Path) -> Option<Game> {
         cover: None,
         gone: false,
         group: String::new(),
+        folder: false,
+        sub: String::new(),
     })
 }
 
@@ -1849,6 +2037,56 @@ mod tests {
             assert_eq!(g.console, Console::Nes);
             assert_eq!(g.stem, "game");
         }
+    }
+
+    /// Folders of games in a console's folder are listed as folders, each game in one knowing
+    /// where it is; empty folders, hidden ones and DSlot's artwork are not.
+    #[test]
+    fn folders_of_games() {
+        let dir = TempDir::new("folders");
+        let gb = dir.path().join("Roms/GB");
+        for sub in ["_chromatic/Hacks", "Empty/Deeper", ".hidden", "Imgs"] {
+            fs::create_dir_all(gb.join(sub)).unwrap();
+        }
+        for name in [
+            "Top.gb",
+            "_chromatic/One.gb",
+            "_chromatic/Hacks/Two.gb",
+            ".hidden/Three.gb",
+            "Imgs/Four.gb",
+        ] {
+            fs::write(gb.join(name), b"not much").unwrap();
+        }
+        fs::write(gb.join("Imgs/_chromatic.png"), b"").unwrap();
+        let cache = dir.path().join(Console::Gb.known());
+        let games = scan(Console::Gb, std::slice::from_ref(&gb), &cache);
+        let mut seen: Vec<(String, &str, bool)> = games
+            .iter()
+            .map(|g| (g.sub.clone(), g.stem.as_str(), g.folder))
+            .collect();
+        seen.sort();
+        assert_eq!(
+            seen,
+            [
+                (String::new(), "Top", false),
+                (String::new(), "_chromatic", true),
+                ("_chromatic".into(), "Hacks", true),
+                ("_chromatic".into(), "One", false),
+                ("_chromatic/Hacks".into(), "Two", false),
+            ]
+        );
+        let chromatic = games.iter().find(|g| g.stem == "_chromatic").unwrap();
+        assert_eq!(chromatic.title[1], "2 games");
+        assert_eq!(chromatic.art("Imgs"), gb.join("Imgs/_chromatic.png"));
+        let two = games.iter().find(|g| g.stem == "Two").unwrap();
+        assert_eq!(two.root_dir(), gb);
+        assert_eq!(two.dir(), gb.join("_chromatic/Hacks"));
+        // Its art beside it, else in the console's folder.
+        assert_eq!(two.art("Imgs"), gb.join("_chromatic/Hacks/Imgs/Two.png"));
+        fs::write(gb.join("Imgs/Two.png"), b"").unwrap();
+        assert_eq!(two.art("Imgs"), gb.join("Imgs/Two.png"));
+        // Read again from what was known: the same.
+        assert_eq!(scan(Console::Gb, &[gb], &cache).len(), games.len());
     }
 
     #[test]

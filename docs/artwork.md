@@ -15,6 +15,34 @@ Roms/NDS/Carts/Example Game (USA).png     finished cart (optional)
 Every system's artwork is laid out the same way beside its ROMs (`Roms/GBA/Imgs/...`).
 Every DS box is drawn the shape of a real DS case (137 : 125); a cover of another shape is scaled to fill it and cropped about its centre.
 
+## Folders of games
+
+A system's folder can hold folders of games ([README](../README.md#pages)). A game in one finds
+its artwork beside it first, in that folder's own `Imgs/`, `Labels/` and `Carts/`, then in the
+system's:
+
+```
+Roms/GB/_chromatic/Moon Ferry.gb
+Roms/GB/_chromatic/Imgs/Moon Ferry.png     box front, looked for first
+Roms/GB/Imgs/Moon Ferry.png                box front, if the folder has none
+```
+
+A folder of games is drawn as a folder, cart and box alike, in its system's colour, with its name
+and how many games it holds on the front. Standing up out of it are the boxes of its first three
+games by name (its own games first, then those in the folders inside it), or, where it has one,
+its own picture: a PNG named after the folder in the `Imgs/` beside it.
+
+```
+Roms/GB/_chromatic/                        the folder
+Roms/GB/Imgs/_chromatic.png                its picture
+Roms/GB/_chromatic/Hacks/                  a folder inside it
+Roms/GB/_chromatic/Imgs/Hacks.png          that folder's picture
+```
+
+The picture can be any shape: it is drawn a little under half the folder's width and as tall as
+its shape makes it, and the folder's front covers its lower part, so the top half is what shows.
+A box front or a logo works; a picture with the subject near its top shows best.
+
 ## Cart label format
 
 A label is the sticker alone, as printed: logo band, artwork and the strip with the game code. The frontend supplies the plastic.

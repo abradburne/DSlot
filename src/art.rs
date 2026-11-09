@@ -3,6 +3,7 @@
 
 mod disc;
 mod finish;
+mod folder;
 mod shells;
 mod studio;
 
@@ -1001,6 +1002,16 @@ pub fn box_art(game: &Game, cache: &Path) -> std::path::PathBuf {
 /// A game's cart and its box, the box art read once for both.
 pub fn art(shell: &Shell, game: &Game, fonts: &Fonts, looks: Looks, cache: &Path) -> (Img, Img) {
     let src = load_png(&box_art(game, cache));
+    // A folder of games is a folder, cart and box: its picture on it where it has one.
+    if game.folder {
+        let inside = folder_inside(game, fonts, looks.black(game), src.as_ref(), cache);
+        let (cw, ch) = cart_size(game.console);
+        let (bw, bh) = box_size(game.console);
+        return (
+            folder_art(game, fonts, &inside, cw, ch),
+            folder_art(game, fonts, &inside, bw, bh),
+        );
+    }
     // An app's page is a grid of boxes alone: no cart to draw.
     let cart = if disc::is_disc(game.console) {
         disc::disc(
@@ -1323,6 +1334,33 @@ fn boxart(game: &Game, fonts: &Fonts, black: bool, src: Option<&Img>) -> Img {
     img
 }
 
+/// A folder of games' picture, `w` x `h` (folder.rs).
+fn folder_art(game: &Game, fonts: &Fonts, inside: &[Img], w: usize, h: usize) -> Img {
+    let c = crate::ui::console_colour(game.console);
+    folder::draw(game, fonts, [c.r, c.g, c.b], inside, w, h)
+}
+
+/// What stands up out of a folder of games: its own picture (`Imgs/<folder>.png` beside it)
+/// where it has one, else the boxes of its first games.
+fn folder_inside(
+    game: &Game,
+    fonts: &Fonts,
+    black: bool,
+    own: Option<&Img>,
+    cache: &Path,
+) -> Vec<Img> {
+    if let Some(own) = own {
+        return vec![own.clone()];
+    }
+    crate::rom::folder_samples(game, 3)
+        .iter()
+        .map(|g| {
+            let src = load_png(&box_art(g, cache));
+            boxart(g, fonts, black, src.as_ref())
+        })
+        .collect()
+}
+
 /// Fit a box within a grid cell, preserving landscape covers as well as square ones.
 pub fn thumb_size(console: Console, size: (usize, usize)) -> (usize, usize) {
     if console == Console::Ds {
@@ -1353,7 +1391,9 @@ pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cach
     let head: Vec<u8> = stamp.iter().flat_map(|v| v.to_le_bytes()).collect();
 
     // FNV-1a over everything the picture depends on bar the source's contents.
-    let key = format!("{}|{black}|{w}x{h}", game.path.display());
+    // A folder's picture also shows what is in it, which its own date doesn't follow.
+    let folder = if game.folder { "|folder" } else { "" };
+    let key = format!("{}|{black}|{w}x{h}{folder}", game.path.display());
     let hash = key.bytes().fold(0xcbf29ce484222325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x100000001b3)
     });
@@ -1369,7 +1409,15 @@ pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cach
     }
 
     let src = load_png(&art);
-    let img = boxart(game, fonts, black, src.as_ref()).shrink(w, h);
+    let img = match game.folder {
+        true => {
+            let inside = folder_inside(game, fonts, black, src.as_ref(), cache);
+            let (bw, bh) = box_size(game.console);
+            folder_art(game, fonts, &inside, bw, bh)
+        }
+        false => boxart(game, fonts, black, src.as_ref()),
+    }
+    .shrink(w, h);
     let _ = fs::create_dir_all(cache);
     let _ = fs::write(&file, [head.as_slice(), &img.px].concat());
     img
@@ -1529,6 +1577,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         };
         let looks = |snes| Looks {
             case: Case::Region,
@@ -1567,6 +1617,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         };
         // Red at the top, blue at the bottom: a crop to the box's shape would lose both.
         let mut src = Img::new(100, 160);
@@ -1602,6 +1654,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         }
     }
 

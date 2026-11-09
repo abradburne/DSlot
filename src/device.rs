@@ -108,7 +108,7 @@ pub fn about(games: &[Game], stats: &Stats) -> About {
     }
 
     // What is on the cards, and what has been played.
-    let here: Vec<&Game> = games.iter().filter(|g| !g.gone).collect();
+    let here: Vec<&Game> = games.iter().filter(|g| !g.gone && !g.folder).collect();
     let consoles = |gs: &[&Game]| {
         let mut cs: Vec<Console> = gs
             .iter()

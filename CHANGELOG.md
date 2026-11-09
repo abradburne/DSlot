@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **System → Help**: What's new in the running nibOS and short help topics (the controls, the
+  menu, saves, sleep and charging, Wi-Fi, adding games, the console), the last section under
+  System. nibOS keeps them as text files (`/usr/share/nibos/whats-new.txt`, written from its
+  changelog when an image is built, and `/usr/share/nibos/help/`); nibkit 0.5's `guide` reads
+  them. A topic is read as a page of text with no highlight: up and down scroll it a line, left
+  and right a screen, a finger drags it, and B goes back to the list. Where there are no files
+  (the stock OS) there is no Help section.
+- **Folders of games**: a folder in a console's folder (`Roms/GB/_chromatic`, and folders in
+  it) is on the shelf as a folder, before the games, with how many games are in it. A opens it
+  (or a tap on it, or a pull); B goes back out, onto the folder left, and the heading names the
+  folder open. A folder with no games in it, a hidden one, DSlot's `Imgs`/`Labels`/`Carts`, and
+  the Ports and Apps pages' folders are not shown. A game in a folder finds its art beside it,
+  else in the console's `Imgs` and the rest; back from a game, the shelf is in its folder.
+  Favourites alone and an arcade section list every game of theirs, in whatever folder.
+- **B never starts a game**: it used to insert the cart, as A does.
+
 ## 0.6.0
 
 - **Both screens lit when the shelf comes back**: a player turns off a screen it doesn't use

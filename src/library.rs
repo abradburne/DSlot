@@ -17,14 +17,27 @@ pub struct Filter<'a> {
     pub faves_only: bool,
     /// One section of the page's games alone (`Game::group`: an arcade board), or all of them.
     pub group: Option<&'a str>,
+    /// The folder of games open (`Game::sub`): its games and folders alone. Favourites alone and
+    /// a section show every game of theirs, in whatever folder, and no folders.
+    pub dir: &'a str,
+}
+
+impl Filter<'_> {
+    /// Whether the page shows its games whatever folder they are in, and no folders: favourites
+    /// alone, or one section.
+    pub fn flat(&self) -> bool {
+        self.faves_only || self.group.is_some()
+    }
 }
 
 /// The games on the page, in order, as indices into `games`.
 pub fn order(games: &[Game], stats: &Stats, filter: Filter) -> Vec<usize> {
     let shown = |i: &usize| {
         let g = &games[*i];
+        let flat = filter.flat();
         g.console == filter.console
             && !g.gone
+            && if flat { !g.folder } else { g.sub == filter.dir }
             && (!filter.faves_only || stats.fave(&g.path))
             && filter
                 .group
@@ -39,6 +52,8 @@ pub fn order(games: &[Game], stats: &Stats, filter: Filter) -> Vec<usize> {
         Sort::Recent => order.sort_by_key(|&i| std::cmp::Reverse(stats.last(&games[i].path))),
         Sort::Rating => order.sort_by_key(|&i| std::cmp::Reverse(stats.rating(&games[i].path))),
     }
+    // Folders of games before the games, by name, however the games are sorted.
+    order.sort_by_key(|&i| !games[i].folder);
     // On the Ports page, PortMaster's tile first, however the ports are sorted.
     if filter.console == Console::Ports {
         order.sort_by_key(|&i| !games[i].is_app());
@@ -116,6 +131,8 @@ mod tests {
             cover: None,
             gone: false,
             group: String::new(),
+            folder: false,
+            sub: String::new(),
         }
     }
 
@@ -136,6 +153,8 @@ mod tests {
     fn one_section_alone() {
         let set = |name: &str, group: &str| Game {
             group: group.into(),
+            folder: false,
+            sub: String::new(),
             ..game(Console::Arcade, name)
         };
         let games = vec![
@@ -152,6 +171,7 @@ mod tests {
             sort: Sort::Name,
             faves_only: false,
             group: None,
+            dir: "",
         };
         assert_eq!(order(&games, &stats, arcade).len(), 5);
         let neo = Filter {
@@ -190,6 +210,7 @@ mod tests {
                 sort,
                 faves_only: false,
                 group: None,
+                dir: "",
             };
             assert_eq!(order(&games, &stats, filter)[0], 2, "{sort:?}");
         }
@@ -205,6 +226,7 @@ mod tests {
             sort: Sort::Name,
             faves_only: false,
             group: None,
+            dir: "",
         };
         assert_eq!(order(&games, &stats, ds), [0, 1, 3, 4]);
         assert_eq!(
@@ -257,6 +279,7 @@ mod tests {
             sort: Sort::Name,
             faves_only: false,
             group: None,
+            dir: "",
         };
         // "Animal" deleted, "Apple" copied in; the GBA game untouched.
         let found = vec![
@@ -278,6 +301,41 @@ mod tests {
         assert_eq!(merge(&mut games, Console::Ds, back), (1, 4));
         assert_eq!(order(&games, &stats, ds), [1]);
         assert_eq!(games.len(), 6);
+    }
+
+    /// A page lists the folder of games open, its folders first; favourites alone, every
+    /// favourite, wherever it is, and no folders.
+    #[test]
+    fn folders_of_games() {
+        let mut games = vec![
+            game(Console::Gb, "Zed"),
+            game(Console::Gb, "One"),
+            game(Console::Gb, "_chromatic"),
+            game(Console::Gb, "Two"),
+        ];
+        games[1].sub = "_chromatic".into();
+        games[2].folder = true;
+        games[3].sub = "_chromatic".into();
+        let dir = TempDir::new("folders");
+        let stats = Stats::load(dir.path().join("stats.tsv"));
+        let top = Filter {
+            console: Console::Gb,
+            sort: Sort::Name,
+            faves_only: false,
+            group: None,
+            dir: "",
+        };
+        assert_eq!(order(&games, &stats, top), [2, 0]);
+        let inside = Filter {
+            dir: "_chromatic",
+            ..top
+        };
+        assert_eq!(order(&games, &stats, inside), [1, 3]);
+        let faves = Filter {
+            faves_only: true,
+            ..top
+        };
+        assert!(faves.flat() && !top.flat());
     }
 
     #[test]

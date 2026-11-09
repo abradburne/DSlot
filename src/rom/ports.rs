@@ -33,6 +33,8 @@ pub fn get_more() -> Option<Game> {
         cover: found.icon.clone(),
         gone: false,
         group: String::new(),
+        folder: false,
+        sub: String::new(),
     })
 }
 

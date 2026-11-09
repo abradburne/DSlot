@@ -159,6 +159,17 @@ their page about a second after the copy finishes, and so do a card's games when
 or taken out; the selection stays where it was. **Rescan games** on the menu's System page
 looks again at every page, for a change DSlot didn't notice.
 
+**Folders of games.** A folder inside a system's folder (`Roms/GB/_chromatic`, `Roms/PS/RPGs`)
+is on its page as a folder, before the games, with its name and how many games it holds; folders
+inside it work the same way, a few deep. A (or a tap on it, or pulling it down) opens it; **B**
+goes back out, onto the folder you left, and the line at the top of the touch screen names the
+folder open. Coming back from a game opens the folder it is in. A folder with no games in it, a
+hidden one (`.name`), and the artwork folders `Imgs`, `Labels` and `Carts` are not shown, nor are
+folders on the Ports and Apps pages (a port's folder is its data). With **Show** set to
+Favourites, or an arcade section chosen, a page lists all its games, in whatever folder, and no
+folders. A folder is drawn as a folder in its system's colour, with the boxes of the first games
+in it standing up out of it, or a picture of its own: see [Artwork](#artwork).
+
 PortMaster's ports in `Roms/PORTS` have a **Ports** page, each named and pictured from its own
 folder and started with PortMaster's runner; while one plays on the top screen, the bottom one
 says how to quit it. See [Ports](docs/ports.md).
@@ -245,7 +256,8 @@ scripts too. How to make one: [docs/apps.md](docs/apps.md).
 | D-pad up / down | Jump to the previous / next letter (a row, in the cover grid; a game, in a list) |
 | L / R, or tap a page's tab | The previous / next page (the tabs scroll when there are more than fit; tap a faded end to see more) |
 | Select | The system picker: a blade for each system, its games and when one was last played, and its card on the top screen. Up / down (or drag) to choose, A or a tap to go there, B or Select to close |
-| A, or drag the cart down | Insert the cart and play |
+| A, or drag the cart down | Insert the cart and play; on a folder of games, open it |
+| B | Out of the folder of games open, to the one it is in. B never starts a game |
 | Tap a neighbouring cart | Bring it to the centre |
 | Tap a cover in the grid or a name in a list, then tap it again | Pick it, then play it |
 | Flick the grid or a list | It keeps scrolling and slows to a stop, as on a phone; touch it to stop it |
@@ -271,7 +283,7 @@ it, Y resets it to what it inherits, B or Back closes the menu.
 |---|---|---|
 | Game | | Favourite and rating; the emulator it starts in and that emulator's options for it (DSperate: 3D resolution, frame skip, ...); clear its resume state, delete its saves (each asks first: A, then A again). |
 | Console | Emulator, Shelf | The emulator its games start in (only when more than one is installed) and that emulator's options; how the page is shown: View, Sort by, Show, Game case. |
-| System | Shelf, Screen, Sound, Power, Time, About, Update | How every page is shown (unless its console says otherwise), Button repeat, Rescan games; each screen's brightness and the screensaver; the volume, Sounds and the speakers' tuning; the battery, Start at power-on, Power off; the clock; the device and what it is using; on nibOS, its updates. |
+| System | Shelf, Screen, Sound, Power, Time, About, Update, Help | How every page is shown (unless its console says otherwise), Button repeat, Rescan games; each screen's brightness and the screensaver; the volume, Sounds and the speakers' tuning; the battery, Start at power-on, Power off; the clock; the device and what it is using; on nibOS, its updates, and What's new in it with short help topics (read with the D-pad or a finger, B back to the list). |
 | Network | Wi-Fi, Bluetooth, Network info | nibOS: the networks and devices, and what to read out when something won't connect. |
 
 A setting for a game wins over its console's, which wins over the system's, and each row says
@@ -317,6 +329,12 @@ Artwork is optional. With none, every cart gets a sticker printed from the ROM's
 icon and game code, and every box is drawn from the same. Box art goes in `Imgs/` beside the
 ROMs, the folder the stock menu uses, so one set of covers serves both; labels and finished
 carts can go in `Labels/` and `Carts/`. Names, shapes and sizes: [docs/artwork.md](docs/artwork.md).
+
+A game in a folder of games has its artwork in that folder's own `Imgs/`, `Labels/` and `Carts/`
+(`Roms/GB/_chromatic/Imgs/<name>.png`), or else in the system's (`Roms/GB/Imgs/<name>.png`). A
+folder of games can have a picture of its own, named after the folder, in the `Imgs/` beside it:
+`Roms/GB/Imgs/_chromatic.png` (for `Roms/GB/_chromatic/Hacks`, `Roms/GB/_chromatic/Imgs/Hacks.png`).
+Without one, the boxes of its first three games stand in it.
 
 A game with no box art in `Imgs/` gets libretro's (thumbnails.libretro.com, by the ROM's file
 name) the first time its page (X) is opened with a network: it is kept in DSlot's cache, not on
