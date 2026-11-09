@@ -209,6 +209,9 @@ struct State {
     /// Seconds since the selected cart started into the slot, and whether its click is queued.
     insert: Option<f32>,
     clicked: bool,
+    /// Select was held as the cart went in (Select + A): the game starts without its resume
+    /// point, which is set aside.
+    fresh: bool,
     /// Seconds since the cart started out of the slot (from below 0: the click's lead).
     eject: Option<f32>,
     popped: bool,
@@ -649,17 +652,8 @@ fn page_context<'a>(
 /// Where `game`'s resume point is, by the emulator it starts in, if that is one whose resume
 /// points DSlot can read (resume.rs) and DSlot gives it its saves folder.
 fn resume_of(shelf: &Shelf, settings: &Settings, game: &Game) -> Option<crate::resume::Wanted> {
-    let root = crate::platform::saves()?;
     let emulator = crate::launch::emulator_for(shelf.emulators, settings, game)?;
-    let command = emulator.command(game.console.folder())?;
-    if !command.iter().any(|w| w.contains("{saves}")) {
-        return None;
-    }
-    Some(crate::resume::Wanted {
-        saves: crate::launch::saves_dir(&root, game),
-        stem: game.stem.clone(),
-        by: crate::resume::By::of(&emulator.name, command)?,
-    })
+    crate::launch::resume_point(emulator, game)
 }
 
 /// A button as the on-screen keyboard takes it.
@@ -780,6 +774,7 @@ impl State {
             order,
             sel,
             insert: None,
+            fresh: false,
             clicked: false,
             eject,
             popped: false,
@@ -1998,10 +1993,15 @@ fn show(
             state.leave_folder(games, stats, settings);
         }
 
+        // Select held as A is pressed, or at any time while the cart goes in: started fresh.
+        state.fresh = state.insert.is_some() && (state.fresh || reader.select_held());
         let pull = state.follow(dt, mode, geometry.2);
         let (pull, inserted) = state.slot(dt, &mut sound, pull);
         if inserted {
-            leaving = Some(Outcome::Launch(state.order[state.sel]));
+            leaving = Some(Outcome::Launch {
+                game: state.order[state.sel],
+                fresh: state.fresh,
+            });
         }
         sound.tick(dt);
 
@@ -2240,9 +2240,19 @@ fn show(
             crate::mark("first frame drawn");
         }
         // A port plays on the top screen alone: the bottom one says how to get out of it.
-        if let Some(Outcome::Launch(g) | Outcome::Resume(g)) = leaving {
+        if let Some(Outcome::Launch { game: g, .. } | Outcome::Resume(g)) = leaving {
             if games[g].console == Console::Ports {
                 ui.draw_port_help(games[g].name())?;
+            }
+        }
+        // Started fresh: said over the fade, and kept on screen as the game starts.
+        if state.fresh {
+            let resumes = state
+                .order
+                .get(state.sel)
+                .is_some_and(|&g| resume_of(shelf, settings, &games[g]).is_some());
+            if resumes {
+                soft("the fresh start", ui.draw_fresh());
             }
         }
         // Leaving for a game: this frame is what DSlot keeps on screen while it goes.

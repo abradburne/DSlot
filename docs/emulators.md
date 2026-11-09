@@ -164,6 +164,13 @@ to run the game (its metadata's `core` says which), and the others are set aside
 made it, else the core's file set aside. An emulator with a resume point of its own can be read
 the same way by adding its format to `resume.rs`.
 
+**Starting fresh.** Select + A on the shelf starts a game without its resume point. Before the
+emulator starts, DSlot renames the files the start would resume from, adding `.before-fresh`
+(replacing any set aside before, so one is kept): DSperate's `*.auto.dss` and `*.auto.thumb`;
+inkdot's and inktick's `<ROM name>.auto.state`; nibcase's `<ROM name>.auto.state` (unless
+another core made it: nibcase sets that aside for its own core) and the chosen core's
+`<ROM name>.auto-<core>.state`. Renaming a file back brings the resume point back.
+
 ## Options
 
 Each `[[options]]` entry becomes a setting on the console's page and the Game page of DSlot's

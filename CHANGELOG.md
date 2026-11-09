@@ -17,6 +17,12 @@
   else in the console's `Imgs` and the rest; back from a game, the shelf is in its folder.
   Favourites alone and an arcade section list every game of theirs, in whatever folder.
 - **B never starts a game**: it used to insert the cart, as A does.
+- **Start a game fresh**: hold Select and press A (or hold Select as the cart goes in) and the
+  game starts from boot, not from its resume point; "Starting fresh" shows as the cart goes
+  in. The resume point is set aside, not deleted: renamed `<file>.before-fresh` in the game's
+  saves folder, one kept, for DSperate, inkdot, inktick and nibcase games. Select tapped alone
+  still opens the system picker; let go after another button, it no longer does. In a desktop
+  preview, S stands in for Select the same way.
 
 ## 0.6.0
 

@@ -55,8 +55,12 @@ use std::sync::Mutex;
 
 /// How the shelf ends.
 pub enum Outcome {
-    /// The game at this index was pushed into the slot.
-    Launch(usize),
+    /// The game at this index was pushed into the slot; `fresh`, with Select held (Select +
+    /// A): its resume point is set aside, and it starts from the beginning.
+    Launch {
+        game: usize,
+        fresh: bool,
+    },
     /// The game at this index, put away for the power menu, carries on (Cancel, or a wake).
     Resume(usize),
     /// Installed emulator descriptions changed: the pages and menus are made again.

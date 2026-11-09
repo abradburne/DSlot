@@ -15,6 +15,10 @@
 //!
 //! The one shown is the one the next start will resume: the chosen emulator's. One without a
 //! picture is left out.
+//!
+//! Started fresh (Select + A on the shelf), a game's resume point is set aside, not deleted:
+//! each file is renamed with `.before-fresh` after it, replacing the last one set aside, so a
+//! mistaken start can be undone by renaming it back.
 
 use crate::gfx::{self, Img};
 use std::fs;
@@ -109,6 +113,66 @@ pub fn find(wanted: &Wanted) -> Option<Resume> {
     }
 }
 
+/// What is added to a resume point's name when a game is started fresh.
+pub const BEFORE_FRESH: &str = ".before-fresh";
+
+/// The files the next start of `wanted`'s game would resume from: DSperate's every
+/// `*.auto.dss` with its `*.auto.thumb`; inkdot's and inktick's `<ROM name>.auto.state`;
+/// nibcase's `<ROM name>.auto.state` unless another core made it (nibcase sets that one
+/// aside for its own core), and the chosen core's own set aside, `<ROM name>.auto-<core>.state`.
+fn resume_files(wanted: &Wanted) -> Vec<PathBuf> {
+    let saves = &wanted.saves;
+    match &wanted.by {
+        By::Dsperate => {
+            let mut files: Vec<PathBuf> = fs::read_dir(saves)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.to_string_lossy().ends_with(".auto.dss"))
+                .flat_map(|state| {
+                    let s = state.to_string_lossy();
+                    let thumb = PathBuf::from(format!("{}.thumb", s.trim_end_matches(".dss")));
+                    [state, thumb]
+                })
+                .collect();
+            files.sort();
+            files
+        }
+        By::Inkdot | By::Inktick => vec![saves.join(format!("{}.auto.state", wanted.stem))],
+        By::Nibcase(key) => {
+            let current = saves.join(format!("{}.auto.state", wanted.stem));
+            let own = saves.join(format!("{}.auto-{key}.state", wanted.stem));
+            // Another core's, positively: left for nibcase to set aside as that core's. One
+            // that can't be read is set aside too: it may be why the game won't start.
+            let others = nibcase_core(&current).is_some_and(|core| core_key(&core) != *key);
+            if others {
+                vec![own]
+            } else {
+                vec![current, own]
+            }
+        }
+    }
+}
+
+/// Sets `wanted`'s game's resume point aside, so that it starts from the beginning: each file
+/// renamed `<file>.before-fresh`, replacing one set aside before. Returns the files moved
+/// (none, if there was no resume point).
+pub fn set_aside(wanted: &Wanted) -> Result<Vec<PathBuf>, String> {
+    let mut moved = Vec::new();
+    for file in resume_files(wanted) {
+        if !file.is_file() {
+            continue;
+        }
+        let mut aside = file.clone().into_os_string();
+        aside.push(BEFORE_FRESH);
+        fs::rename(&file, &aside)
+            .map_err(|e| format!("cannot set {} aside: {e}", file.display()))?;
+        moved.push(file);
+    }
+    Ok(moved)
+}
+
 /// A file, no bigger than `most`.
 fn read(path: &Path, most: u64) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
@@ -197,6 +261,20 @@ fn inkdot(path: &Path, magic: &[u8; 5]) -> Option<Resume> {
         picture: gfx::decode_png(png)?,
         saved,
     })
+}
+
+/// The core that made a nibcase state, from its metadata alone.
+fn nibcase_core(path: &Path) -> Option<String> {
+    let bytes = head(path, 24, |h| Some(u32_at(h, 12)?.min(65536)))?;
+    if !bytes.starts_with(b"NIBSTATE") || u32_at(&bytes, 8)? != 1 {
+        return None;
+    }
+    let meta = std::str::from_utf8(bytes.get(24..)?).ok()?;
+    #[derive(serde::Deserialize)]
+    struct Meta {
+        core: String,
+    }
+    Some(toml::from_str::<Meta>(meta).ok()?.core)
 }
 
 /// nibcase's, with the name of the core that made it.
@@ -360,5 +438,112 @@ mod tests {
         let r = find(&wanted(d, By::Dsperate)).unwrap();
         assert_eq!((r.picture.w, r.picture.h), (256, 384));
         assert_eq!(r.picture.px.len(), 256 * 384 * 4);
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn fresh_sets_inkdot_and_inktick_aside() {
+        for by in [By::Inkdot, By::Inktick] {
+            let dir = TempDir::new("fresh-ink");
+            let d = dir.path();
+            // Nothing to set aside: nothing moved.
+            assert!(set_aside(&wanted(d, by.clone())).unwrap().is_empty());
+            fs::write(d.join("Moon Bay.auto.state"), b"old").unwrap();
+            fs::write(d.join("Moon Bay.srm"), b"battery").unwrap();
+            let moved = set_aside(&wanted(d, by.clone())).unwrap();
+            assert_eq!(moved, vec![d.join("Moon Bay.auto.state")]);
+            assert_eq!(
+                names(d),
+                ["Moon Bay.auto.state.before-fresh", "Moon Bay.srm"]
+            );
+            // Again: the newer one replaces the one set aside before; one is kept.
+            fs::write(d.join("Moon Bay.auto.state"), b"new").unwrap();
+            set_aside(&wanted(d, by)).unwrap();
+            assert_eq!(
+                fs::read(d.join("Moon Bay.auto.state.before-fresh")).unwrap(),
+                b"new"
+            );
+            assert_eq!(names(d).len(), 2);
+        }
+    }
+
+    #[test]
+    fn fresh_sets_dsperate_aside() {
+        let dir = TempDir::new("fresh-ds");
+        let d = dir.path();
+        fs::write(d.join("CEYE.auto.dss"), b"DSST").unwrap();
+        fs::write(d.join("CEYE.auto.thumb"), b"thumb").unwrap();
+        fs::write(d.join("CEYE.dsv"), b"battery").unwrap();
+        fs::write(d.join("CEYE.1.dss"), b"slot 1").unwrap();
+        let moved = set_aside(&wanted(d, By::Dsperate)).unwrap();
+        assert_eq!(
+            moved,
+            vec![d.join("CEYE.auto.dss"), d.join("CEYE.auto.thumb")]
+        );
+        assert_eq!(
+            names(d),
+            [
+                "CEYE.1.dss",
+                "CEYE.auto.dss.before-fresh",
+                "CEYE.auto.thumb.before-fresh",
+                "CEYE.dsv"
+            ]
+        );
+        assert!(find(&wanted(d, By::Dsperate)).is_none());
+    }
+
+    #[test]
+    fn fresh_sets_the_chosen_cores_nibcase_state_aside() {
+        let dir = TempDir::new("fresh-nibcase");
+        let d = dir.path();
+        let snes9x = wanted(d, By::Nibcase("snes9x".into()));
+        // The chosen core's own, current: set aside.
+        fs::write(
+            d.join("Moon Bay.auto.state"),
+            nibstate("Snes9x", 100, &png(4, 3)),
+        )
+        .unwrap();
+        assert_eq!(
+            set_aside(&snes9x).unwrap(),
+            vec![d.join("Moon Bay.auto.state")]
+        );
+        assert_eq!(names(d), ["Moon Bay.auto.state.before-fresh"]);
+
+        // Another core's current, this core's set aside by nibcase: only this core's moves.
+        fs::write(
+            d.join("Moon Bay.auto.state"),
+            nibstate("bsnes", 200, &png(4, 3)),
+        )
+        .unwrap();
+        fs::write(
+            d.join("Moon Bay.auto-snes9x.state"),
+            nibstate("Snes9x", 300, &png(4, 3)),
+        )
+        .unwrap();
+        assert_eq!(
+            set_aside(&snes9x).unwrap(),
+            vec![d.join("Moon Bay.auto-snes9x.state")]
+        );
+        assert!(d.join("Moon Bay.auto.state").is_file());
+        assert!(find(&snes9x).is_none());
+        assert!(find(&wanted(d, By::Nibcase("bsnes".into()))).is_some());
+
+        // One that can't be read (it may be why the game is stuck): set aside.
+        fs::write(d.join("Moon Bay.auto.state"), b"NIBSTATE broken").unwrap();
+        let pcsx = wanted(d, By::Nibcase("pcsxrearmed".into()));
+        assert_eq!(
+            set_aside(&pcsx).unwrap(),
+            vec![d.join("Moon Bay.auto.state")]
+        );
+        assert!(!d.join("Moon Bay.auto.state").exists());
     }
 }

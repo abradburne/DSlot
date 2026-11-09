@@ -2065,6 +2065,34 @@ impl Ui<'_> {
         Ok(())
     }
 
+    /// A game started fresh (Select + A): said on the top screen, over the fade, so that it
+    /// stays up while the game starts.
+    pub fn draw_fresh(&mut self) -> Result<(), String> {
+        let v = self.top;
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
+        let (width, height) = (360.0, 104.0);
+        let (x, y) = ((SW - width) / 2.0, (SH - height) / 2.0);
+        self.white[v.c].set_alpha_mod(255);
+        self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
+        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, width, height))?;
+        self.text(
+            v,
+            "Starting fresh",
+            (30.0, true),
+            (SW / 2.0, y + 18.0),
+            0.5,
+            GOLD,
+        )?;
+        self.text(
+            v,
+            "The resume point is set aside",
+            (20.0, false),
+            (SW / 2.0, y + 62.0),
+            0.5,
+            DIM,
+        )
+    }
+
     /// A game came straight back: why, over both screens dimmed, in a box on the touch screen,
     /// until any button is pressed; with the bug report's state under it, where one can be sent.
     pub fn draw_notice(&mut self, shown: &NoticeShown) -> Result<(), String> {

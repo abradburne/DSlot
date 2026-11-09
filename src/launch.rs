@@ -75,6 +75,21 @@ fn fill(word: &str, game: &Game, saves: Option<&Path>) -> String {
     dslot::fill(word, &p)
 }
 
+/// Where `game`'s resume point is when `emulator` starts it, if that is one whose resume points
+/// DSlot knows (resume.rs) and DSlot gives it its saves folder.
+pub fn resume_point(emulator: &Emulator, game: &Game) -> Option<crate::resume::Wanted> {
+    let root = crate::platform::saves()?;
+    let command = emulator.command(game.console.folder())?;
+    if !command.iter().any(|w| w.contains("{saves}")) {
+        return None;
+    }
+    Some(crate::resume::Wanted {
+        saves: saves_dir(&root, game),
+        stem: game.stem.clone(),
+        by: crate::resume::By::of(&emulator.name, command)?,
+    })
+}
+
 /// Whether `action` can be done for `game` here: it names `{saves}` only where there is a
 /// saves folder.
 pub fn can_do(action: &Action, saves: Option<&Path>) -> bool {

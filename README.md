@@ -181,7 +181,8 @@ When the game has a **resume point** (its emulator saved where you left off when
 quit), its picture is inset over the box's bottom right corner, framed, with a "Resume" tag and
 when it was saved: for a DS game both screens, one over the other. It is the resume point the
 next start will use, the chosen emulator's own; one saved without a picture isn't shown. How
-DSlot reads each emulator's: [docs/emulators.md](docs/emulators.md#resume-points).
+DSlot reads each emulator's: [docs/emulators.md](docs/emulators.md#resume-points). To start
+from boot instead, hold **Select** and press **A**.
 
 In the system picker, and on the menu's console page, the top screen shows the **system's
 card**: a Top Trumps style card with its maker, stats (released, launch price, sold,
@@ -257,6 +258,7 @@ scripts too. How to make one: [docs/apps.md](docs/apps.md).
 | L / R, or tap a page's tab | The previous / next page (the tabs scroll when there are more than fit; tap a faded end to see more) |
 | Select | The system picker: a blade for each system, its games and when one was last played, and its card on the top screen. Up / down (or drag) to choose, A or a tap to go there, B or Select to close |
 | A, or drag the cart down | Insert the cart and play; on a folder of games, open it |
+| Select + A (or hold Select as the cart goes in) | Start the game fresh, from boot, not from its resume point: "Starting fresh" shows as it goes in. The resume point isn't deleted: it is renamed `<file>.before-fresh` in the game's saves folder (replacing one set aside before), so renaming it back undoes it |
 | B | Out of the folder of games open, to the one it is in. B never starts a game |
 | Tap a neighbouring cart | Bring it to the centre |
 | Tap a cover in the grid or a name in a list, then tap it again | Pick it, then play it |

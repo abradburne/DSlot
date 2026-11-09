@@ -28,7 +28,7 @@ pub enum Key {
     /// pressed.
     L2,
     R2,
-    /// Select tapped alone (held with Start, it leaves DSlot).
+    /// Select tapped alone (held with Start, it leaves DSlot; with A, a game starts fresh).
     Select,
     /// The Back key beside Menu: a key of its own, not a gamepad button (nibOS's
     /// docs/engineering/input.md).
@@ -45,8 +45,8 @@ pub enum Input {
     Quit,
 }
 
-/// Reads SDL's events, remembering whether Select is held (and whether Start went down with
-/// it) and where the stick is pushed.
+/// Reads SDL's events, remembering whether Select is held (and whether another button went
+/// down with it) and where the stick is pushed.
 #[derive(Default)]
 pub struct Reader {
     select: bool,
@@ -62,6 +62,18 @@ const STICK_PRESS: i16 = 16000;
 const STICK_LET_GO: i16 = 8000;
 
 impl Reader {
+    /// Whether Select is held: with A, or as a cart goes into the slot, the game starts fresh.
+    pub fn select_held(&self) -> bool {
+        self.select
+    }
+
+    /// Select let go: tapped alone, it is a press of its own, sent now.
+    fn select_up(&mut self) -> Option<Input> {
+        let alone = self.select && !self.chord;
+        self.select = false;
+        alone.then_some(Input::Press(Key::Select))
+    }
+
     /// `mouse` is the touch screen's view when the mouse stands in for the touch panel, `None`
     /// when the panel is read directly (whose touches SDL also reports as the mouse).
     pub fn read(&mut self, event: Event, mouse: Option<View>) -> Option<Input> {
@@ -73,9 +85,24 @@ impl Reader {
             } => Some(Input::Quit),
             // Held keys repeat on the shelf's own clock, as the D-pad does.
             Event::KeyDown { repeat: true, .. } => None,
+            // S stands in for Select, as the pad's: a press of its own as it is let go alone.
+            Event::KeyDown {
+                keycode: Some(Keycode::S),
+                ..
+            } => {
+                (self.select, self.chord) = (true, false);
+                None
+            }
+            Event::KeyUp {
+                keycode: Some(Keycode::S),
+                ..
+            } => self.select_up(),
             Event::KeyDown {
                 keycode: Some(key), ..
-            } => keyboard(key).map(Input::Press),
+            } => {
+                self.chord |= self.select;
+                keyboard(key).map(Input::Press)
+            }
             Event::KeyUp {
                 keycode: Some(key), ..
             } => keyboard(key).map(Input::Release),
@@ -89,14 +116,15 @@ impl Reader {
                     Some(Input::Quit)
                 }
                 Button::Guide if platform::MENU_QUITS => Some(Input::Quit),
-                button => pad(button).map(Input::Press),
+                button => {
+                    // Pressed with Select (Select + A): Select's own press is not sent.
+                    self.chord |= self.select;
+                    pad(button).map(Input::Press)
+                }
             },
             Event::ControllerButtonUp { button, .. } => {
                 if button == Button::Back {
-                    // Tapped alone, Select is a press of its own, sent as it is let go.
-                    let alone = self.select && !self.chord;
-                    self.select = false;
-                    return alone.then_some(Input::Press(Key::Select));
+                    return self.select_up();
                 }
                 pad(button).map(Input::Release)
             }
@@ -220,7 +248,6 @@ fn keyboard(key: Keycode) -> Option<Key> {
         Keycode::R | Keycode::PageDown => Key::R,
         Keycode::LeftBracket => Key::L2,
         Keycode::RightBracket => Key::R2,
-        Keycode::S => Key::Select,
         Keycode::D => Key::Start,
         _ => return None,
     })
@@ -282,6 +309,35 @@ mod tests {
             reader.read(down(Button::Start), None),
             Some(Input::Press(Key::Start))
         );
+    }
+
+    #[test]
+    fn select_with_a() {
+        let mut reader = Reader::default();
+        assert!(!reader.select_held());
+        assert_eq!(reader.read(down(Button::Back), None), None);
+        assert!(reader.select_held());
+        let a = reader.read(down(Button::A), None);
+        assert!(matches!(a, Some(Input::Press(Key::A | Key::B))));
+        assert!(reader.select_held());
+        // Let go after A: not the picker's press.
+        assert_eq!(reader.read(up(Button::Back), None), None);
+        assert!(!reader.select_held());
+        // Tapped alone, it is.
+        reader.read(down(Button::Back), None);
+        assert_eq!(
+            reader.read(up(Button::Back), None),
+            Some(Input::Press(Key::Select))
+        );
+        // The keyboard's S, the same.
+        let (s, s_up) = scripted("S");
+        let (ret, _) = scripted("Return");
+        reader.read(s.clone(), None);
+        assert!(reader.select_held());
+        assert_eq!(reader.read(ret, None), Some(Input::Press(Key::A)));
+        assert_eq!(reader.read(s_up.clone(), None), None);
+        reader.read(s, None);
+        assert_eq!(reader.read(s_up, None), Some(Input::Press(Key::Select)));
     }
 
     fn key(keycode: Keycode) -> Event {

@@ -373,7 +373,12 @@ fn run() -> Result<(), String> {
                 platform::restart();
                 return Ok(());
             }
-            ui::Outcome::Launch(i) | ui::Outcome::Resume(i) => {
+            outcome @ (ui::Outcome::Launch { .. } | ui::Outcome::Resume(_)) => {
+                let (i, fresh) = match outcome {
+                    ui::Outcome::Launch { game, fresh } => (game, fresh),
+                    ui::Outcome::Resume(game) => (game, false),
+                    _ => unreachable!(),
+                };
                 let game = &games[i];
                 let began = Instant::now();
                 // The shelf's windows are gone: its last frame stays up until the game's first.
@@ -382,7 +387,7 @@ fn run() -> Result<(), String> {
                 let played = if game.is_app() {
                     start_app(game, &apps, &power).map(|ended| (ended, None))
                 } else {
-                    play(game, &emulators, &settings, &ra, &power)
+                    play(game, &emulators, &settings, &ra, &power, fresh)
                 };
                 // Why it came straight back, if it did: the shelf says so when it is up again.
                 let (put_away, notice) = match played {
@@ -446,13 +451,15 @@ fn hold_last_frame(opts: &ui::Opts) {
 
 /// Starts `game` in its emulator and waits for it to exit, or puts it away when the power
 /// menu is asked for. With it, why it stopped when it did so at once or badly (`stopped`),
-/// for the shelf to show; logged here too.
+/// for the shelf to show; logged here too. `fresh`: its resume point is set aside first, so
+/// that it starts from the beginning.
 fn play(
     game: &Game,
     emulators: &Emulators,
     settings: &Settings,
     ra: &achievements::Ra,
     power: &Requests,
+    fresh: bool,
 ) -> Result<(Ended, Option<String>), String> {
     let emulator = launch::emulator_for(emulators, settings, game).ok_or_else(|| {
         format!(
@@ -460,6 +467,9 @@ fn play(
             game.console.label()
         )
     })?;
+    if fresh {
+        start_fresh(game, emulator);
+    }
     let options = launch::options(settings, emulator, game);
     let mut launch = Launch::new(emulator, game, &options, platform::saves().as_deref())?;
     // Signed in to RetroAchievements: an emulator that earns them for this system is told where
@@ -481,6 +491,35 @@ fn play(
         eprintln!("dslot: {notice}");
     }
     Ok((ended, notice))
+}
+
+/// Sets `game`'s resume point aside (resume::set_aside), for `emulator`, which starts it, when
+/// DSlot knows where that emulator keeps it. A failure is logged and the game starts anyway: it
+/// resumes, as it would have.
+fn start_fresh(game: &Game, emulator: &emulator::Emulator) {
+    let Some(wanted) = launch::resume_point(emulator, game) else {
+        eprintln!(
+            "dslot: {}: no resume point DSlot knows to set aside",
+            game.path.display()
+        );
+        return;
+    };
+    match resume::set_aside(&wanted) {
+        Ok(moved) if moved.is_empty() => {
+            eprintln!("dslot: starting fresh: {} had no resume point", game.stem)
+        }
+        Ok(moved) => {
+            for file in moved {
+                eprintln!(
+                    "dslot: starting fresh: {} set aside as {}{}",
+                    file.display(),
+                    file.display(),
+                    resume::BEFORE_FRESH
+                );
+            }
+        }
+        Err(e) => eprintln!("dslot: starting fresh: {e}"),
+    }
 }
 
 /// A game is taken to have started if it ran this long.
@@ -543,6 +582,7 @@ fn launch_one(rom: &Path, dirs: &platform::Dirs) -> Result<(), String> {
         &settings,
         &achievements::Ra::new(dirs.achievements.clone(), &dirs.cache),
         &nibkit::power::watch(),
+        false,
     )?;
     std::process::exit(ended.status.code().unwrap_or(1));
 }
