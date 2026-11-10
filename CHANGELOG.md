@@ -16,6 +16,11 @@
   the Ports and Apps pages' folders are not shown. A game in a folder finds its art beside it,
   else in the console's `Imgs` and the rest; back from a game, the shelf is in its folder.
   Favourites alone and an arcade section list every game of theirs, in whatever folder.
+- **`_hidden` folders**: a folder of that name, at any depth, is never on the shelf, nor
+  anything in it.
+- **Hide _ before folder names** (System → Shelf, on by default): `_chromatic` shows as
+  `chromatic`, on the folder, the top screen and the heading. Its picture is still named after
+  the folder itself (`Imgs/_chromatic.png`).
 - **B never starts a game**: it used to insert the cart, as A does.
 - **Start a game fresh**: hold Select and press A (or hold Select as the cart goes in) and the
   game starts from boot, not from its resume point; "Starting fresh" shows as the cart goes

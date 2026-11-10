@@ -1322,7 +1322,7 @@ fn heading(state: &State, settings: &Settings) -> String {
     let open = &state.dirs[settings.page as usize];
     let folder =
         (!open.is_empty() && show != Show::Favourites && settings.section(settings.page).is_none())
-            .then(|| parent_dir(open).1);
+            .then(|| crate::rom::folder_name(parent_dir(open).1, settings.hide_underscore()));
     let notes = [
         folder,
         (show == Show::Favourites).then_some("Favourites"),
@@ -1364,6 +1364,9 @@ fn show(
     let mut panel = if dual { Panel::open() } else { None };
     crate::mark("touch panel ready");
 
+    // Folders of games named as the setting says, and named again when it changes.
+    let mut hide_underscore = settings.hide_underscore();
+    crate::rom::name_folders(games, hide_underscore);
     let mut state = State::new(games, stats, settings, back, &shelf.opts.searched, shelf.ra);
     let mut reader = Reader::default();
     let mut events = sdl.event_pump()?;
@@ -1487,9 +1490,17 @@ fn show(
                 }
             }
             if changed {
+                crate::rom::name_folders(games, hide_underscore);
                 state.rescanned(games, stats, settings);
                 state.repage(games, &opts.searched, settings);
             }
+        }
+        if settings.hide_underscore() != hide_underscore {
+            hide_underscore = !hide_underscore;
+            for g in crate::rom::name_folders(games, hide_underscore) {
+                ui.forget_art_of(g);
+            }
+            state.relist(games, stats, settings);
         }
         let games: &[Game] = games;
         if let Some(to) = state.turn_page.take() {

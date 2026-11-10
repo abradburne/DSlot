@@ -234,6 +234,15 @@ pub fn builtin(key: &str) -> Option<Def> {
             default: Some(Value::Boolean(true)),
             ..def("Sounds", Kind::Toggle, Levels::SYSTEM, "")
         },
+        HIDE_UNDERSCORE => Def {
+            default: Some(Value::Boolean(true)),
+            ..def(
+                "Hide _ before folder names",
+                Kind::Toggle,
+                Levels::SYSTEM,
+                "",
+            )
+        },
         SHOW_EMPTY => Def {
             default: Some(Value::Boolean(false)),
             ..def(
@@ -256,6 +265,8 @@ pub const REPEAT: &str = "repeat";
 pub const SOUNDS: &str = "sounds";
 /// Whether a console with no games on either card has a page (and a tab) all the same.
 pub const SHOW_EMPTY: &str = "show_empty_systems";
+/// Whether a folder of games named `_chromatic` is shown as `chromatic`.
+pub const HIDE_UNDERSCORE: &str = "hide_folder_underscore";
 pub const SAVER: &str = "screensaver";
 pub const SAVER_LOOK: &str = "screensaver_look";
 /// RetroAchievements: hardcore or softcore (achievements/).

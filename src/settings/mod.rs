@@ -229,6 +229,16 @@ impl Settings {
         self.choice(&[Scope::System], def::SAVER_LOOK, SaverLook::parse)
     }
 
+    /// Whether the `_` (or `__`...) a folder of games' name starts with is left off on the
+    /// shelf.
+    pub fn hide_underscore(&self) -> bool {
+        let def = def::builtin(def::HIDE_UNDERSCORE)
+            .unwrap_or_else(|| unreachable!("hide_folder_underscore is a built-in setting"));
+        self.value(&[Scope::System], &def)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true)
+    }
+
     /// Whether a console with no games has a page all the same.
     pub fn show_empty(&self) -> bool {
         let def = def::builtin(def::SHOW_EMPTY)

@@ -1069,7 +1069,10 @@ impl Menu {
             (Page::View, _) => shelf(&mut items),
             (Page::System, Part::Shelf) => {
                 shelf(&mut items);
-                setting(&mut items, &[def::SHOW_EMPTY, def::REPEAT]);
+                setting(
+                    &mut items,
+                    &[def::SHOW_EMPTY, def::HIDE_UNDERSCORE, def::REPEAT],
+                );
                 items.push(Item::Rescan);
             }
             (Page::System, Part::Screen) => {
@@ -3501,6 +3504,7 @@ mod tests {
                 "Show",
                 "Game case",
                 "Show systems with no games",
+                "Hide _ before folder names",
                 "Button repeat",
                 "Rescan games"
             ]

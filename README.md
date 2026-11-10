@@ -165,7 +165,11 @@ inside it work the same way, a few deep. A (or a tap on it, or pulling it down) 
 goes back out, onto the folder you left, and the line at the top of the touch screen names the
 folder open. Coming back from a game opens the folder it is in. A folder with no games in it, a
 hidden one (`.name`), and the artwork folders `Imgs`, `Labels` and `Carts` are not shown, nor are
-folders on the Ports and Apps pages (a port's folder is its data). With **Show** set to
+folders on the Ports and Apps pages (a port's folder is its data). A folder named **`_hidden`**
+(at any depth, in any case) is never shown, nor anything in it: a place to keep games off the
+shelf without taking them off the card. A `_` at the start of a folder's name sorts it first on
+a computer but is left off on the shelf (`_chromatic` shows as `chromatic`); Menu → System →
+Shelf → **Hide _ before folder names** (on by default) turns that off. With **Show** set to
 Favourites, or an arcade section chosen, a page lists all its games, in whatever folder, and no
 folders. A folder is drawn as a folder in its system's colour, with the boxes of the first games
 in it standing up out of it, or a picture of its own: see [Artwork](#artwork).
@@ -285,7 +289,7 @@ it, Y resets it to what it inherits, B or Back closes the menu.
 |---|---|---|
 | Game | | Favourite and rating; the emulator it starts in and that emulator's options for it (DSperate: 3D resolution, frame skip, ...); clear its resume state, delete its saves (each asks first: A, then A again). |
 | Console | Emulator, Shelf | The emulator its games start in (only when more than one is installed) and that emulator's options; how the page is shown: View, Sort by, Show, Game case. |
-| System | Shelf, Screen, Sound, Power, Time, About, Update, Help | How every page is shown (unless its console says otherwise), Button repeat, Rescan games; each screen's brightness and the screensaver; the volume, Sounds and the speakers' tuning; the battery, Start at power-on, Power off; the clock; the device and what it is using; on nibOS, its updates, and What's new in it with short help topics (read with the D-pad or a finger, B back to the list). |
+| System | Shelf, Screen, Sound, Power, Time, About, Update, Help | How every page is shown (unless its console says otherwise), Show systems with no games, Hide _ before folder names, Button repeat, Rescan games; each screen's brightness and the screensaver; the volume, Sounds and the speakers' tuning; the battery, Start at power-on, Power off; the clock; the device and what it is using; on nibOS, its updates, and What's new in it with short help topics (read with the D-pad or a finger, B back to the list). |
 | Network | Wi-Fi, Bluetooth, Network info | nibOS: the networks and devices, and what to read out when something won't connect. |
 
 A setting for a game wins over its console's, which wins over the system's, and each row says

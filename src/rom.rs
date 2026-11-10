@@ -675,11 +675,14 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
 /// The folders DSlot keeps a console's artwork in, beside its games: never folders of games.
 const ART_FOLDERS: [&str; 3] = ["Imgs", "Labels", "Carts"];
 
+/// A folder of this name, at any depth, is kept off the shelf with everything in it.
+pub const HIDDEN_FOLDER: &str = "_hidden";
+
 /// How deep folders of games go in a console's folder.
 const FOLDER_DEPTH: usize = 6;
 
 /// Whether `entry`, in the console folder's folder `sub`, is a folder that may hold games: not
-/// a hidden one, nor one of DSlot's artwork, nor on the Ports page (a port's folder is its
+/// a hidden one (`.name`, or `_hidden`), nor one of DSlot's artwork, nor on the Ports page (a port's folder is its
 /// data) or the Apps page.
 fn game_folder(console: Console, entry: &fs::DirEntry, sub: &str) -> bool {
     let name = entry.file_name();
@@ -688,6 +691,7 @@ fn game_folder(console: Console, entry: &fs::DirEntry, sub: &str) -> bool {
     };
     !matches!(console, Console::Ports | Console::Apps)
         && !name.starts_with('.')
+        && !name.eq_ignore_ascii_case(HIDDEN_FOLDER)
         && !ART_FOLDERS.iter().any(|a| name.eq_ignore_ascii_case(a))
         && (sub.is_empty() || sub.split('/').count() < FOLDER_DEPTH)
         && entry.file_type().is_ok_and(|t| t.is_dir())
@@ -735,6 +739,29 @@ fn folder_entries(
         });
     }
     entries
+}
+
+/// A folder of games' name as the shelf shows it: without the `_`s it starts with where
+/// `hide_underscore` (`_chromatic` is `chromatic`), unless that leaves nothing.
+pub fn folder_name(stem: &str, hide_underscore: bool) -> &str {
+    match stem.trim_start_matches('_') {
+        rest if hide_underscore && !rest.is_empty() => rest,
+        _ => stem,
+    }
+}
+
+/// Names the folders of games among `games` as the shelf shows them ([`folder_name`]).
+/// Returns those whose name changed.
+pub fn name_folders(games: &mut [Game], hide_underscore: bool) -> Vec<usize> {
+    let mut changed = Vec::new();
+    for (i, g) in games.iter_mut().enumerate().filter(|(_, g)| g.folder) {
+        let name = folder_name(&g.stem, hide_underscore);
+        if g.title[0] != name {
+            g.title[0] = name.to_owned();
+            changed.push(i);
+        }
+    }
+    changed
 }
 
 /// Up to `most` of the games in the folder of games `folder`, by name, for its picture: those
@@ -2045,7 +2072,14 @@ mod tests {
     fn folders_of_games() {
         let dir = TempDir::new("folders");
         let gb = dir.path().join("Roms/GB");
-        for sub in ["_chromatic/Hacks", "Empty/Deeper", ".hidden", "Imgs"] {
+        for sub in [
+            "_chromatic/Hacks",
+            "_chromatic/_HIDDEN",
+            "_hidden",
+            "Empty/Deeper",
+            ".hidden",
+            "Imgs",
+        ] {
             fs::create_dir_all(gb.join(sub)).unwrap();
         }
         for name in [
@@ -2054,6 +2088,8 @@ mod tests {
             "_chromatic/Hacks/Two.gb",
             ".hidden/Three.gb",
             "Imgs/Four.gb",
+            "_hidden/Five.gb",
+            "_chromatic/_HIDDEN/Six.gb",
         ] {
             fs::write(gb.join(name), b"not much").unwrap();
         }
@@ -2087,6 +2123,36 @@ mod tests {
         assert_eq!(two.art("Imgs"), gb.join("Imgs/Two.png"));
         // Read again from what was known: the same.
         assert_eq!(scan(Console::Gb, &[gb], &cache).len(), games.len());
+    }
+
+    /// A folder of games' `_` is left off its name where the setting says, unless that leaves
+    /// nothing.
+    #[test]
+    fn folder_names() {
+        assert_eq!(folder_name("_chromatic", true), "chromatic");
+        assert_eq!(folder_name("__old", true), "old");
+        assert_eq!(folder_name("_chromatic", false), "_chromatic");
+        assert_eq!(folder_name("RPGs", true), "RPGs");
+        assert_eq!(folder_name("___", true), "___");
+        let folder = |stem: &str| Game {
+            console: Console::Gb,
+            path: PathBuf::from(stem),
+            stem: stem.into(),
+            code: String::new(),
+            title: vec![stem.into(), "2 games".into()],
+            icon: None,
+            cover: None,
+            gone: false,
+            group: String::new(),
+            folder: true,
+            sub: String::new(),
+        };
+        let mut games = vec![folder("_chromatic"), folder("RPGs")];
+        assert_eq!(name_folders(&mut games, true), [0]);
+        assert_eq!(games[0].name(), "chromatic");
+        assert!(name_folders(&mut games, true).is_empty());
+        assert_eq!(name_folders(&mut games, false), [0]);
+        assert_eq!(games[0].name(), "_chromatic");
     }
 
     #[test]

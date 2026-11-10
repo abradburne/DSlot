@@ -75,6 +75,8 @@ pub fn merge(games: &mut Vec<Game>, console: Console, found: Vec<Game>) -> (usiz
                 *game = again;
                 came += 1;
             }
+            // A folder of games found again: how many games are in it may have changed.
+            Some(again) if game.folder => game.title = again.title,
             Some(_) => {}
             None if !game.gone => {
                 game.gone = true;

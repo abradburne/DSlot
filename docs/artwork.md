@@ -30,7 +30,8 @@ Roms/GB/Imgs/Moon Ferry.png                box front, if the folder has none
 A folder of games is drawn as a folder, cart and box alike, in its system's colour, with its name
 and how many games it holds on the front. Standing up out of it are the boxes of its first three
 games by name (its own games first, then those in the folders inside it), or, where it has one,
-its own picture: a PNG named after the folder in the `Imgs/` beside it.
+its own picture: a PNG named after the folder in the `Imgs/` beside it, by its name on the card
+(`_chromatic.png`, with the `_`, even where Hide _ before folder names shows it as `chromatic`).
 
 ```
 Roms/GB/_chromatic/                        the folder

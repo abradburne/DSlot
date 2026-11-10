@@ -1392,7 +1392,10 @@ pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cach
 
     // FNV-1a over everything the picture depends on bar the source's contents.
     // A folder's picture also shows what is in it, which its own date doesn't follow.
-    let folder = if game.folder { "|folder" } else { "" };
+    let folder = match game.folder {
+        true => format!("|folder|{}", game.name()),
+        false => String::new(),
+    };
     let key = format!("{}|{black}|{w}x{h}{folder}", game.path.display());
     let hash = key.bytes().fold(0xcbf29ce484222325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x100000001b3)
