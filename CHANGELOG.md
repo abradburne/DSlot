@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0
 
 - **System → Help**: What's new in the running nibOS and short help topics (the controls, the
   menu, saves, sleep and charging, Wi-Fi, adding games, the console), the last section under
