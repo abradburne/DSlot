@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Cargo.lock takes nibkit 0.5.0, which Cargo.toml names: 0.7.0's still pinned 0.4.1, so its
+  package did not build with `--locked`.
+
 ## 0.7.0
 
 - **System → Help**: What's new in the running nibOS and short help topics (the controls, the
