@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **GBA DS page**: a page after the GBA's for the games in `Roms/GBA` that
+  [GBA DS](https://github.com/kyannon/gba-ds) gives a second screen (their map, HUD or status
+  screen on the other screen), known by their cart codes: 51 games as of GBA DS 1.5. The same
+  files as on the GBA page, with their art; its emulator, settings and saves go by `GBADS`.
+  There once an emulator description for `GBADS` is installed (nibOS's `gba-ds` package has
+  one). The shelf shows a GBA DS game's resume picture (the `.game.bmp` GBA DS writes beside its
+  resume point). See [GBA DS](docs/gba-ds.md).
+
 ## 0.7.1
 
 - Cargo.lock takes nibkit 0.5.0, which Cargo.toml names: 0.7.0's still pinned 0.4.1, so its

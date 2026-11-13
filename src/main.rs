@@ -164,7 +164,7 @@ fn run() -> Result<(), String> {
     let playable =
         |c: Console| !platform::on_device() || emulators.for_system(c.folder()).next().is_some();
     for console in Console::ALL.into_iter().filter(|&c| playable(c)) {
-        opts.searched[console as usize] = roots.iter().map(|r| r.join(console.folder())).collect();
+        opts.searched[console as usize] = roots.iter().map(|r| r.join(console.roms())).collect();
     }
 
     mark("started");
@@ -301,7 +301,7 @@ fn run() -> Result<(), String> {
             let selected = back
                 .as_ref()
                 .and_then(|b| games.get(b.game))
-                .map(|g| g.path.clone());
+                .map(|g| (g.console, g.path.clone()));
             emulators = Emulators::load(&dirs.emulators);
             if !given_roots {
                 roots = platform::rom_roots();
@@ -313,7 +313,7 @@ fn run() -> Result<(), String> {
                 let playable = !platform::on_device()
                     || emulators.for_system(console.folder()).next().is_some();
                 opts.searched[console as usize] = if playable {
-                    roots.iter().map(|r| r.join(console.folder())).collect()
+                    roots.iter().map(|r| r.join(console.roms())).collect()
                 } else {
                     Vec::new()
                 };
@@ -330,7 +330,12 @@ fn run() -> Result<(), String> {
             games.extend(rom::apps(&apps));
             settings.reload();
             back = selected
-                .and_then(|path| games.iter().position(|g| g.path == path))
+                .and_then(|(console, path)| {
+                    // Its page's: a GBA game may be on the GBA DS page too.
+                    games
+                        .iter()
+                        .position(|g| g.console == console && g.path == path)
+                })
                 .map(|game| ui::Back {
                     game,
                     put_away,

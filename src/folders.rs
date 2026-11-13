@@ -36,7 +36,14 @@ pub fn make_soon(roots: &[PathBuf], emulators: &crate::emulator::Emulators) {
         return;
     }
     let cards = cards(roots);
-    let mut systems = emulators.systems();
+    // Each system's games' folder: the GBA DS page's are in the GBA's, so it has none to make.
+    let mut systems: Vec<String> = emulators
+        .systems()
+        .into_iter()
+        .map(|s| Console::from_folder(&s).map_or(s, |c| c.roms().to_owned()))
+        .collect();
+    systems.sort();
+    systems.dedup();
     if !systems.iter().any(|s| s == "PORTS") {
         systems.push("PORTS".into());
     }

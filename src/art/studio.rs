@@ -127,7 +127,7 @@ pub fn labels(game: &Game, cards: &[PathBuf]) -> Vec<(PathBuf, bool)> {
     let mut found = vec![(game.art("Labels"), false)];
     for card in cards {
         found.push((
-            card.join("Labels").join(game.console.folder()).join(&file),
+            card.join("Labels").join(game.console.roms()).join(&file),
             true,
         ));
     }
@@ -141,7 +141,7 @@ pub fn shell_files(game: &Game, cards: &[PathBuf]) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = vec![game.dir().join(name)];
     for card in cards {
         let labels = card.join("Labels");
-        files.push(labels.join(game.console.folder()).join(name));
+        files.push(labels.join(game.console.roms()).join(name));
         files.push(labels.join(name));
         files.push(card.join(name));
     }

@@ -12,6 +12,9 @@
 //!   (TOML: `core`, `created`, ...), the picture (PNG), the core's state. A resume point is
 //!   each core's own: one made by another core is set aside as `<ROM name>.auto-<core>.state`
 //!   when that core starts, and its own brought back.
+//! - GBA DS: `<ROM name>.auto.state` (mGBA's state), the game's screen as it was left beside it
+//!   in `<ROM name>.game.bmp` (240 × 160, as SDL writes a BMP), and the second screen's picture
+//!   in `<ROM name>.map.bmp`. The state's file time is when it was saved.
 //!
 //! The one shown is the one the next start will resume: the chosen emulator's. One without a
 //! picture is left out.
@@ -42,6 +45,8 @@ pub enum By {
     Dsperate,
     Inkdot,
     Inktick,
+    /// GBA DS (nibOS's `/usr/lib/gba-ds/run-game`).
+    GbaDs,
     /// nibcase, with the core it runs, by the key nibcase files its states under: the core's
     /// name in lower case, letters and digits only.
     Nibcase(String),
@@ -58,7 +63,12 @@ impl By {
                     .is_some_and(|f| f.to_string_lossy().starts_with(n))
             })
         };
-        if named("nibcase") {
+        let gba_ds = command.iter().take(2).any(|w| {
+            w.contains("/gba-ds/") || Path::new(w).file_name().is_some_and(|f| f == "gba-ds")
+        });
+        if gba_ds {
+            Some(By::GbaDs)
+        } else if named("nibcase") {
             let core = name.trim_end_matches("(nibcase)").trim();
             Some(By::Nibcase(core_key(core)))
         } else if named("inkdot") {
@@ -99,6 +109,7 @@ pub fn find(wanted: &Wanted) -> Option<Resume> {
             &wanted.saves.join(format!("{}.auto.state", wanted.stem)),
             b"ITKS\x01",
         ),
+        By::GbaDs => gba_ds(&wanted.saves, &wanted.stem),
         By::Nibcase(key) => {
             let current = wanted.saves.join(format!("{}.auto.state", wanted.stem));
             let aside = wanted
@@ -140,6 +151,10 @@ fn resume_files(wanted: &Wanted) -> Vec<PathBuf> {
             files
         }
         By::Inkdot | By::Inktick => vec![saves.join(format!("{}.auto.state", wanted.stem))],
+        By::GbaDs => ["auto.state", "game.bmp", "map.bmp"]
+            .iter()
+            .map(|ext| saves.join(format!("{}.{ext}", wanted.stem)))
+            .collect(),
         By::Nibcase(key) => {
             let current = saves.join(format!("{}.auto.state", wanted.stem));
             let own = saves.join(format!("{}.auto-{key}.state", wanted.stem));
@@ -246,6 +261,54 @@ fn dsperate(saves: &Path) -> Option<Resume> {
         picture: Img { w, h, px },
         saved,
     })
+}
+
+/// GBA DS's: `<ROM name>.auto.state`, its picture the `.game.bmp` written with it.
+fn gba_ds(saves: &Path, stem: &str) -> Option<Resume> {
+    let saved = modified(&saves.join(format!("{stem}.auto.state")))?;
+    let bmp = saves.join(format!("{stem}.game.bmp"));
+    // Written just after the state: one older than it is an earlier state's.
+    if modified(&bmp)? + 5 < saved {
+        return None;
+    }
+    Some(Resume {
+        picture: decode_bmp(&read(&bmp, 64 * 1024 * 1024)?)?,
+        saved,
+    })
+}
+
+/// An uncompressed 24- or 32-bit BMP, as SDL saves one (BGR(A), rows bottom first unless the
+/// height is negative, each padded to 4 bytes).
+fn decode_bmp(b: &[u8]) -> Option<Img> {
+    if !b.starts_with(b"BM") {
+        return None;
+    }
+    let data = u32_at(b, 10)?;
+    let w = i32::from_le_bytes(b.get(18..22)?.try_into().ok()?);
+    let h = i32::from_le_bytes(b.get(22..26)?.try_into().ok()?);
+    let bpp = u16::from_le_bytes(b.get(28..30)?.try_into().ok()?) as usize;
+    let compression = u32_at(b, 30)?;
+    // 3: bit fields, which SDL writes for 32 bits as B, G, R, A in byte order.
+    if !(bpp == 24 && compression == 0 || bpp == 32 && (compression == 0 || compression == 3)) {
+        return None;
+    }
+    let (w, top_down) = (usize::try_from(w).ok()?, h < 0);
+    let h = h.unsigned_abs() as usize;
+    if w == 0 || h == 0 || w > 4096 || h > 4096 {
+        return None;
+    }
+    let bytes = bpp / 8;
+    let stride = (w * bytes).div_ceil(4) * 4;
+    let mut px = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let row = if top_down { y } else { h - 1 - y };
+        let line = b.get(data + row * stride..data + row * stride + w * bytes)?;
+        px.extend(
+            line.chunks_exact(bytes)
+                .flat_map(|p| [p[2], p[1], p[0], 255]),
+        );
+    }
+    Some(Img { w, h, px })
 }
 
 /// inkdot's, and inktick's (the same layout under its own `magic`).
@@ -365,6 +428,10 @@ mod tests {
             By::of("DSperate", &words(&["/usr/bin/dsperate", "{options}"])),
             Some(By::Dsperate)
         );
+        assert_eq!(
+            By::of("GBA DS", &words(&["/usr/lib/gba-ds/run-game", "{options}"])),
+            Some(By::GbaDs)
+        );
         assert_eq!(By::of("Other", &words(&["/usr/bin/other"])), None);
     }
 
@@ -474,6 +541,69 @@ mod tests {
             );
             assert_eq!(names(d).len(), 2);
         }
+    }
+
+    /// A BMP as SDL_SaveBMP writes a 24-bit picture: bottom row first, rows padded to 4 bytes.
+    fn bmp24(w: usize, h: usize, at: impl Fn(usize, usize) -> [u8; 3]) -> Vec<u8> {
+        let stride = (w * 3).div_ceil(4) * 4;
+        let mut out = b"BM".to_vec();
+        out.extend(((54 + stride * h) as u32).to_le_bytes());
+        out.extend([0u8; 4]);
+        out.extend(54u32.to_le_bytes());
+        out.extend(40u32.to_le_bytes());
+        out.extend((w as i32).to_le_bytes());
+        out.extend((h as i32).to_le_bytes());
+        out.extend(1u16.to_le_bytes());
+        out.extend(24u16.to_le_bytes());
+        out.extend([0u8; 24]);
+        for y in (0..h).rev() {
+            let mut row: Vec<u8> = (0..w)
+                .flat_map(|x| {
+                    let [r, g, b] = at(x, y);
+                    [b, g, r]
+                })
+                .collect();
+            row.resize(stride, 0);
+            out.extend(row);
+        }
+        out
+    }
+
+    #[test]
+    fn gba_ds_reads_its_bmp() {
+        let dir = TempDir::new("gbads");
+        let d = dir.path();
+        let w = wanted(d, By::GbaDs);
+        assert!(find(&w).is_none());
+        fs::write(d.join("Moon Bay.auto.state"), b"mgba state").unwrap();
+        // A state with no picture: left out.
+        assert!(find(&w).is_none());
+        // 3 wide: rows padded; the top left red, the bottom right blue.
+        let bmp = bmp24(3, 2, |x, y| match (x, y) {
+            (0, 0) => [255, 0, 0],
+            (2, 1) => [0, 0, 255],
+            _ => [10, 20, 30],
+        });
+        fs::write(d.join("Moon Bay.game.bmp"), bmp).unwrap();
+        let r = find(&w).unwrap();
+        assert_eq!((r.picture.w, r.picture.h), (3, 2));
+        assert_eq!(&r.picture.px[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&r.picture.px[4..8], &[10, 20, 30, 255]);
+        assert_eq!(&r.picture.px[20..24], &[0, 0, 255, 255]);
+        // Fresh: the state and both pictures set aside.
+        fs::write(d.join("Moon Bay.map.bmp"), b"map").unwrap();
+        fs::write(d.join("Moon Bay.sav"), b"battery").unwrap();
+        assert_eq!(set_aside(&w).unwrap().len(), 3);
+        assert_eq!(
+            names(d),
+            [
+                "Moon Bay.auto.state.before-fresh",
+                "Moon Bay.game.bmp.before-fresh",
+                "Moon Bay.map.bmp.before-fresh",
+                "Moon Bay.sav"
+            ]
+        );
+        assert!(find(&w).is_none());
     }
 
     #[test]

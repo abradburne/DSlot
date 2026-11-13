@@ -1,0 +1,9 @@
+# GBA DS: the system card for the GBA DS page. Not a console, so no stats or photo; what GBA DS
+# is and does, from its README and wiki at https://github.com/kyannon/gba-ds (read 12 November
+# 2026). The bio and fact are DSlot's own words.
+name = "GBA DS"
+maker = "Game Boy Advance, on two screens"
+source = "https://github.com/kyannon/gba-ds"
+bio = "Game Boy Advance games with a second screen. The game plays on one screen, and its own map, race HUD or status screen stays up on the other and keeps itself current as you play. The games here are the ones in Roms/GBA that GBA DS has a second screen for; they are on the GBA page too."
+fact = "The map is the game's own: a second, silent copy of the game opens the map screen about once a second, and that picture is what the other screen shows."
+stats = []

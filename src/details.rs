@@ -75,7 +75,7 @@ pub fn boxart_file(cache: &Path, game: &Game) -> PathBuf {
 pub fn thumbnail_system(console: Console) -> Option<&'static str> {
     Some(match console {
         Console::Ds => "Nintendo - Nintendo DS",
-        Console::Gba => "Nintendo - Game Boy Advance",
+        Console::Gba | Console::GbaDs => "Nintendo - Game Boy Advance",
         Console::Gb => "Nintendo - Game Boy",
         Console::Gbc => "Nintendo - Game Boy Color",
         Console::Snes => "Nintendo - Super Nintendo Entertainment System",
@@ -118,7 +118,7 @@ fn folder(cache: &Path, game: &Game) -> PathBuf {
         .chars()
         .map(|c| if c == '/' || c == '\\' { '_' } else { c })
         .collect();
-    cache.join("details").join(game.console.folder()).join(stem)
+    cache.join("details").join(game.console.roms()).join(stem)
 }
 
 fn now() -> u64 {

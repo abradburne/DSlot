@@ -71,7 +71,7 @@ delete = ["{saves}/*.auto.dss"]
 |---|---|---|
 | `name` | required | Shown in the menu's Emulator row. |
 | `priority` | default 0 | Each system's default is the installed emulator with the highest. The stock descriptions use 10 and 20; DSperate, 100. |
-| `[systems]` | required | A command for each system it plays, by the system's `Roms/` folder name: `NDS`, `GBA`, `GB`, `GBC`, `SFC` (SNES), `FC` (NES), `FDS`, `MD`, `SEGACD` (Mega-CD), `32X`, `PICO`, `SMS`, `SG1000`, `GG`, `PCE`, `PCECD`, `PS`, `PSP`, `LYNX`, `NGP`, `WS`, `GW` (Game & Watch). A system DSlot does not know is skipped. |
+| `[systems]` | required | A command for each system it plays, by the system's `Roms/` folder name: `NDS`, `GBA`, `GBADS` (the GBA DS page, whose games are in `Roms/GBA`: [gba-ds.md](gba-ds.md)), `GB`, `GBC`, `SFC` (SNES), `FC` (NES), `FDS`, `MD`, `SEGACD` (Mega-CD), `32X`, `PICO`, `SMS`, `SG1000`, `GG`, `PCE`, `PCECD`, `PS`, `PSP`, `LYNX`, `NGP`, `WS`, `GW` (Game & Watch). A system DSlot does not know is skipped. |
 | `requires` | optional | Files that must be there as well as the programs: `["/path/to/core.so"]`. |
 | `[env]` | optional | Environment variables for the emulator. |
 | `[achievements]` | optional | Where the emulator earns RetroAchievements: `systems = ["GB", "GBC"]`, some of its `[systems]` (another is an error), and `hardcore = false` (the default: Casual only; `true` when it can play hardcore, locking what hardcore forbids). When the player is signed in, a game of one of those systems gets `RA_TOKEN_FILE`, `RA_USERNAME` and `RA_HARDCORE` in its environment (`RA_HARDCORE=1` only with `hardcore = true`, and once DSlot offers hardcore); a game of any other system, or in an emulator without the table, gets none. |

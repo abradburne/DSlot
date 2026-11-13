@@ -236,7 +236,7 @@ fn north_american_locale() -> bool {
 fn shell_of(console: Console) -> Option<fn() -> Frame> {
     match console {
         Console::Ds => Some(ds_frame),
-        Console::Gba => Some(gba_frame),
+        Console::Gba | Console::GbaDs => Some(gba_frame),
         Console::Gb => Some(gb_frame),
         Console::Gbc => Some(gbc_frame),
         Console::Snes => Some(shells::snes_us_frame),
@@ -284,6 +284,7 @@ pub fn slot(console: Console) -> Slot {
     match console {
         Console::Ds => Slot::One,
         Console::Gba
+        | Console::GbaDs
         | Console::Gb
         | Console::Gbc
         | Console::Snes
@@ -433,7 +434,7 @@ impl Shell {
 pub fn cart_size(console: Console) -> (usize, usize) {
     match console {
         Console::Ds => (CART_W, CART_H),
-        Console::Gba => (GBA_CART_W, GBA_CART_H),
+        Console::Gba | Console::GbaDs => (GBA_CART_W, GBA_CART_H),
         Console::Snes => SNES_CART,
         Console::Nes => NES_CART,
         Console::MegaDrive | Console::Sega32x => MD_CART,
@@ -476,6 +477,7 @@ pub fn box_size(console: Console) -> (usize, usize) {
         // Pocket's and the WonderSwan's are near enough; a CD's case is square. A PSP's case is
         // tall.
         Console::Gba
+        | Console::GbaDs
         | Console::Gb
         | Console::Gbc
         | Console::Apps
@@ -1069,6 +1071,7 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
         // A Game Boy label is about square, as its box is: the box art fills it.
         Console::Gb | Console::Gbc | Console::Nes if cover.is_some() => cover_label(cover, sw, sh),
         Console::Gba
+        | Console::GbaDs
         | Console::Gb
         | Console::Gbc
         | Console::Nes

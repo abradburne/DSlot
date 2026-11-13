@@ -2251,6 +2251,7 @@ pub(crate) fn console_colour(console: Console) -> Color {
     match console {
         Console::Ds => Color::RGB(58, 68, 92),
         Console::Gba => Color::RGB(76, 58, 128),
+        Console::GbaDs => Color::RGB(52, 84, 148),
         Console::Gb => Color::RGB(104, 116, 78),
         Console::Gbc => Color::RGB(118, 58, 108),
         Console::Snes => Color::RGB(104, 96, 136),
@@ -2379,6 +2380,7 @@ fn bar_for(console: Console) -> usize {
         | Console::PcEngineCd
         | Console::MegaCd => 2,
         Console::Gba
+        | Console::GbaDs
         | Console::Snes
         | Console::Nes
         | Console::MegaDrive

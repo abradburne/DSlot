@@ -3,6 +3,7 @@
 //! maker from the cartridge header, also inside a .zip; the name is the file's. SNES uses the
 //! same filename rule, with its LoROM/HiROM/ExHiROM headers read by `snes`.
 
+mod gbads;
 mod ports;
 mod snes;
 
@@ -26,6 +27,11 @@ use std::path::{Path, PathBuf};
 pub enum Console {
     Ds,
     Gba,
+    /// Game Boy Advance games that GBA DS (github.com/kyannon/gba-ds) gives a second screen: a
+    /// page of its own beside the GBA's, of the games in `Roms/GBA` whose cart codes are in its
+    /// list (rom/gbads.rs). The same files as on the GBA page; its emulators, settings and
+    /// saves go by `GBADS`.
+    GbaDs,
     Gb,
     Gbc,
     Snes,
@@ -68,9 +74,10 @@ pub enum Console {
 
 impl Console {
     /// The consoles, as against the apps, in tab order.
-    pub const ALL: [Console; 24] = [
+    pub const ALL: [Console; 25] = [
         Console::Ds,
         Console::Gba,
+        Console::GbaDs,
         Console::Gb,
         Console::Gbc,
         Console::Snes,
@@ -95,9 +102,10 @@ impl Console {
         Console::Ports,
     ];
     /// Every page there can be, in tab order: the consoles, then the apps.
-    pub const PAGES: [Console; 25] = [
+    pub const PAGES: [Console; 26] = [
         Console::Ds,
         Console::Gba,
+        Console::GbaDs,
         Console::Gb,
         Console::Gbc,
         Console::Snes,
@@ -130,6 +138,7 @@ impl Console {
         match self {
             Console::Ds => "NDS",
             Console::Gba => "GBA",
+            Console::GbaDs => "GBADS",
             Console::Gb => "GB",
             Console::Gbc => "GBC",
             Console::Snes => "SFC",
@@ -156,11 +165,21 @@ impl Console {
         }
     }
 
+    /// The folder under `Roms/` its games are in: its own, but for the GBA DS page, whose games
+    /// are the Game Boy Advance's (their box art and labels with them).
+    pub fn roms(self) -> &'static str {
+        match self {
+            Console::GbaDs => Console::Gba.folder(),
+            console => console.folder(),
+        }
+    }
+
     /// Its full name, as the system picker shows it.
     pub fn name(self) -> &'static str {
         match self {
             Console::Ds => "Nintendo DS",
             Console::Gba => "Game Boy Advance",
+            Console::GbaDs => "GBA DS",
             Console::Gb => "Game Boy",
             Console::Gbc => "Game Boy Color",
             Console::Snes => "Super Nintendo",
@@ -192,6 +211,7 @@ impl Console {
         match self {
             Console::Ds => "DS",
             Console::Gba => "GBA",
+            Console::GbaDs => "GBA DS",
             Console::Gb => "GB",
             Console::Gbc => "GBC",
             Console::Snes => "SNES",
@@ -223,6 +243,7 @@ impl Console {
         match self {
             Console::Ds => "ds",
             Console::Gba => "gba",
+            Console::GbaDs => "gbads",
             Console::Gb => "gb",
             Console::Gbc => "gbc",
             Console::Snes => "snes",
@@ -263,6 +284,7 @@ impl Console {
         match self {
             Console::Ds => "nds",
             Console::Gba => "gba",
+            Console::GbaDs => "gba",
             Console::Gb => "gb",
             Console::Gbc => "gbc",
             Console::Snes => "sfc",
@@ -303,7 +325,7 @@ impl Console {
     pub fn extensions(self) -> &'static [&'static str] {
         match self {
             Console::Ds => &["nds", "zip"],
-            Console::Gba => &["gba", "zip"],
+            Console::Gba | Console::GbaDs => &["gba", "zip"],
             Console::Gb | Console::Gbc => &["gb", "gbc", "zip"],
             Console::Snes => &["sfc", "smc", "zip"],
             Console::Nes => &["nes", "unf", "unif", "zip"],
@@ -336,6 +358,7 @@ impl Console {
         match self {
             Console::Ds => "games.bin",
             Console::Gba => "gba.bin",
+            Console::GbaDs => "gbads.bin",
             Console::Gb => "gb.bin",
             Console::Gbc => "gbc.bin",
             Console::Snes => "snes.bin",
@@ -367,6 +390,7 @@ impl Console {
         match self {
             Console::Ds => "NTR",
             Console::Gba => "AGB",
+            Console::GbaDs => "AGB",
             Console::Gb => "DMG",
             Console::Gbc => "CGB",
             Console::Snes => "SNS",
@@ -663,6 +687,11 @@ pub fn scan(console: Console, dirs: &[PathBuf], known: &Path) -> Vec<Game> {
             eprintln!("dslot: cannot write {}: {e}", known.display());
         }
     }
+    // The GBA DS page: of the GBA's games (all of them kept in mind above, so that none is
+    // read again), those it has a second screen for. A folder with none of them isn't shown.
+    if console == Console::GbaDs {
+        games.retain(|g| gbads::supported(&g.code));
+    }
     games.extend(folder_entries(console, &games, folders));
     games.sort_by_key(|g| g.name().to_lowercase());
     // PortMaster itself heads the Ports page, to get more: there with no ports yet too.
@@ -943,7 +972,7 @@ pub fn app_path(f: &nibkit::dslot::Found) -> PathBuf {
 fn read_header(console: Console, path: &Path, stem: &str) -> (String, Vec<String>, Option<Img>) {
     match console {
         Console::Ds => parse(path).unwrap_or_default(),
-        Console::Gba => parse_gba(path, stem),
+        Console::Gba | Console::GbaDs => parse_gba(path, stem),
         Console::Gb | Console::Gbc => parse_gb(path, stem),
         Console::Snes => snes::parse(path, stem),
         // NES cartridge dumps have no universal title/publisher/serial fields. Keep the
@@ -2236,6 +2265,58 @@ mod tests {
             Some("Zebra Sprint (Europe)")
         );
         assert_eq!(games.len(), 6);
+    }
+
+    /// The GBA DS page: the GBA folder's games whose cart codes GBA DS knows, with the folders
+    /// that hold some; the same files as the GBA page's, kept by its own name.
+    #[test]
+    fn gba_ds_games() {
+        let dir = TempDir::new("rom-gbads");
+        let gba = dir.path().join("Roms/GBA");
+        fs::create_dir_all(gba.join("Hacks")).unwrap();
+        fs::create_dir_all(gba.join("Others")).unwrap();
+        let rom = |code: &str| {
+            let mut head = vec![0u8; 0xC0];
+            head[0xAC..0xB0].copy_from_slice(code.as_bytes());
+            head
+        };
+        for (name, code) in [
+            ("Metroid Fusion (USA).gba", "AMTE"),
+            ("Hacks/Fusion Recolour.gba", "AMTE"),
+            ("Others/Some Puzzle (USA).gba", "ZZZE"),
+            ("Tidepool Racer (USA).gba", "ATRE"),
+        ] {
+            fs::write(gba.join(name), rom(code)).unwrap();
+        }
+        fs::write(gba.join("Wario Land 4 (USA).zip"), zip(&rom("AWAE"), true)).unwrap();
+        assert_eq!(Console::GbaDs.roms(), "GBA");
+        let known = dir.path().join(Console::GbaDs.known());
+        let dirs = std::slice::from_ref(&gba);
+        let games = scan(Console::GbaDs, dirs, &known);
+        let seen: Vec<(&str, &str, bool)> = games
+            .iter()
+            .map(|g| (g.sub.as_str(), g.stem.as_str(), g.folder))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("Hacks", "Fusion Recolour", false),
+                ("", "Hacks", true),
+                ("", "Metroid Fusion (USA)", false),
+                ("", "Wario Land 4 (USA)", false),
+            ]
+        );
+        assert!(games.iter().all(|g| g.console == Console::GbaDs));
+        assert_eq!(games[2].key(), "GBADS/Metroid Fusion (USA)");
+        // Every GBA ROM's header is kept in mind, so that the others aren't read each time.
+        assert_eq!(read_known(&known).unwrap().len(), 5);
+        assert_eq!(scan(Console::GbaDs, dirs, &known).len(), 4);
+        // The GBA page has them all.
+        let all = scan(Console::Gba, dirs, &dir.path().join("gba.bin"));
+        assert_eq!(all.iter().filter(|g| !g.folder).count(), 5);
+        // A file in a folder named GBA is a GBA game, not this page's.
+        let one = read_one(&gba.join("Metroid Fusion (USA).gba")).unwrap();
+        assert_eq!(one.console, Console::Gba);
     }
 
     #[test]

@@ -156,12 +156,14 @@ enum Changed {
 #[cfg(target_os = "linux")]
 struct Notify {
     fd: libc::c_int,
-    watches: std::collections::HashMap<libc::c_int, On>,
+    /// What each watch is on: a folder two pages share (Roms/GBA, for GBA and GBA DS) is one
+    /// watch, the kernel's answer the same for both.
+    watches: std::collections::HashMap<libc::c_int, Vec<On>>,
 }
 
 /// What a watch is on.
 #[cfg(target_os = "linux")]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum On {
     /// One of a console's folders.
     Console(Console),
@@ -203,7 +205,10 @@ impl Notify {
             // SAFETY: a NUL-terminated path that outlives the call.
             let wd = unsafe { inotify_add_watch(self.fd, c.as_ptr(), mask | IN_ONLYDIR) };
             if wd >= 0 {
-                self.watches.insert(wd, what);
+                let on = self.watches.entry(wd).or_default();
+                if !on.contains(&what) {
+                    on.push(what);
+                }
             }
             wd >= 0
         };
@@ -278,13 +283,17 @@ impl Notify {
                     unsafe { std::ptr::read_unaligned(buf[at..].as_ptr().cast()) };
                 at += head + event.len as usize;
                 let lost = event.mask & (IN_IGNORED | IN_UNMOUNT | IN_DELETE_SELF | IN_MOVE_SELF);
-                match self.watches.get(&event.wd) {
-                    _ if event.mask & IN_Q_OVERFLOW != 0 || lost != 0 => all = true,
-                    Some(On::Console(console)) => consoles.push(*console),
-                    // Only folders matter in a Roms folder.
-                    Some(On::Roms) => all |= event.mask & IN_ISDIR != 0,
-                    Some(On::Cards) => all = true,
-                    None => {}
+                if event.mask & IN_Q_OVERFLOW != 0 || lost != 0 {
+                    all = true;
+                    continue;
+                }
+                for on in self.watches.get(&event.wd).into_iter().flatten() {
+                    match on {
+                        On::Console(console) => consoles.push(*console),
+                        // Only folders matter in a Roms folder.
+                        On::Roms => all |= event.mask & IN_ISDIR != 0,
+                        On::Cards => all = true,
+                    }
                 }
             }
         }
@@ -293,6 +302,7 @@ impl Notify {
         } else if consoles.is_empty() {
             Changed::Nothing
         } else {
+            consoles.sort_by_key(|c| *c as usize);
             consoles.dedup();
             Changed::Consoles(consoles)
         }
@@ -371,5 +381,33 @@ mod tests {
         // Asked for, every console is looked at at once, and it says when it has.
         rescan.now();
         next(&rescan, |f| matches!(f, Found::Done).then_some(()));
+    }
+
+    /// GBA and GBA DS both list Roms/GBA: one watch, and a game copied in rescans both pages.
+    #[test]
+    fn a_shared_folder_rescans_both_pages() {
+        let dir = TempDir::new("rescan-shared");
+        let gba = dir.path().join("Roms/GBA");
+        fs::create_dir_all(&gba).unwrap();
+        let mut searched: [Vec<PathBuf>; Console::COUNT] = Default::default();
+        searched[Console::Gba as usize] = vec![gba.clone()];
+        searched[Console::GbaDs as usize] = vec![gba.clone()];
+        let rescan = Rescan::start(Folders {
+            searched,
+            cache: dir.path().to_owned(),
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        fs::write(gba.join("Moth & Lamp (Europe).gba"), [0u8; 512]).unwrap();
+        // (Both pages' results come in one batch: collect all of it, not the first.)
+        let mut seen = Vec::new();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !(seen.contains(&Console::Gba) && seen.contains(&Console::GbaDs)) {
+            assert!(Instant::now() < until, "rescanned only {seen:?}");
+            seen.extend(rescan.found().into_iter().filter_map(|f| match f {
+                Found::Games(console, _) => Some(console),
+                _ => None,
+            }));
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 }
