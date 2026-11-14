@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 - **GBA DS page**: a page after the GBA's for the games in `Roms/GBA` that
   [GBA DS](https://github.com/kyannon/gba-ds) gives a second screen (their map, HUD or status
