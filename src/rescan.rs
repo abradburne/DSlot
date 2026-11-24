@@ -37,6 +37,8 @@ enum Ask {
     Watch(Box<Folders>),
     /// Look at every console now.
     Now,
+    /// Look at these consoles now (used to finish scanning non-active pages after frame 0).
+    Consoles(Vec<Console>),
 }
 
 /// The watcher, which runs until DSlot exits.
@@ -68,6 +70,13 @@ impl Rescan {
         let _ = self.asks.send(Ask::Now);
     }
 
+    /// Looks at `consoles` now, without waiting for their folders to settle.
+    pub fn scan_consoles(&self, consoles: Vec<Console>) {
+        if !consoles.is_empty() {
+            let _ = self.asks.send(Ask::Consoles(consoles));
+        }
+    }
+
     /// What has been found since the last call.
     pub fn found(&self) -> Vec<Found> {
         self.found.try_iter().collect()
@@ -80,26 +89,61 @@ fn watch(mut folders: Folders, asked: Receiver<Ask>, tell: Sender<Found>) {
     // The consoles waiting to be looked at, and when their folders last changed.
     let mut due: [Option<Instant>; Console::COUNT] = [None; Console::COUNT];
     loop {
-        let now = Instant::now();
-        let wait = due
-            .iter()
-            .flatten()
-            .map(|&t| (t + QUIET).saturating_duration_since(now))
-            .min()
-            .unwrap_or(TICK)
-            .min(TICK);
-        let changed = notify.wait(wait);
         let mut all_now = false;
-        loop {
-            match asked.try_recv() {
-                Ok(Ask::Watch(f)) => {
-                    folders = *f;
-                    present = notify.set(&folders);
+        let mut immediate = [false; Console::COUNT];
+        let drain_asks = |all_now: &mut bool,
+                          immediate: &mut [bool; Console::COUNT],
+                          folders: &mut Folders,
+                          present: &mut [Vec<PathBuf>; Console::COUNT],
+                          notify: &mut Notify|
+         -> bool {
+            loop {
+                match asked.try_recv() {
+                    Ok(Ask::Watch(f)) => {
+                        *folders = *f;
+                        *present = notify.set(folders);
+                    }
+                    Ok(Ask::Now) => *all_now = true,
+                    Ok(Ask::Consoles(cs)) => {
+                        for c in cs {
+                            immediate[c as usize] = true;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => return true,
+                    Err(TryRecvError::Disconnected) => return false,
                 }
-                Ok(Ask::Now) => all_now = true,
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return,
             }
+        };
+        if !drain_asks(
+            &mut all_now,
+            &mut immediate,
+            &mut folders,
+            &mut present,
+            &mut notify,
+        ) {
+            return;
+        }
+        let changed = if all_now || immediate.iter().any(|&b| b) {
+            Changed::Nothing
+        } else {
+            let now = Instant::now();
+            let wait = due
+                .iter()
+                .flatten()
+                .map(|&t| (t + QUIET).saturating_duration_since(now))
+                .min()
+                .unwrap_or(TICK)
+                .min(TICK);
+            notify.wait(wait)
+        };
+        if !drain_asks(
+            &mut all_now,
+            &mut immediate,
+            &mut folders,
+            &mut present,
+            &mut notify,
+        ) {
+            return;
         }
         let now = Instant::now();
         match changed {
@@ -122,7 +166,7 @@ fn watch(mut folders: Folders, asked: Receiver<Ask>, tell: Sender<Found>) {
         }
         for console in Console::ALL {
             let quiet = due[console as usize].is_some_and(|t| now >= t + QUIET);
-            if !(all_now || quiet) {
+            if !(all_now || immediate[console as usize] || quiet) {
                 continue;
             }
             due[console as usize] = None;
@@ -409,5 +453,25 @@ mod tests {
             }));
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn scans_requested_consoles_without_waiting_for_quiet() {
+        let dir = TempDir::new("rescan-deferred");
+        let gba = dir.path().join("Roms/GBA");
+        fs::create_dir_all(&gba).unwrap();
+        fs::write(gba.join("Moth & Lamp (Europe).gba"), [0u8; 512]).unwrap();
+        let mut searched: [Vec<PathBuf>; Console::COUNT] = Default::default();
+        searched[Console::Gba as usize] = vec![gba];
+        let rescan = Rescan::start(Folders {
+            searched,
+            cache: dir.path().to_owned(),
+        });
+        rescan.scan_consoles(vec![Console::Gba]);
+        let found = next(&rescan, |f| match f {
+            Found::Games(Console::Gba, games) => Some(games.len()),
+            _ => None,
+        });
+        assert_eq!(found, 1);
     }
 }

@@ -55,8 +55,9 @@ pub fn splash_shown() -> bool {
     Path::new(SPLASH_SHOWN).exists()
 }
 
-/// Loads Mesa's libraries into the process ahead of SDL, which then finds them already there.
-/// Cold, from the SD card, they take ~0.5-1 s even without LLVM.
+/// Loads SDL3 and Mesa's libraries into the process ahead of SDL, which then finds them already
+/// there. Cold, from the SD card, they take ~0.5-1 s even without LLVM. RTLD_LAZY avoids eagerly
+/// resolving thousands of unused desktop-GL / other-Mali symbols in libgallium at startup.
 pub fn preload_gl() {
     #[cfg(target_os = "linux")]
     {
@@ -70,6 +71,7 @@ pub fn preload_gl() {
                     .is_some_and(|n| n.to_string_lossy().starts_with("libgallium-"))
             });
         let libs = [
+            "libSDL3.so.0",
             "libgbm.so.1",
             "libEGL.so.1",
             "libEGL_mesa.so.0",
@@ -82,12 +84,60 @@ pub fn preload_gl() {
                 continue;
             };
             // SAFETY: a NUL-terminated path; a library that is missing just returns null.
-            unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
+            unsafe { libc::dlopen(name.as_ptr(), libc::RTLD_LAZY | libc::RTLD_GLOBAL) };
         }
     }
 }
 
-pub fn first_frame_shown() {}
+/// Tells systemd (Type=notify) that the shelf's first frame is on screen, so deferred services
+/// (nibos-cpufreq, late modules, zram, growfs, bootlog) can start now that boot UI start-up is
+/// done and the CPU can leave the performance governor.
+pub fn first_frame_shown() {
+    #[cfg(target_os = "linux")]
+    sd_notify_ready();
+}
+
+#[cfg(target_os = "linux")]
+fn sd_notify_ready() {
+    use std::os::unix::ffi::OsStrExt;
+    let Some(sock) = std::env::var_os("NOTIFY_SOCKET") else {
+        return;
+    };
+    let bytes = sock.as_bytes();
+    if bytes.is_empty() {
+        return;
+    }
+    // SAFETY: AF_UNIX datagram socket for systemd's notification socket.
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_DGRAM | libc::SOCK_CLOEXEC, 0) };
+    if fd < 0 {
+        return;
+    }
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    let max = addr.sun_path.len();
+    if bytes.len() <= max {
+        // Abstract sockets start with '@' in NOTIFY_SOCKET and '\0' in sun_path.
+        for (i, &b) in bytes.iter().enumerate() {
+            addr.sun_path[i] = if i == 0 && b == b'@' { 0 } else { b as _ };
+        }
+        let len =
+            (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len()) as libc::socklen_t;
+        let msg = b"READY=1\n";
+        // SAFETY: valid buffer, socket fd, and sockaddr_un of length `len`.
+        unsafe {
+            libc::sendto(
+                fd,
+                msg.as_ptr().cast(),
+                msg.len(),
+                libc::MSG_NOSIGNAL,
+                (&addr as *const libc::sockaddr_un).cast(),
+                len,
+            );
+        }
+    }
+    // SAFETY: our own descriptor.
+    unsafe { libc::close(fd) };
+}
 
 /// Started by systemd as root, dslot.service has no drop-in naming its user: DSlot's files,
 /// and the games' settings and saves, would all be root's.

@@ -54,6 +54,12 @@ impl Sound {
         }
     }
 
+    /// Whether SDL's audio subsystem is needed as a fallback: on nibOS and stock OS, `pacat`
+    /// plays the clicks and opening SDL audio cold costs ~0.7 s on frame 1 for nothing.
+    pub fn needs_sdl(&self) -> bool {
+        !std::path::Path::new("/usr/bin/pacat").exists()
+    }
+
     /// SDL's audio, for when there is no `pacat`. Sound is optional: with no audio device the
     /// shelf is simply silent.
     pub fn set_audio(&mut self, console: Option<AudioSubsystem>) {

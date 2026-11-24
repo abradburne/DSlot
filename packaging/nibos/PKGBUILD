@@ -67,7 +67,7 @@ prepare() {
 
 build() {
     cd "$srcdir/dslot"
-    cargo build --release --frozen --features nibos
+    RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=cortex-a55" cargo build --release --frozen --features nibos
 }
 
 check() {

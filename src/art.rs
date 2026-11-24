@@ -380,14 +380,15 @@ fn on_lip(x: f32, y: f32) -> bool {
 }
 
 impl Shell {
+    /// Creates an empty shell cache: each console's cart shell is drawn lazily on an artwork
+    /// worker thread the first time a cart of that console is composed, so startup never blocks
+    /// on drawing a shell before frame 0.
     pub fn load() -> Shell {
-        let shell = Shell {
+        Shell {
             frames: Default::default(),
             famicom: OnceLock::new(),
             styled: Mutex::default(),
-        };
-        shell.frame(Console::Ds);
-        shell
+        }
     }
 
     fn frame(&self, console: Console) -> &Frame {

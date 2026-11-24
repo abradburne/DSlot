@@ -141,12 +141,12 @@ pub struct Ui<'a> {
     pub(super) white: Vec<Texture>,
     /// The status bar with the DS slot, and with the slot-2 opening, by `Slot as usize`.
     /// The status bar with the slot in it: the DS's, then slot-2's opening sized for each
-    /// console's carts (`bar_for`).
-    bars: [Texture; 3],
-    star: Vec<Texture>,
-    heart: Vec<Texture>,
-    /// The DSlot logo, for the screensaver, one for each canvas.
-    logo: Vec<Texture>,
+    /// console's carts (`bar_for`), rasterized on first use.
+    bars: [Option<Texture>; 3],
+    star: Option<Vec<Texture>>,
+    heart: Option<Vec<Texture>>,
+    /// The DSlot logo, for the screensaver, one for each canvas (decoded on first use).
+    logo: Option<Vec<Texture>>,
     /// The status bar's battery icon, as last drawn.
     battery: Option<(stats::BatteryNow, Texture)>,
     /// The system cards' photos, by console, made into textures as they are first shown.
@@ -240,16 +240,6 @@ impl<'a> Ui<'a> {
             h: 1,
             px: vec![255; 4],
         })?;
-        let bar = |slot, cart_w| texture(&creators[bot.c], &slot_bar(bot.s, slot, cart_w));
-        let bars = [
-            bar(Slot::One, 0.0)?,
-            bar(Slot::Two, cart_geometry(Console::Gba).0)?,
-            bar(Slot::Two, cart_geometry(Console::Gb).0)?,
-        ];
-        let icon = (ICON * bot.s).round() as usize;
-        let (star, heart) = (each(&gfx::star(icon))?, each(&gfx::heart(icon))?);
-        let logo = gfx::decode_png(crate::splash::LOGO).ok_or("the logo is not a PNG")?;
-        let logo = each(&logo)?;
         let thumb = (
             (GRID_COVER.0 * bot.s).round() as usize,
             (GRID_COVER.1 * bot.s).round() as usize,
@@ -274,10 +264,10 @@ impl<'a> Ui<'a> {
             thumbs: HashMap::new(),
             texts: HashMap::new(),
             white,
-            bars,
-            star,
-            heart,
-            logo,
+            bars: [None, None, None],
+            star: None,
+            heart: None,
+            logo: None,
             battery: None,
             radios: None,
             photos: HashMap::new(),
@@ -662,10 +652,55 @@ impl Ui<'_> {
         self.canvases[v.c].copy(t, None, dst)
     }
 
+    fn ensure_bar(&mut self, idx: usize) -> Result<(), String> {
+        if self.bars[idx].is_none() {
+            let img = match idx {
+                0 => slot_bar(self.bot.s, Slot::One, 0.0),
+                1 => slot_bar(self.bot.s, Slot::Two, cart_geometry(Console::Gba).0),
+                _ => slot_bar(self.bot.s, Slot::Two, cart_geometry(Console::Gb).0),
+            };
+            self.bars[idx] = Some(texture(&self.creators[self.bot.c], &img)?);
+        }
+        Ok(())
+    }
+
+    fn ensure_logo(&mut self) -> Result<(), String> {
+        if self.logo.is_none() {
+            let img = gfx::decode_png(crate::splash::LOGO).ok_or("the logo is not a PNG")?;
+            let made: Result<Vec<_>, _> =
+                self.creators.iter().map(|tc| texture(tc, &img)).collect();
+            self.logo = Some(made?);
+        }
+        Ok(())
+    }
+
+    fn ensure_star(&mut self) -> Result<(), String> {
+        if self.star.is_none() {
+            let icon = (ICON * self.bot.s).round() as usize;
+            let img = gfx::star(icon);
+            let made: Result<Vec<_>, _> =
+                self.creators.iter().map(|tc| texture(tc, &img)).collect();
+            self.star = Some(made?);
+        }
+        Ok(())
+    }
+
+    fn ensure_heart(&mut self) -> Result<(), String> {
+        if self.heart.is_none() {
+            let icon = (ICON * self.bot.s).round() as usize;
+            let img = gfx::heart(icon);
+            let made: Result<Vec<_>, _> =
+                self.creators.iter().map(|tc| texture(tc, &img)).collect();
+            self.heart = Some(made?);
+        }
+        Ok(())
+    }
+
     /// The screensaver, on the screens in `screens` (top, bottom): black, and the logo where
     /// the bouncer has it, in its colour (the screens stacked with the hinge between them).
     /// Only those canvases are cleared and shown again; a screen left black stays as it is.
     pub fn draw_saver(&mut self, b: &Bouncer, screens: [bool; 2]) -> Result<(), String> {
+        self.ensure_logo()?;
         let views = [(self.top, 0.0), (self.bot, SH + bouncer::HINGE)];
         // A canvas shared by both screens (the stock OS) is drawn whole.
         let mut canvases: Vec<usize> = (0..2)
@@ -684,7 +719,7 @@ impl Ui<'_> {
             if !canvases.contains(&v.c) || !bouncer::on_screen(y) {
                 continue;
             }
-            let logo = &mut self.logo[v.c];
+            let logo = &mut self.logo.as_mut().unwrap()[v.c];
             logo.set_color_mod(r, g, bl);
             self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
             // Where it is to a fraction of a pixel, so the slow drift glides between frames.
@@ -710,15 +745,17 @@ impl Ui<'_> {
 
     /// A rating: five stars, the first `rating` of them lit.
     pub fn stars(&mut self, v: View, x: f32, y: f32, rating: u8) -> Result<(), String> {
+        self.ensure_star()?;
+        let star = &mut self.star.as_mut().unwrap()[v.c];
         for i in 0..5 {
             let c = if i < rating {
                 GOLD
             } else {
                 Color::RGB(52, 58, 74)
             };
-            self.star[v.c].set_color_mod(c.r, c.g, c.b);
+            star.set_color_mod(c.r, c.g, c.b);
             self.canvases[v.c].copy(
-                &self.star[v.c],
+                star,
                 None,
                 v.rect(x + i as f32 * (ICON + 4.0), y, ICON, ICON),
             )?;
@@ -727,8 +764,10 @@ impl Ui<'_> {
     }
 
     pub fn heart(&mut self, v: View, x: f32, y: f32, c: Color) -> Result<(), String> {
-        self.heart[v.c].set_color_mod(c.r, c.g, c.b);
-        self.canvases[v.c].copy(&self.heart[v.c], None, v.rect(x, y, ICON, ICON))
+        self.ensure_heart()?;
+        let heart = &mut self.heart.as_mut().unwrap()[v.c];
+        heart.set_color_mod(c.r, c.g, c.b);
+        self.canvases[v.c].copy(heart, None, v.rect(x, y, ICON, ICON))
     }
 
     /// Hint line, status bar and the fade to black that goes with a launch.
@@ -745,8 +784,10 @@ impl Ui<'_> {
             hint => hint,
         };
         self.text(v, hint, (18.0, false), (SW / 2.0, 636.0), 0.5, FAINT)?;
+        let bar_idx = bar_for(console);
+        self.ensure_bar(bar_idx)?;
         self.canvases[v.c].copy(
-            &self.bars[bar_for(console)],
+            self.bars[bar_idx].as_ref().unwrap(),
             None,
             v.rect(0.0, SH - BAR_H, SW, BAR_H),
         )?;
@@ -1939,8 +1980,10 @@ impl Ui<'_> {
                     }
                 }
                 Draw::Bar { y, .. } => {
+                    let bar_idx = bar_for(console);
+                    self.ensure_bar(bar_idx)?;
                     self.canvases[v.c].copy(
-                        &self.bars[bar_for(console)],
+                        self.bars[bar_idx].as_ref().unwrap(),
                         None,
                         v.rect(0.0, y, SW, BAR_H),
                     )?;

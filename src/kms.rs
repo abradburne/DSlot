@@ -24,6 +24,9 @@ impl Kms {
     pub fn show(&mut self, _imgs: &[&crate::gfx::Img]) -> Result<(), String> {
         Ok(())
     }
+    pub fn show_xrgb(&mut self, _imgs: &[&crate::splash::RawScreen]) -> Result<(), String> {
+        Ok(())
+    }
     pub fn paint(&mut self, _imgs: &[&crate::gfx::Img]) {}
     pub fn set(&self) -> Result<(), String> {
         Ok(())
@@ -200,15 +203,16 @@ mod linux {
 
     impl Kms {
         /// Takes the first two connected outputs of the first KMS card, on the CRTCs they are
-        /// already lit by (the console's). The first is the bottom screen unless `swap`.
+        /// already lit by (or the first free CRTC each may use when deferred fbcon hasn't lit them
+        /// yet). The first is the bottom screen unless `swap`.
         pub fn open(swap: bool) -> Result<Kms, String> {
-            let (fd, connectors) = (0..4).find_map(card).ok_or("no KMS card")?;
+            let (fd, crtcs, connectors) = (0..4).find_map(card).ok_or("no KMS card")?;
             let mut kms = Kms {
                 fd,
                 screens: Vec::new(),
             };
             for id in connectors {
-                if let Some(screen) = kms.screen(id)? {
+                if let Some(screen) = kms.screen(id, &crtcs)? {
                     kms.screens.push(screen);
                 }
                 if kms.screens.len() == 2 {
@@ -225,33 +229,54 @@ mod linux {
             Ok(kms)
         }
 
-        /// The connector `id` as a screen, with a buffer of its own, if it is lit.
-        fn screen(&self, id: u32) -> Result<Option<Screen>, String> {
+        /// The connector `id` as a screen, with a buffer of its own, if it is connected.
+        fn screen(&self, id: u32, crtcs: &[u32]) -> Result<Option<Screen>, String> {
             let fd = self.fd;
             let mut c = GetConnector {
                 connector_id: id,
                 ..Default::default()
             };
             ioctl(fd, GETCONNECTOR, &mut c)?;
-            if c.connection != CONNECTED || c.count_modes == 0 || c.encoder_id == 0 {
+            if c.connection != CONNECTED || c.count_modes == 0 {
                 return Ok(None);
             }
             let mut modes = vec![ModeInfo::default(); c.count_modes as usize];
+            let mut encs = vec![0u32; c.count_encoders as usize];
             let mut with_modes = GetConnector {
                 connector_id: id,
                 modes_ptr: modes.as_mut_ptr() as u64,
                 count_modes: c.count_modes,
+                encoders_ptr: encs.as_mut_ptr() as u64,
+                count_encoders: c.count_encoders,
                 ..Default::default()
             };
             ioctl(fd, GETCONNECTOR, &mut with_modes)?;
+            let enc = if with_modes.encoder_id != 0 {
+                with_modes.encoder_id
+            } else {
+                encs.first().copied().unwrap_or(0)
+            };
+            if enc == 0 {
+                return Ok(None);
+            }
             let mut e = GetEncoder {
-                encoder_id: c.encoder_id,
+                encoder_id: enc,
                 ..Default::default()
             };
             ioctl(fd, GETENCODER, &mut e)?;
-            if e.crtc_id == 0 {
-                return Ok(None);
-            }
+            let free = |crtc: &u32| !self.screens.iter().any(|s| s.crtc == *crtc);
+            let crtc = if e.crtc_id != 0 && free(&e.crtc_id) {
+                e.crtc_id
+            } else {
+                match crtcs
+                    .iter()
+                    .enumerate()
+                    .find(|(i, c)| e.possible_crtcs & (1 << i) != 0 && free(c))
+                {
+                    Some((_, &c)) => c,
+                    None => return Ok(None),
+                }
+            };
             let mode = modes[0];
             let (width, height) = (mode.hdisplay as u32, mode.vdisplay as u32);
             let mut d = CreateDumb {
@@ -291,12 +316,9 @@ mod linux {
             if map == libc::MAP_FAILED {
                 return Err("mmap of a dumb buffer failed".into());
             }
-            eprintln!(
-                "dslot: KMS connector {id} on CRTC {} {width}x{height}",
-                e.crtc_id
-            );
+            eprintln!("dslot: KMS connector {id} on CRTC {crtc} {width}x{height}");
             Ok(Some(Screen {
-                crtc: e.crtc_id,
+                crtc,
                 connector: id,
                 mode,
                 fb: f.fb_id,
@@ -309,6 +331,28 @@ mod linux {
         /// Shows one picture on each screen (top first), taking the outputs from the console.
         pub fn show(&mut self, imgs: &[&Img]) -> Result<(), String> {
             self.paint(imgs);
+            self.set()
+        }
+
+        /// Copies raw XRGB8888 splash pictures straight into each dumb buffer and sets them,
+        /// avoiding an RGBA round-trip and pixel-by-pixel writes into write-combined memory.
+        pub fn show_xrgb(&mut self, imgs: &[&crate::splash::RawScreen]) -> Result<(), String> {
+            for (s, img) in self.screens.iter().zip(imgs) {
+                let (cw, ch) = (
+                    (s.mode.hdisplay as usize).min(img.w) * 4,
+                    (s.mode.vdisplay as usize).min(img.h),
+                );
+                for y in 0..ch {
+                    // SAFETY: row `y` within both `img.px` and the dumb buffer mapping.
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            img.px.as_ptr().add(y * img.w * 4),
+                            s.map.add(y * s.pitch as usize),
+                            cw,
+                        );
+                    }
+                }
+            }
             self.set()
         }
 
@@ -368,8 +412,8 @@ mod linux {
         }
     }
 
-    /// Opens /dev/dri/card`i` and lists its connectors, if it is a KMS card.
-    fn card(i: u32) -> Option<(i32, Vec<u32>)> {
+    /// Opens /dev/dri/card`i` and lists its CRTCs and connectors, if it is a KMS card.
+    fn card(i: u32) -> Option<(i32, Vec<u32>, Vec<u32>)> {
         let path = std::ffi::CString::new(format!("/dev/dri/card{i}")).ok()?;
         // SAFETY: a NUL-terminated path.
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
@@ -379,13 +423,16 @@ mod linux {
         let mut res = CardRes::default();
         if ioctl(fd, GETRESOURCES, &mut res).is_ok() && res.count_connectors > 0 {
             let mut ids = vec![0u32; res.count_connectors as usize];
+            let mut crtcs = vec![0u32; res.count_crtcs as usize];
             let mut listed = CardRes {
                 connector_id_ptr: ids.as_mut_ptr() as u64,
                 count_connectors: res.count_connectors,
+                crtc_id_ptr: crtcs.as_mut_ptr() as u64,
+                count_crtcs: res.count_crtcs,
                 ..Default::default()
             };
             if ioctl(fd, GETRESOURCES, &mut listed).is_ok() {
-                return Some((fd, ids));
+                return Some((fd, crtcs, ids));
             }
         }
         // SAFETY: our own descriptor, not used again.

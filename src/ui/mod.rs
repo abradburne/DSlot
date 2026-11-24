@@ -100,6 +100,10 @@ pub struct Opts {
     pub last_frame: Mutex<Option<[crate::gfx::Img; 2]>>,
     /// Notices nibOS leaves for the shelf (notices.rs), and which have been shown this run.
     pub notices: Mutex<crate::notices::Notices>,
+    /// Non-active consoles deferred from initial scan until after frame 0.
+    pub deferred_scan: Mutex<Vec<crate::rom::Console>>,
+    /// ROM roots whose missing console folders are created after frame 0.
+    pub pending_folders: Mutex<Option<Vec<PathBuf>>>,
 }
 
 /// What the shelf works with, the same every time it comes up. (The games are passed beside

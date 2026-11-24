@@ -1367,7 +1367,13 @@ fn show(
     // Folders of games named as the setting says, and named again when it changes.
     let mut hide_underscore = settings.hide_underscore();
     crate::rom::name_folders(games, hide_underscore);
+    let from_boot = back.is_none();
     let mut state = State::new(games, stats, settings, back, &shelf.opts.searched, shelf.ra);
+    let started = Instant::now();
+    let mut check_update = from_boot
+        && state.menu.is_none()
+        && crate::update::there()
+        && crate::update::status().is_none();
     let mut reader = Reader::default();
     let mut events = sdl.event_pump()?;
     crate::mark("shelf set up");
@@ -2034,6 +2040,25 @@ fn show(
                 idle = Instant::now();
             }
         }
+        // nibos-update-boot.service runs beside DSlot: if its status file arrives shortly after
+        // boot with a post-update notice, open the Update page once.
+        if check_update && frame.is_multiple_of(15) {
+            if started.elapsed() >= Duration::from_secs(10) {
+                check_update = false;
+            } else if let Some(s) = crate::update::status() {
+                check_update = false;
+                if (!s.updated_to.is_empty() || !s.failed.is_empty())
+                    && state.menu.is_none()
+                    && state.power.is_none()
+                    && state.game_page.is_none()
+                    && !state.busy()
+                {
+                    let game = state.order.get(state.sel).is_some();
+                    state.menu = Some(Menu::open_update(game, shelf.ra));
+                    idle = Instant::now();
+                }
+            }
+        }
         // A level the keys just set: shown from now, then faded.
         if let Some(level) = levels.as_mut().and_then(|w| w.changed()) {
             indicator.show(level, Instant::now());
@@ -2304,12 +2329,31 @@ fn show(
             });
         }
         if frame == 1 {
-            platform::first_frame_shown();
             pads = Some(Pads::open(sdl.game_controller()?)?);
             crate::mark("controllers ready");
-            // Also not wanted for the first frame, and slow to start cold (~0.7 s on nibOS).
-            sound.set_audio(sdl.audio().ok());
+            // Tell systemd (and dsboot) we are live and interactive so post-boot services
+            // (cpufreq, late modules, zram, etc.) start without competing with startup.
+            platform::first_frame_shown();
+            // SDL audio (~0.7 s cold on nibOS) is only needed where pacat isn't available.
+            if sound.needs_sdl() {
+                sound.set_audio(sdl.audio().ok());
+            }
             crate::mark("audio ready");
+            // Finish scanning non-active consoles and creating missing ROM folders now that
+            // the active page is on screen and interactive.
+            let deferred =
+                std::mem::take(&mut *opts.deferred_scan.lock().unwrap_or_else(|e| e.into_inner()));
+            if !deferred.is_empty() {
+                shelf.rescan.scan_consoles(deferred);
+            }
+            if let Some(roots) = opts
+                .pending_folders
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take()
+            {
+                crate::folders::make_soon(&roots, shelf.emulators);
+            }
             crate::gfx::warm_fallback();
         }
         frame += 1;

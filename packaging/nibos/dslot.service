@@ -22,7 +22,7 @@
 Description=DSlot game shelf
 Documentation=https://github.com/abradburne/DSlot
 DefaultDependencies=no
-After=systemd-journald.socket systemd-tmpfiles-setup-dev-early.service systemd-remount-fs.service
+After=systemd-journald.socket systemd-remount-fs.service
 Conflicts=getty@tty1.service shutdown.target
 Before=shutdown.target
 # Leaving DSlot (Select + Start), or DSlot failing, brings up the shell on tty1.
@@ -30,7 +30,8 @@ OnSuccess=getty@tty1.service
 OnFailure=getty@tty1.service
 
 [Service]
-Type=exec
+Type=notify
+TimeoutStartSec=30
 SupplementaryGroups=video input audio
 WorkingDirectory=~
 # See the top of this file.
@@ -47,6 +48,8 @@ StandardOutput=journal
 StandardError=journal
 # The shelf is what you see; keep it ahead of everything else starting.
 Nice=-5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
 # The games DSlot starts run in this unit and inherit its limits: real-time priority up to 10,
 # below PipeWire's data loops, for an emulator's frame and audio threads. (PipeWire's client
 # library sets RLIMIT_RTTIME to 200 ms in such a process: a real-time thread that never sleeps

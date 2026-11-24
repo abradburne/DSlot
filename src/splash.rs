@@ -44,11 +44,16 @@ pub fn write(path: &Path, w: usize, h: usize) -> Result<(), String> {
     std::fs::write(path, out).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The splash's picture as the splash program showed it: the first of `paths` that reads, top
-/// screen first. DSlot puts it up in its own buffers, the same pixels, so that the buffers SDL
-/// finds on screen when it starts (and puts back when its windows go) are DSlot's, which last,
-/// rather than the splash program's, which go when it exits.
-pub fn read(paths: &[&str]) -> Option<[Img; 2]> {
+/// One screen's raw XRGB8888 pixels straight from a PSPL file (matching KMS dumb buffers
+/// without an RGBA round-trip).
+pub struct RawScreen {
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<u8>,
+}
+
+/// The splash's picture as raw XRGB8888 rows, ready to memcpy into KMS dumb buffers.
+pub fn read_xrgb(paths: &[&str]) -> Option<[RawScreen; 2]> {
     let data = paths.iter().find_map(|p| std::fs::read(p).ok())?;
     let u32_at = |at: usize| -> Option<usize> {
         Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?) as usize)
@@ -57,7 +62,7 @@ pub fn read(paths: &[&str]) -> Option<[Img; 2]> {
         return None;
     }
     let mut at = 12;
-    let mut screen = || -> Option<Img> {
+    let mut screen = || -> Option<RawScreen> {
         let (w, h, len) = (u32_at(at)?, u32_at(at + 4)?, u32_at(at + 8)?);
         if w > 4096 || h > 4096 {
             return None;
@@ -65,16 +70,30 @@ pub fn read(paths: &[&str]) -> Option<[Img; 2]> {
         let mut px = vec![0u8; w * h * 4];
         lz4_flex::block::decompress_into(data.get(at + 12..at + 12 + len)?, &mut px).ok()?;
         at += 12 + len;
-        // XRGB8888 to RGBA.
-        for p in px.chunks_exact_mut(4) {
-            p.swap(0, 2);
-            p[3] = 255;
-        }
-        Some(Img { w, h, px })
+        Some(RawScreen { w, h, px })
     };
     let top = screen()?;
     let bot = screen()?;
     Some([top, bot])
+}
+
+/// The splash's picture as the splash program showed it: the first of `paths` that reads, top
+/// screen first.
+#[cfg(test)]
+pub fn read(paths: &[&str]) -> Option<[Img; 2]> {
+    let [top, bot] = read_xrgb(paths)?;
+    let to_rgba = |mut s: RawScreen| {
+        for p in s.px.chunks_exact_mut(4) {
+            p.swap(0, 2);
+            p[3] = 255;
+        }
+        Img {
+            w: s.w,
+            h: s.h,
+            px: s.px,
+        }
+    };
+    Some([to_rgba(top), to_rgba(bot)])
 }
 
 #[cfg(test)]

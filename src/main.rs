@@ -110,6 +110,8 @@ fn run() -> Result<(), String> {
         outputs: std::sync::Mutex::new(None),
         last_frame: std::sync::Mutex::new(None),
         notices: std::sync::Mutex::new(notices::Notices::system()),
+        deferred_scan: std::sync::Mutex::new(Vec::new()),
+        pending_folders: std::sync::Mutex::new(None),
     };
 
     let mut args = std::env::args().skip(1);
@@ -148,24 +150,28 @@ fn run() -> Result<(), String> {
             _ => return Err(format!("unknown option {arg}\n{USAGE}")),
         }
     }
+    let on_device = platform::on_device();
+    // Mesa is loaded from the very start, on a thread, so it overlaps reading emulator
+    // descriptions, notices, and KMS splash takeover (DSLOT_PRELOAD=0 for the other way).
+    let preload = on_device && !std::env::var("DSLOT_PRELOAD").is_ok_and(|v| v == "0");
+    let gl = preload.then(|| {
+        std::thread::spawn(|| {
+            platform::preload_gl();
+            mark("GL libraries loaded");
+        })
+    });
     // Roms folders named on the command line stay as they are; the system's are read again
     // at each rescan, for a card put in or taken out since.
     let given_roots = !roots.is_empty();
     if !given_roots {
         roots = platform::rom_roots();
     }
-    // A console has a page when an emulator for it is installed
-    // (anywhere but the device, for trying the shelf out, the first is enough). Its games are
-    // looked for in its folder in every Roms folder, as the stock OS lays the cards out:
-    // Roms/NDS, Roms/GBA, ...
-    let mut emulators = Emulators::load(&dirs.emulators);
-    // The game folders a card should have, and doesn't yet (folders.rs).
-    folders::make_soon(&roots, &emulators);
-    let playable =
-        |c: Console| !platform::on_device() || emulators.for_system(c.folder()).next().is_some();
-    for console in Console::ALL.into_iter().filter(|&c| playable(c)) {
-        opts.searched[console as usize] = roots.iter().map(|r| r.join(console.roms())).collect();
-    }
+    // The game folders a card should have, and doesn't yet (folders.rs): deferred until after
+    // frame 0 so boot I/O isn't held up touching /mnt/roms before GL starts.
+    *opts
+        .pending_folders
+        .lock()
+        .unwrap_or_else(|e| e.into_inner()) = Some(roots.clone());
 
     mark("started");
     platform::check_user()?;
@@ -175,25 +181,132 @@ fn run() -> Result<(), String> {
     // A long press of power (nibOS) asks for the power menu, from now on.
     let power = nibkit::power::watch();
     platform::refresh_power_on_hook();
-    let on_device = platform::on_device();
     let hold_outputs = platform::SKELETON_START && on_device && opts.shot.is_none();
     let skeleton = hold_outputs && !std::env::var("DSLOT_KMS").is_ok_and(|v| v == "0");
-    // Mesa is loaded from the start, on a thread, rather than when SDL makes the renderers: on
-    // nibOS the shelf is up ~0.15 s sooner (DSLOT_PRELOAD=0 for the other way). The skeleton
-    // needs no dlopen, so it isn't held up.
-    let preload = on_device && !std::env::var("DSLOT_PRELOAD").is_ok_and(|v| v == "0");
-    let gl = preload.then(|| {
-        std::thread::spawn(|| {
-            platform::preload_gl();
-            mark("GL libraries loaded");
-        })
-    });
-    let fonts = gfx::Fonts::load();
-    mark("fonts loaded");
     let splash = on_device && platform::splash_shown();
     if splash {
         mark("splash on screen");
     }
+    // Parse the embedded fonts off the main thread when the splash is up (skeleton needs them
+    // before KMS show; otherwise they aren't needed until Ui::new after SDL/GL open).
+    let mut fonts_bg = splash.then(|| {
+        std::thread::spawn(|| {
+            let f = gfx::Fonts::load();
+            mark("fonts loaded");
+            f
+        })
+    });
+    let mut fonts_fg = (!splash).then(|| {
+        let f = gfx::Fonts::load();
+        mark("fonts loaded");
+        f
+    });
+
+    // Load emulators, stats, settings and list games on a background thread right away,
+    // overlapping KMS splash takeover and SDL/GL initialization on the main thread.
+    let wait_roms = on_device && !given_roots && roots.iter().any(|r| r == Path::new("/mnt/roms"));
+    let is_shot = opts.shot.is_some();
+    let bg_emulators_dirs = dirs.emulators.clone();
+    let bg_stats_path = dirs.stats.clone();
+    let bg_settings_path = dirs.settings.clone();
+    let bg_legacy = settings::Legacy {
+        settings_ini: dirs.legacy.settings_ini.clone(),
+        launch_conf: dirs.legacy.launch_conf.clone(),
+    };
+    let bg_roots = roots.clone();
+    let bg_cache = opts.cache.clone();
+    let library_bg = std::thread::spawn(move || {
+        let emulators = Emulators::load(&bg_emulators_dirs);
+        let mut searched: [Vec<PathBuf>; Console::COUNT] = Default::default();
+        let playable = |c: Console| !on_device || emulators.for_system(c.folder()).next().is_some();
+        for console in Console::ALL.into_iter().filter(|&c| playable(c)) {
+            searched[console as usize] = bg_roots.iter().map(|r| r.join(console.roms())).collect();
+        }
+        let stats = stats::Stats::load(bg_stats_path);
+        // When settings.toml already exists (every boot after the first), load it before scanning
+        // so we know the active page and can scan only that console before frame 0; the rest are
+        // scanned by `rescan` right after frame 0 is shown.
+        let early_settings = (on_device && !is_shot && bg_settings_path.exists())
+            .then(|| Settings::load(bg_settings_path.clone(), &bg_legacy, &[], &emulators));
+        let active_only = early_settings
+            .as_ref()
+            .map(|s| s.page)
+            .filter(|&p| !searched[p as usize].is_empty());
+
+        let spawn_scan = |console: Console, scan_dirs: Vec<PathBuf>, known: PathBuf| {
+            std::thread::spawn(move || {
+                if let Ok(dir) = std::env::var("DSLOT_WAIT_FOR") {
+                    wait_for_mount(&dir);
+                } else if wait_roms {
+                    wait_for_mount("/mnt/roms");
+                }
+                nibkit::paths::wait_for_cards(CARD_WAIT);
+                let games = rom::scan(console, &scan_dirs, &known);
+                mark(&format!("{} games scanned", console.label()));
+                games
+            })
+        };
+
+        let scan_consoles: Vec<Console> = match active_only {
+            Some(page) => vec![page],
+            None => Console::ALL
+                .into_iter()
+                .filter(|&s| !searched[s as usize].is_empty())
+                .collect(),
+        };
+        let listings: Vec<_> = scan_consoles
+            .into_iter()
+            .map(|console| {
+                spawn_scan(
+                    console,
+                    searched[console as usize].clone(),
+                    bg_cache.join(console.known()),
+                )
+            })
+            .collect();
+        let mut games: Vec<Game> = Vec::new();
+        for listing in listings {
+            let found = listing.join().map_err(|_| "listing the games failed")?;
+            if let Some(g) = found.first() {
+                eprintln!(
+                    "dslot: {} {} games in {:?}",
+                    found.len(),
+                    g.console.label(),
+                    searched[g.console as usize]
+                );
+            }
+            games.extend(found);
+        }
+        let mut deferred = Vec::new();
+        if let Some(page) = active_only {
+            let others: Vec<Console> = Console::ALL
+                .into_iter()
+                .filter(|&s| s != page && !searched[s as usize].is_empty())
+                .collect();
+            if games.is_empty() {
+                let rest: Vec<_> = others
+                    .into_iter()
+                    .map(|c| spawn_scan(c, searched[c as usize].clone(), bg_cache.join(c.known())))
+                    .collect();
+                for listing in rest {
+                    games.extend(listing.join().map_err(|_| "listing the games failed")?);
+                }
+            } else {
+                deferred = others;
+            }
+        }
+        rom::name_from_lists(&mut games, &emulators);
+        let apps = nibkit::dslot::apps(&bg_roots);
+        if !apps.is_empty() {
+            eprintln!("dslot: {} apps", apps.len());
+        }
+        games.extend(rom::apps(&apps));
+        let settings = early_settings
+            .unwrap_or_else(|| Settings::load(bg_settings_path, &bg_legacy, &games, &emulators));
+        mark("stats and settings loaded");
+        Ok::<_, String>((emulators, searched, stats, settings, games, apps, deferred))
+    });
+
     // DSlot's own hold on the screens (kms), opened now, while no one else has them, and kept:
     // the shelf's layout, empty, at once (the shelf comes up over it), and later the shelf's
     // last frame between it and a game.
@@ -201,18 +314,18 @@ fn run() -> Result<(), String> {
         match kms::Kms::open(opts.swap) {
             Ok(mut out) => {
                 if skeleton && !splash {
-                    let (top, bot) = ui::skeleton(&fonts);
+                    let (top, bot) = ui::skeleton(fonts_fg.as_ref().expect("fonts loaded"));
                     out.show(&[&top, &bot])?;
                     mark("skeleton shown");
                 } else if let (true, Some([top, bot])) =
-                    (splash, splash::read(platform::SPLASH_PICTURES))
+                    (splash, splash::read_xrgb(platform::SPLASH_PICTURES))
                 {
                     // The splash's picture again, in DSlot's buffers: nothing changes on screen,
                     // but what SDL finds there when it starts, and puts back when it lets go of
                     // the screens for a game, is now DSlot's, which lasts. The splash program's
                     // goes when it exits (as DSlot's first frame is up), and SDL putting that
                     // back failed ("Could not restore CRTC"), leaving a screen dark for a moment.
-                    match out.show(&[&top, &bot]) {
+                    match out.show_xrgb(&[&top, &bot]) {
                         Ok(()) => mark("splash taken over"),
                         Err(e) => eprintln!("dslot: KMS: {e}"),
                     }
@@ -223,62 +336,28 @@ fn run() -> Result<(), String> {
         }
     }
 
-    // The games are listed (which may wait ~1 s at power-on for the games card to mount) and
-    // the cart shell is drawn while SDL, the windows and GL start here: SDL stays on this
-    // thread. Each page's games are listed on a thread of their own.
-    let listings: Vec<_> = Console::ALL
-        .into_iter()
-        .filter(|&s| !opts.searched[s as usize].is_empty())
-        .map(|console| {
-            let (dirs, known) = (
-                opts.searched[console as usize].clone(),
-                opts.cache.join(console.known()),
-            );
-            std::thread::spawn(move || {
-                // A mount point the games are on that may still be on its way (nibOS mounts
-                // the ROMS partition early, beside DSlot rather than before it).
-                if let Ok(dir) = std::env::var("DSLOT_WAIT_FOR") {
-                    wait_for_mount(&dir);
-                }
-                // And a games card the kernel has seen but udev hasn't mounted yet.
-                nibkit::paths::wait_for_cards(CARD_WAIT);
-                let games = rom::scan(console, &dirs, &known);
-                mark(&format!("{} games scanned", console.label()));
-                games
-            })
-        })
-        .collect();
-    let shell = std::thread::spawn(|| {
-        let shell = art::Shell::load();
-        mark("cart shell loaded");
-        shell
-    });
     // SDL's start needs the loader's lock, which dlopen holds.
     if let Some(t) = gl {
         let _ = t.join();
     }
     let mut screens = Some(ui::open(&opts)?);
-    let mut games: Vec<Game> = Vec::new();
-    for listing in listings {
-        let found = listing.join().map_err(|_| "listing the games failed")?;
-        if let Some(g) = found.first() {
-            eprintln!(
-                "dslot: {} {} games in {:?}",
-                found.len(),
-                g.console.label(),
-                opts.searched[g.console as usize]
-            );
-        }
-        games.extend(found);
+    let (mut emulators, searched, mut stats, mut settings, mut games, mut apps, deferred) =
+        library_bg
+            .join()
+            .map_err(|_| "loading the library failed")??;
+    opts.searched = searched;
+    if !deferred.is_empty() {
+        *opts.deferred_scan.lock().unwrap_or_else(|e| e.into_inner()) = deferred;
     }
-    rom::name_from_lists(&mut games, &emulators);
-    // The apps in Roms/APPS on either card: their own page, when there are any.
-    let mut apps = nibkit::dslot::apps(&roots);
-    if !apps.is_empty() {
-        eprintln!("dslot: {} apps", apps.len());
-    }
-    games.extend(rom::apps(&apps));
-    let shell = shell.join().map_err(|_| "drawing the cart shell failed")?;
+    let shell = art::Shell::load();
+    let fonts = match fonts_fg.take() {
+        Some(f) => f,
+        None => fonts_bg
+            .take()
+            .expect("fonts spawned")
+            .join()
+            .map_err(|_| "loading the fonts failed")?,
+    };
 
     // Games copied onto the cards or deleted from them from now on, and cards put in or out.
     let folders = |opts: &ui::Opts| rescan::Folders {
@@ -286,10 +365,6 @@ fn run() -> Result<(), String> {
         cache: opts.cache.clone(),
     };
     let rescan = rescan::Rescan::start(folders(&opts));
-
-    let mut stats = stats::Stats::load(dirs.stats.clone());
-    let mut settings = Settings::load(dirs.settings.clone(), &dirs.legacy, &games, &emulators);
-    mark("stats and settings loaded");
     // RetroAchievements: the sign-in kept and the lookups' cache.
     let ra = achievements::Ra::new(dirs.achievements.clone(), &opts.cache);
 
