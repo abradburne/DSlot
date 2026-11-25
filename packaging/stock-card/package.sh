@@ -19,6 +19,8 @@ rm -rf "$stage" "dist/DSlot-$version-rgdsplus.zip" && mkdir -p "$stage"
 cp -R "$here/Roms" "$stage/"
 app="$stage/Roms/APPS/dslot"
 cp target/aarch64-unknown-linux-gnu/release/dslot "$app/dslot"
+mkdir -p "$app/art"
+cp data/art/*.tsv.z "$app/art/"
 cp README.md "$app/README.md"
 # DSlot's licence, and the crates' notices, which go with every copy too.
 cp LICENSE THIRD-PARTY.md "$app/"

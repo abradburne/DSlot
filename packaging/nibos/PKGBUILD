@@ -80,6 +80,7 @@ package() {
     install -Dm755 target/release/dslot "$pkgdir/usr/bin/dslot"
     install -Dm644 packaging/nibos/dslot.service "$pkgdir/usr/lib/systemd/system/dslot.service"
     install -d "$pkgdir/usr/share/dslot/emulators"
+    install -Dm644 -t "$pkgdir/usr/share/dslot/art" data/art/*.tsv.z
     # The picture nibOS's power-on splash shows until DSlot's first frame.
     install -d "$pkgdir/var/lib/dslot"
     target/release/dslot --write-splash "$pkgdir/var/lib/dslot/splash"
