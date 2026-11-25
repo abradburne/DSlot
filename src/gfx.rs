@@ -155,6 +155,34 @@ impl Img {
         ]
     }
 
+    /// Scales down so neither edge exceeds `max_edge`, preserving aspect ratio. Never upscales.
+    pub fn fit_max_edge(&self, max_edge: usize) -> Img {
+        let max_edge = max_edge.max(1);
+        let longest = self.w.max(self.h);
+        if longest <= max_edge || self.w == 0 || self.h == 0 {
+            return self.clone();
+        }
+        let scale = max_edge as f64 / longest as f64;
+        let w = ((self.w as f64 * scale).round() as usize).max(1);
+        let h = ((self.h as f64 * scale).round() as usize).max(1);
+        self.shrink(w, h)
+    }
+
+    /// Composites transparent pixels onto opaque white (for box art, matching BoxArt's PNG output).
+    pub fn flatten_white(&mut self) {
+        for px in self.px.chunks_exact_mut(4) {
+            let a = px[3] as u16;
+            if a == 255 {
+                continue;
+            }
+            let inv = 255 - a;
+            for c in &mut px[..3] {
+                *c = ((*c as u16 * a + 255 * inv + 127) / 255) as u8;
+            }
+            px[3] = 255;
+        }
+    }
+
     /// Tint a white-on-transparent image (rendered text) and draw it.
     pub fn stamp(&mut self, mask: &Img, x: i32, y: i32, c: Rgba) {
         for my in 0..mask.h {
@@ -477,16 +505,55 @@ pub fn heart(size: usize) -> Img {
     })
 }
 
-/// A picture file: a PNG, or a JPEG (a port's screenshot, say).
+/// A picture file: a PNG, JPEG, or WebP.
 pub fn load_png(path: &Path) -> Option<Img> {
     let mut file = File::open(path).ok()?;
-    let mut magic = [0u8; 2];
-    std::io::Read::read_exact(&mut file, &mut magic).ok()?;
-    if magic == [0xFF, 0xD8] {
+    let mut magic = [0u8; 12];
+    let n = std::io::Read::read(&mut file, &mut magic).ok()?;
+    if n >= 2 && magic[..2] == [0xFF, 0xD8] {
         return decode_jpeg(&std::fs::read(path).ok()?);
+    }
+    if n >= 12 && &magic[..4] == b"RIFF" && &magic[8..12] == b"WEBP" {
+        return decode_webp(&std::fs::read(path).ok()?);
     }
     std::io::Seek::rewind(&mut file).ok()?;
     decode_png(file)
+}
+
+/// Decodes raw PNG, JPEG, or WebP bytes in memory into an RGBA `Img`.
+pub fn decode_image(bytes: &[u8]) -> Option<Img> {
+    if bytes.len() >= 2 && bytes[..2] == [0xFF, 0xD8] {
+        return decode_jpeg(bytes);
+    }
+    if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return decode_webp(bytes);
+    }
+    if bytes.len() >= 8 && &bytes[..8] == b"\x89PNG\r\n\x1a\n" {
+        return decode_png(std::io::Cursor::new(bytes));
+    }
+    None
+}
+
+/// A WebP image's pixels, as RGBA.
+pub fn decode_webp(bytes: &[u8]) -> Option<Img> {
+    let mut dec = image_webp::WebPDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    let (w, h) = dec.dimensions();
+    let (w, h) = (w as usize, h as usize);
+    if w == 0 || h == 0 || w > 10_000 || h > 10_000 {
+        return None;
+    }
+    let has_alpha = dec.has_alpha();
+    let bpp = if has_alpha { 4 } else { 3 };
+    let mut raw = vec![0u8; w.checked_mul(h)?.checked_mul(bpp)?];
+    dec.read_image(&mut raw).ok()?;
+    if has_alpha {
+        return Some(Img { w, h, px: raw });
+    }
+    let mut px = Vec::with_capacity(w * h * 4);
+    for rgb in raw.chunks_exact(3) {
+        px.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    }
+    Some(Img { w, h, px })
 }
 
 /// A JPEG's pixels, as RGBA.

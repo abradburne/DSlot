@@ -213,6 +213,25 @@ pub fn look_up(cache: &Path, game: &Game, again: bool) -> Looked {
                     Got::NoNetwork => {}
                 }
             }
+            // If exact Libretro filename missed box art, fall back to the full matcher
+            // (GameTDB DS code, No-Intro CRC32, Libretro title match, LaunchBox).
+            if wants_box && !dir.join("boxart.png").is_file() {
+                let svc = crate::artwork::Service::new(cache, crate::platform::dirs().art_index);
+                let cancel = std::sync::atomic::AtomicBool::new(false);
+                if let Ok(Some((mut img, _))) = svc.fetch_box(game, &cancel) {
+                    img = img.fit_max_edge(512);
+                    img.flatten_white();
+                    let dest = dir.join("boxart.png");
+                    let part = dest.with_extension("part");
+                    if crate::gfx::save_png(&part, img.w as u32, img.h as u32, &img.px).is_ok()
+                        && std::fs::rename(&part, &dest).is_ok()
+                    {
+                        answered = true;
+                    } else {
+                        let _ = std::fs::remove_file(&part);
+                    }
+                }
+            }
             // With no network, asked again next time rather than in a week.
             if answered {
                 reached = true;

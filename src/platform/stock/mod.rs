@@ -28,6 +28,7 @@ pub fn dirs() -> Dirs {
         achievements: here.join("retroachievements.token"),
         cache: here.join("cache"),
         emulators: vec![here.join("emulators")],
+        art_index: vec![here.join("art"), PathBuf::from("data/art")],
     }
 }
 

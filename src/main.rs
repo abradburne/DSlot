@@ -4,6 +4,7 @@
 
 mod achievements;
 mod art;
+mod artwork;
 mod bugreport;
 mod details;
 mod device;
@@ -112,6 +113,7 @@ fn run() -> Result<(), String> {
         notices: std::sync::Mutex::new(notices::Notices::system()),
         deferred_scan: std::sync::Mutex::new(Vec::new()),
         pending_folders: std::sync::Mutex::new(None),
+        artwork: std::sync::Mutex::new(artwork::Runner::new(&dirs.cache, dirs.art_index.clone())),
     };
 
     let mut args = std::env::args().skip(1);

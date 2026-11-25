@@ -33,6 +33,10 @@ pub fn dirs() -> Dirs {
         cache: app.cache,
         // Packages', then the administrator's, then the user's own.
         emulators: nibkit::dslot::description_dirs(),
+        art_index: vec![
+            PathBuf::from("/usr/share/dslot/art"),
+            PathBuf::from("data/art"),
+        ],
     }
 }
 

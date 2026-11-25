@@ -32,6 +32,7 @@ licence).
 | bitreader | 0.3.11 | MIT OR Apache-2.0 | nibos, stock |
 | blocking | 1.7.0 | Apache-2.0 OR MIT | nibos |
 | byteorder | 1.5.0 | Unlicense OR MIT | nibos, stock |
+| byteorder-lite | 0.1.0 | Unlicense OR MIT | nibos, stock |
 | cc | 1.10.0 | MIT OR Apache-2.0 | nibos, stock |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 | nibos, stock |
 | chd | 0.3.5 | BSD-3-Clause | nibos, stock |
@@ -63,6 +64,7 @@ licence).
 | hashbrown | 0.15.5 | MIT OR Apache-2.0 | nibos, stock |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | nibos, stock |
 | hex | 0.4.3 | MIT OR Apache-2.0 | nibos |
+| image-webp | 0.2.4 | MIT OR Apache-2.0 | nibos, stock |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT | nibos, stock |
 | itoa | 1.0.18 | MIT OR Apache-2.0 | nibos, stock |
 | lazy_static | 1.5.1 | MIT OR Apache-2.0 | nibos, stock |
@@ -74,8 +76,8 @@ licence).
 | memchr | 2.8.3 | Unlicense OR MIT | nibos, stock |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 | nibos, stock |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 | nibos, stock |
-| nib-cheevos | 0.4.1 | MIT | nibos, stock |
-| nibkit | 0.4.1 | MIT AND OFL-1.1 | nibos, stock |
+| nib-cheevos | 0.5.0 | MIT | nibos, stock |
+| nibkit | 0.5.0 | MIT AND OFL-1.1 | nibos, stock |
 | num-derive | 0.4.2 | MIT OR Apache-2.0 | nibos, stock |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | nibos, stock |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | nibos |
@@ -88,6 +90,7 @@ licence).
 | proc-macro-crate | 3.5.0 | MIT OR Apache-2.0 | nibos |
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | nibos, stock |
 | qrcodegen | 1.8.0 | MIT | nibos, stock |
+| quick-error | 2.0.1 | MIT/Apache-2.0 | nibos, stock |
 | quote | 1.0.47 | MIT OR Apache-2.0 | nibos, stock |
 | rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | nibos |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 | nibos, stock |
@@ -1385,7 +1388,7 @@ This project is dual-licensed under the Unlicense and MIT licenses.
 You may use this code under the terms of either license.
 ```
 
-### byteorder 1.5.0 (LICENSE-MIT); memchr 2.8.3 (LICENSE-MIT)
+### byteorder 1.5.0 (LICENSE-MIT); byteorder-lite 0.1.0 (LICENSE-MIT); memchr 2.8.3 (LICENSE-MIT)
 
 ```
 The MIT License (MIT)
@@ -1411,7 +1414,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
 
-### byteorder 1.5.0 (UNLICENSE); memchr 2.8.3 (UNLICENSE)
+### byteorder 1.5.0 (UNLICENSE); byteorder-lite 0.1.0 (UNLICENSE); memchr 2.8.3 (UNLICENSE)
 
 ```
 This is free and unencumbered software released into the public domain.
@@ -1873,7 +1876,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### crc32fast 1.5.2 (LICENSE-APACHE); hex 0.4.3 (LICENSE-APACHE); serde_spanned 0.6.9 (LICENSE-APACHE); toml 0.8.23 (LICENSE-APACHE); toml_datetime 0.6.11 (LICENSE-APACHE); toml_edit 0.22.27 (LICENSE-APACHE); toml_write 0.1.2 (LICENSE-APACHE)
+### crc32fast 1.5.2 (LICENSE-APACHE); hex 0.4.3 (LICENSE-APACHE); quick-error 2.0.1 (LICENSE-APACHE); serde_spanned 0.6.9 (LICENSE-APACHE); toml 0.8.23 (LICENSE-APACHE); toml_datetime 0.6.11 (LICENSE-APACHE); toml_edit 0.22.27 (LICENSE-APACHE); toml_write 0.1.2 (LICENSE-APACHE)
 
 ```
 Apache License
@@ -2403,7 +2406,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 ```
 
-### fdeflate 0.3.7 (LICENSE-APACHE); fontdue 0.9.4 (LICENSE-APACHE); miniz_oxide 0.8.9 (LICENSE-APACHE.md); miniz_oxide 0.9.1 (LICENSE-APACHE.md); pin-project-lite 0.2.17 (LICENSE-APACHE)
+### fdeflate 0.3.7 (LICENSE-APACHE); fontdue 0.9.4 (LICENSE-APACHE); image-webp 0.2.4 (LICENSE-APACHE); miniz_oxide 0.8.9 (LICENSE-APACHE.md); miniz_oxide 0.9.1 (LICENSE-APACHE.md); pin-project-lite 0.2.17 (LICENSE-APACHE)
 
 ```
 Apache License
@@ -2584,7 +2587,7 @@ Apache License
    END OF TERMS AND CONDITIONS
 ```
 
-### fdeflate 0.3.7 (LICENSE-MIT)
+### fdeflate 0.3.7 (LICENSE-MIT); image-webp 0.2.4 (LICENSE-MIT)
 
 ```
 MIT License
@@ -3959,7 +3962,7 @@ Permission is granted to anyone to use this software for any purpose, including 
 3. This notice may not be removed or altered from any source distribution.
 ```
 
-### nib-cheevos 0.4.1 (LICENSE-MIT); nibkit 0.4.1 (LICENSE-MIT)
+### nib-cheevos 0.5.0 (LICENSE-MIT); nibkit 0.5.0 (LICENSE-MIT)
 
 ```
 MIT License
@@ -4027,6 +4030,30 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+```
+
+### quick-error 2.0.1 (LICENSE-MIT)
+
+```
+Copyright (c) 2015 The quick-error Developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ### rustix 1.1.5 (COPYRIGHT)

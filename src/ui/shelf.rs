@@ -1401,6 +1401,8 @@ fn show(
     let mut levels = nibkit::levels::watch();
     let mut indicator = nibkit::menu::level::Indicator::new();
     let mut level_drawn = false;
+    let mut artwork_counts: Option<(Console, crate::artwork::ArtKind, u64, usize, usize)> = None;
+    let mut artwork_gen: u64 = 0;
     loop {
         // A game chosen (or one put away carrying on): this frame is drawn, then the shelf
         // goes.
@@ -1770,6 +1772,7 @@ fn show(
             stats.toggle_fave(&game.path);
             relist = true;
         }
+        let mut drawn_artwork: Option<menu::ArtworkView> = None;
         if let Some(open) = state.menu.as_mut() {
             state.drag = None;
             menu_input.pointers = pointers.clone();
@@ -1786,14 +1789,107 @@ fn show(
             } else {
                 menu_input.taps = taps;
             }
+            let artwork_view = {
+                let kind = open.artwork_kind();
+                let runner = opts.artwork.lock().unwrap_or_else(|e| e.into_inner());
+                let available = runner.available();
+                let snapshot = runner.snapshot();
+                drop(runner);
+                let (console_missing, all_missing) = if !available || snapshot.running {
+                    (0, 0)
+                } else if let Some((c, k, g, cm, am)) = artwork_counts {
+                    if c == console && k == kind && g == artwork_gen {
+                        (cm, am)
+                    } else {
+                        let cm = crate::artwork::missing_count(games, Some(console), kind);
+                        let am = crate::artwork::missing_count(games, None, kind);
+                        artwork_counts = Some((console, kind, artwork_gen, cm, am));
+                        (cm, am)
+                    }
+                } else {
+                    let cm = crate::artwork::missing_count(games, Some(console), kind);
+                    let am = crate::artwork::missing_count(games, None, kind);
+                    artwork_counts = Some((console, kind, artwork_gen, cm, am));
+                    (cm, am)
+                };
+                let game_missing =
+                    available && current.is_some_and(|g| crate::artwork::needs_art(g, kind));
+                menu::ArtworkView {
+                    available,
+                    snapshot,
+                    console_missing,
+                    all_missing,
+                    game_missing,
+                }
+            };
+            drawn_artwork = Some(artwork_view.clone());
             let mut cx = menu::Context {
                 stats: &mut *stats,
                 settings: &mut *settings,
                 emulators,
                 console,
                 game: current,
+                artwork: Some(artwork_view),
             };
             let done = open.update(&menu_input, &mut cx);
+            if let Some(cmd) = done.artwork {
+                let mut runner = opts.artwork.lock().unwrap_or_else(|e| e.into_inner());
+                match cmd {
+                    crate::artwork::Command::Stop => runner.stop(),
+                    crate::artwork::Command::Start {
+                        scope,
+                        kind,
+                        replace,
+                    } => {
+                        let (label, targets): (String, Vec<Game>) = match scope {
+                            crate::artwork::Scope::Game(path) => {
+                                let list: Vec<Game> = games
+                                    .iter()
+                                    .filter(|g| {
+                                        g.path == path
+                                            && crate::artwork::eligible(g)
+                                            && (replace || crate::artwork::needs_art(g, kind))
+                                    })
+                                    .cloned()
+                                    .collect();
+                                let name = list
+                                    .first()
+                                    .map_or_else(|| "game".into(), |g| g.name().to_owned());
+                                (name, list)
+                            }
+                            crate::artwork::Scope::Console(c) => {
+                                let list: Vec<Game> = games
+                                    .iter()
+                                    .filter(|g| {
+                                        g.console == c
+                                            && crate::artwork::eligible(g)
+                                            && (replace || crate::artwork::needs_art(g, kind))
+                                    })
+                                    .cloned()
+                                    .collect();
+                                (c.label().to_owned(), list)
+                            }
+                            crate::artwork::Scope::All => {
+                                let list: Vec<Game> = games
+                                    .iter()
+                                    .filter(|g| {
+                                        crate::artwork::eligible(g)
+                                            && (replace || crate::artwork::needs_art(g, kind))
+                                    })
+                                    .cloned()
+                                    .collect();
+                                ("All games".into(), list)
+                            }
+                        };
+                        runner.start(label, targets, kind, replace);
+                        artwork_gen += 1;
+                        idle = Instant::now();
+                    }
+                }
+                if let Some(view) = drawn_artwork.as_mut() {
+                    view.snapshot = runner.snapshot();
+                }
+            }
             if done.account {
                 // Signed in or out: what was found was the last player's.
                 ui.forget_cheevos();
@@ -2015,6 +2111,10 @@ fn show(
         let pull = state.follow(dt, mode, geometry.2);
         let (pull, inserted) = state.slot(dt, &mut sound, pull);
         if inserted {
+            opts.artwork
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .stop();
             leaving = Some(Outcome::Launch {
                 game: state.order[state.sel],
                 fresh: state.fresh,
@@ -2059,6 +2159,25 @@ fn show(
                 }
             }
         }
+        // Artwork fetched in the background: drop the game's old cached textures so the new
+        // cover / cart appears immediately on the shelf.
+        let artwork_running = {
+            let mut runner = opts.artwork.lock().unwrap_or_else(|e| e.into_inner());
+            let updated = runner.drain_updated();
+            for path in &updated {
+                for (idx, g) in games.iter().enumerate() {
+                    if &g.path == path {
+                        ui.forget_art_of(idx);
+                    }
+                }
+            }
+            if !updated.is_empty() {
+                artwork_gen += 1;
+                idle = Instant::now();
+            }
+            runner.running()
+        };
+
         // A level the keys just set: shown from now, then faded.
         if let Some(level) = levels.as_mut().and_then(|w| w.changed()) {
             indicator.show(level, Instant::now());
@@ -2068,6 +2187,7 @@ fn show(
         // times a second, until something changes. A held direction, a finger down, a cart
         // moving, games found, artwork coming in or a report on its way keep it drawing.
         let resting = !headless
+            && !artwork_running
             && !state.notice.as_ref().is_some_and(Notice::sending)
             && opts.shot.is_none()
             && idle.elapsed() >= REST_AFTER
@@ -2200,6 +2320,7 @@ fn show(
                         emulators,
                         console,
                         game,
+                        artwork: drawn_artwork.clone(),
                     };
                     ui.draw_menu(&open.shown(&cx), console)?;
                 }
@@ -2219,6 +2340,7 @@ fn show(
                     emulators,
                     console,
                     game,
+                    artwork: None,
                 };
                 soft("the View sheet", ui.draw_sheet(&open.shown(&cx)));
             }

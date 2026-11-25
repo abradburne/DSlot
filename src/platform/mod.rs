@@ -49,6 +49,9 @@ pub struct Dirs {
     /// Folders of emulator descriptions, read in order: a file replaces one of the same name
     /// in an earlier folder.
     pub emulators: Vec<PathBuf>,
+    /// Folders holding compressed LaunchBox artwork indexes (`<console>.tsv.z`), read on demand
+    /// when fetching box, cart, or disc art.
+    pub art_index: Vec<PathBuf>,
 }
 
 /// On the handheld, as against a desktop preview.

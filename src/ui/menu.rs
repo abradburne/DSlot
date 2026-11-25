@@ -91,6 +91,8 @@ pub enum Part {
     /// How the shelf is shown: a console's page, and System's for every page with the rest of
     /// the shelf's (empty systems, button repeat, looking for games again).
     Shelf,
+    /// System: downloading missing box art, cart labels, and disc art.
+    Artwork,
     /// System: the screens' brightness and the screensaver.
     Screen,
     /// System: the volume, the clicks and the speaker amps' tuning.
@@ -116,6 +118,7 @@ const SECTIONS: &[(Page, Part)] = &[
     (Page::Console, Part::Emulator),
     (Page::Console, Part::Shelf),
     (Page::System, Part::Shelf),
+    (Page::System, Part::Artwork),
     (Page::System, Part::Screen),
     (Page::System, Part::Sound),
     (Page::System, Part::Power),
@@ -179,6 +182,18 @@ pub enum Item {
     ClockApply,
     /// Looks in every console's folders again, for games the watch on them missed.
     Rescan,
+    /// Artwork: which artwork types to fetch (Box & cart, Box art, Cart & disc).
+    ArtworkKind,
+    /// Artwork: fetch missing box + cart/disc art for the selected game.
+    ArtworkGame,
+    /// Artwork: re-fetch and overwrite artwork for the selected game; asks first.
+    ArtworkGameReplace,
+    /// Artwork: fetch missing artwork for the current console (or stop if running).
+    ArtworkConsole(String),
+    /// Artwork: fetch missing artwork across all consoles (or stop if running).
+    ArtworkAll,
+    /// Artwork: live progress / last-run summary line; shown, not changed.
+    ArtworkStatus,
     /// A line of the System info page; shown, not changed.
     Sys(SysRow),
     /// An emulator's action on the game's files; asks before it acts.
@@ -266,6 +281,12 @@ impl Item {
             Item::ClockField(field) => field.label(),
             Item::ClockApply => "Set the clock",
             Item::Rescan => "Rescan games",
+            Item::ArtworkKind => "Artwork to get",
+            Item::ArtworkGame => "Get artwork",
+            Item::ArtworkGameReplace => "Replace artwork",
+            Item::ArtworkConsole(label) => label,
+            Item::ArtworkAll => "Get for all games",
+            Item::ArtworkStatus => "Progress",
             Item::Sys(row) => row.label(),
             Item::Action(a) => &a.label,
             Item::DeleteSaves => "Delete saves",
@@ -307,6 +328,7 @@ impl Item {
             self,
             Item::Action(_)
                 | Item::DeleteSaves
+                | Item::ArtworkGameReplace
                 | Item::PowerOff
                 | Item::ImportTuning
                 | Item::RestartNow
@@ -626,6 +648,18 @@ pub struct Done {
     /// The player signed in to RetroAchievements or out (or the sign-in kept was refused):
     /// what the shelf found for the last one is let go.
     pub account: bool,
+    /// Artwork fetch started or stopped from the menu.
+    pub artwork: Option<crate::artwork::Command>,
+}
+
+/// Live artwork-fetcher state passed into the menu from the shelf.
+#[derive(Clone, Debug, Default)]
+pub struct ArtworkView {
+    pub available: bool,
+    pub snapshot: crate::artwork::Snapshot,
+    pub console_missing: usize,
+    pub all_missing: usize,
+    pub game_missing: bool,
 }
 
 /// What the menu works on.
@@ -637,6 +671,8 @@ pub struct Context<'a> {
     pub console: Console,
     /// The selected game, if there is one.
     pub game: Option<&'a Game>,
+    /// On-device artwork downloader state (None in headless/minimal contexts).
+    pub artwork: Option<ArtworkView>,
 }
 
 impl Context<'_> {
@@ -762,6 +798,8 @@ pub struct Menu {
     ra: RaPage,
     /// The player signed in or out since the shelf last heard (`Done::account`).
     account_changed: bool,
+    /// Artwork types selected on System -> Artwork (Box & cart, Box art, Cart & disc).
+    artwork_kind: crate::artwork::ArtKind,
 }
 
 /// What the keyboard is typing.
@@ -790,6 +828,7 @@ fn section(page: Page, part: Part, cx: &Context) -> &'static str {
     match part {
         Part::Emulator => return "Emulator",
         Part::Shelf => return "Shelf",
+        Part::Artwork => return "Artwork",
         Part::Screen => return "Screen",
         Part::Sound => return "Sound",
         Part::Power => return "Power",
@@ -891,7 +930,13 @@ impl Menu {
             sys: sysinfo::Info::default(),
             ra: RaPage::new(ra),
             account_changed: false,
+            artwork_kind: crate::artwork::ArtKind::Both,
         }
+    }
+
+    /// Which artwork types are currently chosen in the Artwork section.
+    pub fn artwork_kind(&self) -> crate::artwork::ArtKind {
+        self.artwork_kind
     }
 
     /// Opens on the Update page, where nibOS has an updater: for a notice at start-up.
@@ -1048,6 +1093,12 @@ impl Menu {
                 if saves.is_some() && cx.console != Console::Apps {
                     items.push(Item::DeleteSaves);
                 }
+                if cx.artwork.as_ref().is_some_and(|a| a.available)
+                    && cx.game.is_some_and(crate::artwork::eligible)
+                {
+                    items.push(Item::ArtworkGame);
+                    items.push(Item::ArtworkGameReplace);
+                }
             }
             // The apps' page is always a grid, of boxes without cases, and has no emulator.
             (Page::Console, Part::Emulator) if cx.console == Console::Apps => {}
@@ -1065,6 +1116,11 @@ impl Menu {
                 if cx.console == Console::Snes {
                     setting(&mut items, &[def::SNES_CART]);
                 }
+                if cx.artwork.as_ref().is_some_and(|a| a.available)
+                    && !matches!(cx.console, Console::Ports | Console::Apps)
+                {
+                    items.push(Item::ArtworkConsole("Get missing artwork".into()));
+                }
             }
             (Page::View, _) => shelf(&mut items),
             (Page::System, Part::Shelf) => {
@@ -1074,6 +1130,21 @@ impl Menu {
                     &[def::SHOW_EMPTY, def::HIDE_UNDERSCORE, def::REPEAT],
                 );
                 items.push(Item::Rescan);
+            }
+            (Page::System, Part::Artwork) => {
+                if let Some(art) = cx.artwork.as_ref().filter(|a| a.available) {
+                    items.push(Item::ArtworkKind);
+                    if !matches!(cx.console, Console::Ports | Console::Apps) {
+                        items.push(Item::ArtworkConsole(format!(
+                            "Get for {}",
+                            cx.console.label()
+                        )));
+                    }
+                    items.push(Item::ArtworkAll);
+                    if art.snapshot.running || art.snapshot.total > 0 {
+                        items.push(Item::ArtworkStatus);
+                    }
+                }
             }
             (Page::System, Part::Screen) => {
                 control(
@@ -1434,6 +1505,32 @@ impl Menu {
                 done.rescan = true;
                 self.note = Some((self.row, "Looking\u{2026}".into()));
             }
+        } else if matches!(
+            item,
+            Item::ArtworkGame | Item::ArtworkConsole(_) | Item::ArtworkAll
+        ) {
+            if pressed && was == self.row {
+                let running = cx.artwork.as_ref().is_some_and(|a| a.snapshot.running);
+                if running {
+                    done.artwork = Some(crate::artwork::Command::Stop);
+                } else {
+                    let scope = match item {
+                        Item::ArtworkGame => {
+                            cx.game.map(|g| crate::artwork::Scope::Game(g.path.clone()))
+                        }
+                        Item::ArtworkConsole(_) => Some(crate::artwork::Scope::Console(cx.console)),
+                        Item::ArtworkAll => Some(crate::artwork::Scope::All),
+                        _ => None,
+                    };
+                    if let Some(scope) = scope {
+                        done.artwork = Some(crate::artwork::Command::Start {
+                            scope,
+                            kind: self.artwork_kind,
+                            replace: false,
+                        });
+                    }
+                }
+            }
         } else if item.asks() {
             if pressed && was == self.row {
                 if self.armed == Some(self.row) {
@@ -1449,6 +1546,15 @@ impl Menu {
                             return Done {
                                 restart: true,
                                 ..done
+                            }
+                        }
+                        Item::ArtworkGameReplace => {
+                            if let Some(game) = cx.game {
+                                done.artwork = Some(crate::artwork::Command::Start {
+                                    scope: crate::artwork::Scope::Game(game.path.clone()),
+                                    kind: self.artwork_kind,
+                                    replace: true,
+                                });
                             }
                         }
                         Item::ImportTuning => {
@@ -1946,8 +2052,17 @@ impl Menu {
                 self.at_boot = platform::start_at_power_on();
                 return false;
             }
+            Item::ArtworkKind => {
+                self.artwork_kind = self.artwork_kind.step(dir);
+                return false;
+            }
             Item::Action(_)
             | Item::DeleteSaves
+            | Item::ArtworkGame
+            | Item::ArtworkGameReplace
+            | Item::ArtworkConsole(_)
+            | Item::ArtworkAll
+            | Item::ArtworkStatus
             | Item::PowerOff
             | Item::Battery
             | Item::ImportTuning
@@ -2149,6 +2264,13 @@ impl Menu {
             (Page::Wifi | Page::Bluetooth, _) => radio_title(),
             (Page::Game, Some(game)) => game.name().to_owned(),
             (Page::System, _) if self.clock_view != ClockView::Closed => self.clock_title(),
+            (Page::System, _) if here.1 == Part::Artwork => match cx.artwork.as_ref() {
+                Some(a) if a.snapshot.running => format!(
+                    "Getting artwork ({}/{})\u{2026}",
+                    a.snapshot.done, a.snapshot.total
+                ),
+                _ => "Box art, cart labels and disc art".to_owned(),
+            },
             (Page::System, _) if here.1 == Part::About => self.sys.summary(),
             (Page::System, _) if here.1 == Part::Help => self.help.title(),
             (Page::System, _) => "DSlot and the device".to_owned(),
@@ -2342,9 +2464,15 @@ impl Menu {
     }
 
     /// A note beside a row's value, where it needs one.
-    fn source(&self, item: &Item, _cx: &Context) -> Option<String> {
+    fn source(&self, item: &Item, cx: &Context) -> Option<String> {
         match item {
             Item::Control(Control::BatteryProtect) => Some("stops charging at about 80%".into()),
+            Item::ArtworkKind => Some("saved beside ROMs in Imgs, Labels and Carts".into()),
+            Item::ArtworkStatus => cx
+                .artwork
+                .as_ref()
+                .filter(|a| a.snapshot.running && !a.snapshot.current.is_empty())
+                .map(|a| a.snapshot.current.clone()),
             Item::ImportTuning => {
                 Some("from your stock card in TF2 or a stock image in Roms".into())
             }
@@ -2725,8 +2853,69 @@ impl Menu {
                         .map_or("\u{2013}", |on| if on { "On" } else { "Off" }),
                 )
             }
+            Item::ArtworkKind => text(self.artwork_kind.label()),
+            Item::ArtworkStatus => Value::Prompt {
+                text: cx
+                    .artwork
+                    .as_ref()
+                    .map_or_else(|| "\u{2013}".into(), |a| a.snapshot.summary()),
+                warning: cx.artwork.as_ref().is_some_and(|a| {
+                    !a.snapshot.running
+                        && a.snapshot.errors > 0
+                        && a.snapshot.saved_box + a.snapshot.saved_cart == 0
+                }),
+            },
+            Item::ArtworkGame | Item::ArtworkConsole(_) | Item::ArtworkAll => {
+                let Some(art) = cx.artwork.as_ref() else {
+                    return text("\u{2013}");
+                };
+                if art.snapshot.running {
+                    let label = if r == self.row {
+                        format!("{} \u{b7} Press A to stop", art.snapshot.summary())
+                    } else {
+                        art.snapshot.summary()
+                    };
+                    return Value::Prompt {
+                        text: label,
+                        warning: false,
+                    };
+                }
+                let missing = match item {
+                    Item::ArtworkGame => usize::from(art.game_missing),
+                    Item::ArtworkConsole(_) => art.console_missing,
+                    Item::ArtworkAll => art.all_missing,
+                    _ => 0,
+                };
+                if missing == 0 {
+                    Value::Prompt {
+                        text: "All art present".into(),
+                        warning: false,
+                    }
+                } else if r == self.row {
+                    let what = if matches!(item, Item::ArtworkGame) {
+                        "Press A".into()
+                    } else {
+                        format!("{missing} missing \u{b7} Press A")
+                    };
+                    Value::Prompt {
+                        text: what,
+                        warning: false,
+                    }
+                } else if matches!(item, Item::ArtworkGame) {
+                    Value::Prompt {
+                        text: "Missing".into(),
+                        warning: false,
+                    }
+                } else {
+                    Value::Prompt {
+                        text: format!("{missing} missing"),
+                        warning: false,
+                    }
+                }
+            }
             Item::Action(_)
             | Item::DeleteSaves
+            | Item::ArtworkGameReplace
             | Item::PowerOff
             | Item::ImportTuning
             | Item::RestartNow
@@ -2737,6 +2926,7 @@ impl Menu {
                     Item::RestartNow => "restart",
                     Item::Rollback => "restart into it",
                     Item::ImportTuning => "import",
+                    Item::ArtworkGameReplace => "replace",
                     _ => "do it",
                 };
                 match (self.armed == Some(r), r == self.row) {
@@ -3232,6 +3422,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let token = w.ra.token.clone();
         let mut menu = Menu::open(false, &w.ra);
@@ -3419,6 +3610,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let account = achievements::Account {
             user: "Alan".into(),
@@ -3470,6 +3662,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: Some(&game),
+            artwork: None,
         };
         let mut menu = Menu::open(true, &w.ra);
         // One emulator: no Emulator row. Its option for DS; its action and the saves' deletion
@@ -3532,6 +3725,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Gba,
             game: None,
+            artwork: None,
         };
         let menu = Menu::open(false, &w.ra);
         assert_eq!(menu.page, Page::Console);
@@ -3554,6 +3748,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         let step = |section: i32, page: i32| Input {
@@ -3620,6 +3815,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: Some(&game),
+            artwork: None,
         };
         let mut menu = Menu::open(true, &w.ra);
         let res = 2; // 3D resolution, on the Game page
@@ -3689,6 +3885,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Gba,
             game: Some(&game),
+            artwork: None,
         };
         let mut menu = Menu::open_view(&w.ra);
         assert_eq!(menu.pages(&cx), [Page::View]);
@@ -3740,6 +3937,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         menu.go((Page::System, Part::Sound));
@@ -3785,6 +3983,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         menu.go((Page::System, Part::Power));
@@ -3822,6 +4021,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         let topic = |name: &str, text: &str| nibkit::guide::parse(name, text).unwrap();
@@ -3925,6 +4125,7 @@ mod tests {
             emulators: &w.emulators,
             console: Console::Ds,
             game: None,
+            artwork: None,
         };
         let mut menu = Menu::open(false, &w.ra);
         menu.go((Page::System, Part::About));
@@ -4074,5 +4275,74 @@ mod tests {
             says(&mut menu, "ready", true),
             prompt("Press A again to restart", true)
         );
+    }
+
+    /// System -> Artwork steps artwork type, starts console/all fetches, and stops a running job.
+    #[test]
+    fn artwork_section_starts_stops_and_steps_kind() {
+        let mut w = world("menu-artwork", true);
+        let mut menu = Menu::open(false, &w.ra);
+        menu.go((Page::System, Part::Artwork));
+        let mut cx = Context {
+            stats: &mut w.stats,
+            settings: &mut w.settings,
+            emulators: &w.emulators,
+            console: Console::Snes,
+            game: None,
+            artwork: Some(ArtworkView {
+                available: true,
+                snapshot: crate::artwork::Snapshot::default(),
+                console_missing: 5,
+                all_missing: 12,
+                game_missing: false,
+            }),
+        };
+        assert_eq!(menu.artwork_kind(), crate::artwork::ArtKind::Both);
+        // Step artwork kind from Both -> BoxOnly -> CartOnly.
+        let right = Input {
+            turn: 1,
+            ..Input::default()
+        };
+        menu.update(&right, &mut cx);
+        assert_eq!(menu.artwork_kind(), crate::artwork::ArtKind::BoxOnly);
+        menu.update(&right, &mut cx);
+        assert_eq!(menu.artwork_kind(), crate::artwork::ArtKind::CartOnly);
+
+        // Move to "Get for SNES" and press A -> emits Start for Console::Snes.
+        menu.update(
+            &Input {
+                moved: 1,
+                ..Input::default()
+            },
+            &mut cx,
+        );
+        let done = menu.update(
+            &Input {
+                pressed: true,
+                turn: 1,
+                ..Input::default()
+            },
+            &mut cx,
+        );
+        assert_eq!(
+            done.artwork,
+            Some(crate::artwork::Command::Start {
+                scope: crate::artwork::Scope::Console(Console::Snes),
+                kind: crate::artwork::ArtKind::CartOnly,
+                replace: false,
+            })
+        );
+
+        // While running, pressing A emits Stop.
+        cx.artwork.as_mut().unwrap().snapshot.running = true;
+        let stopped = menu.update(
+            &Input {
+                pressed: true,
+                turn: 1,
+                ..Input::default()
+            },
+            &mut cx,
+        );
+        assert_eq!(stopped.artwork, Some(crate::artwork::Command::Stop));
     }
 }

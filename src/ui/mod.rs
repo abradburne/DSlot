@@ -104,6 +104,8 @@ pub struct Opts {
     pub deferred_scan: Mutex<Vec<crate::rom::Console>>,
     /// ROM roots whose missing console folders are created after frame 0.
     pub pending_folders: Mutex<Option<Vec<PathBuf>>>,
+    /// Background box/cart/disc artwork fetcher, kept alive across menu open/close.
+    pub artwork: Mutex<crate::artwork::Runner>,
 }
 
 /// What the shelf works with, the same every time it comes up. (The games are passed beside
