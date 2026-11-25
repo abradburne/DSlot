@@ -1,10 +1,13 @@
 //! The games on a page, in the order the shelf shows them, and moving through them.
 
-use crate::rom::{Console, Game};
+use crate::rom::{Console, Game, HomeSection};
 use crate::settings::Sort;
 use crate::stats::Stats;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Maximum number of recently played games kept on the cross-console Home shelf.
+pub const HOME_RECENT_MAX: usize = 50;
 
 /// The section of a sectioned page's games that their list puts in no group of its own.
 pub const OTHER: &str = "Other";
@@ -57,6 +60,40 @@ pub fn order(games: &[Game], stats: &Stats, filter: Filter) -> Vec<usize> {
     // On the Ports page, PortMaster's tile first, however the ports are sorted.
     if filter.console == Console::Ports {
         order.sort_by_key(|&i| !games[i].is_app());
+    }
+    order
+}
+
+/// The games on the cross-console Home shelf, in order, as indices into `games`.
+///
+/// - `HomeSection::Recent`: games played at least once across all consoles (excluding Apps and
+///   folders), newest first, capped at [`HOME_RECENT_MAX`].
+/// - `HomeSection::Favourites`: all favourited games across all consoles (excluding Apps and
+///   folders), sorted by `sort` (name tie-breaker).
+pub fn home_order(games: &[Game], stats: &Stats, section: HomeSection, sort: Sort) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..games.len())
+        .filter(|&i| {
+            let g = &games[i];
+            !g.gone
+                && !g.folder
+                && g.console != Console::Apps
+                && match section {
+                    HomeSection::Recent => stats.last(&g.path) > 0,
+                    HomeSection::Favourites => stats.fave(&g.path),
+                }
+        })
+        .collect();
+    order.sort_by_cached_key(|&i| games[i].name().to_lowercase());
+    match section {
+        HomeSection::Recent => {
+            order.sort_by_key(|&i| std::cmp::Reverse(stats.last(&games[i].path)));
+            order.truncate(HOME_RECENT_MAX);
+        }
+        HomeSection::Favourites => match sort {
+            Sort::Name => {}
+            Sort::Recent => order.sort_by_key(|&i| std::cmp::Reverse(stats.last(&games[i].path))),
+            Sort::Rating => order.sort_by_key(|&i| std::cmp::Reverse(stats.rating(&games[i].path))),
+        },
     }
     order
 }
@@ -348,5 +385,49 @@ mod tests {
         assert_eq!(letter_jump(&games, &ds, 2, -1), 1);
         assert_eq!(letter_jump(&games, &ds, 3, 1), 3);
         assert_eq!(letter_jump(&games, &ds, 0, -1), 0);
+    }
+
+    #[test]
+    fn home_shelf_orders_recents_and_favourites_across_consoles() {
+        let mut games = vec![
+            game(Console::Ds, "Zelda"),
+            game(Console::PlayStation, "Crash"),
+            game(Console::Gba, "Metroid"),
+            game(Console::Apps, "Settings"),
+            game(Console::Snes, "_hacks"),
+        ];
+        games[4].folder = true;
+        let dir = TempDir::new("home-order");
+        let file = dir.path().join("stats.tsv");
+        // Crash played most recently (t=200), Zelda older (t=100), Metroid & Zelda favourited,
+        // Settings (Apps) played & favourited but excluded from Home games.
+        std::fs::write(
+            &file,
+            format!(
+                "{}\t60\t100\t1\t1\t4\n{}\t120\t200\t2\t0\t5\n{}\t0\t0\t0\t1\t3\n{}\t10\t300\t1\t1\t0\n",
+                games[0].path.display(),
+                games[1].path.display(),
+                games[2].path.display(),
+                games[3].path.display(),
+            ),
+        )
+        .unwrap();
+        let stats = Stats::load(file);
+
+        // Recent: newest played first across consoles, excluding unplayed, folders, and Apps.
+        assert_eq!(
+            home_order(&games, &stats, HomeSection::Recent, Sort::Name),
+            [1, 0]
+        );
+        // Favourites: alphabetical by default across consoles, excluding Apps.
+        assert_eq!(
+            home_order(&games, &stats, HomeSection::Favourites, Sort::Name),
+            [2, 0]
+        );
+        // Favourites sorted by rating: Zelda (4★) before Metroid (3★).
+        assert_eq!(
+            home_order(&games, &stats, HomeSection::Favourites, Sort::Rating),
+            [0, 2]
+        );
     }
 }

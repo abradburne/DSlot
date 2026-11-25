@@ -34,7 +34,7 @@ pub use migrate::Legacy;
 pub use nibkit::settings::Scope;
 
 use crate::emulator::Emulators;
-use crate::rom::{Console, Game};
+use crate::rom::{Console, Game, HomeSection, ShelfPage};
 use def::Def;
 use std::path::PathBuf;
 use toml::Value;
@@ -54,10 +54,18 @@ pub fn console_scope(console: Console) -> Scope {
     Scope::Console(console.folder().to_owned())
 }
 
+/// The levels a shelf page's view settings are looked up at.
+pub fn page_chain(page: ShelfPage) -> [Scope; 2] {
+    match page {
+        ShelfPage::Home => Scope::console_chain("HOME"),
+        ShelfPage::Console(c) => console_chain(c),
+    }
+}
+
 pub struct Settings {
     store: nibkit::settings::Settings,
-    /// The console whose page the shelf is on.
-    pub page: Console,
+    /// The shelf page currently open (either Home or a console's page).
+    pub page: ShelfPage,
 }
 
 /// The file's first lines.
@@ -78,10 +86,10 @@ impl Settings {
             .state
             .get("page")
             .and_then(Value::as_str)
-            .and_then(Console::from_key);
+            .and_then(ShelfPage::from_key);
         let mut settings = Settings {
             store,
-            page: page.unwrap_or(Console::Ds),
+            page: page.unwrap_or(ShelfPage::Console(Console::Ds)),
         };
         if !existed && migrate::migrate(&mut settings, legacy, games, emulators) {
             settings.save();
@@ -169,8 +177,29 @@ impl Settings {
         self.choice(&console_chain(console), def::VIEW, View::parse)
     }
 
-    pub fn grid_size(&self, console: Console) -> GridSize {
-        self.choice(&console_chain(console), def::GRID_SIZE, GridSize::parse)
+    pub fn view_for(&self, page: ShelfPage) -> View {
+        self.choice(&page_chain(page), def::VIEW, View::parse)
+    }
+
+    pub fn grid_size_for(&self, page: ShelfPage) -> GridSize {
+        self.choice(&page_chain(page), def::GRID_SIZE, GridSize::parse)
+    }
+
+    /// Which sub-section of the Home shelf is active (`Recent` by default).
+    pub fn home_section(&self) -> HomeSection {
+        self.store
+            .state
+            .get("section.home")
+            .and_then(Value::as_str)
+            .and_then(HomeSection::parse)
+            .unwrap_or_default()
+    }
+
+    pub fn set_home_section(&mut self, section: HomeSection) {
+        self.store
+            .state
+            .insert("section.home".into(), Value::from(section.key()));
+        self.save();
     }
 
     /// The section of `console`'s page on show (an arcade board), None for all its games: kept
@@ -200,19 +229,23 @@ impl Settings {
         self.choice(&console_chain(console), def::SORT, Sort::parse)
     }
 
+    pub fn sort_for(&self, page: ShelfPage) -> Sort {
+        self.choice(&page_chain(page), def::SORT, Sort::parse)
+    }
+
     pub fn show(&self, console: Console) -> Show {
         self.choice(&console_chain(console), def::SHOW, Show::parse)
     }
 
-    pub fn case(&self, console: Console) -> Case {
-        self.choice(&console_chain(console), def::CASE, Case::parse)
+    pub fn case_for(&self, page: ShelfPage) -> Case {
+        self.choice(&page_chain(page), def::CASE, Case::parse)
     }
 
-    /// What `console`'s artwork looks like besides its own pictures: its boxes' case, and (on
+    /// What `page`'s artwork looks like besides its own pictures: its boxes' case, and (on
     /// the SNES page) its carts' style.
-    pub fn look(&self, console: Console) -> crate::art::Looks {
+    pub fn look_for(&self, page: ShelfPage) -> crate::art::Looks {
         crate::art::Looks {
-            case: self.case(console),
+            case: self.case_for(page),
             snes: self.choice(
                 &console_chain(Console::Snes),
                 def::SNES_CART,
@@ -320,7 +353,10 @@ mod tests {
             (s.view(Console::Ds), s.view(Console::Gba)),
             (View::Grid, View::Shelf)
         );
-        assert_eq!(s.grid_size(Console::Ds), GridSize::Medium);
+        assert_eq!(
+            s.grid_size_for(ShelfPage::Console(Console::Ds)),
+            GridSize::Medium
+        );
         s.set(Scope::System, def::GRID_SIZE, Value::from("large"));
         s.set(
             console_scope(Console::Snes),
@@ -328,7 +364,10 @@ mod tests {
             Value::from("xlarge"),
         );
         assert_eq!(
-            (s.grid_size(Console::Ds), s.grid_size(Console::Snes)),
+            (
+                s.grid_size_for(ShelfPage::Console(Console::Ds)),
+                s.grid_size_for(ShelfPage::Console(Console::Snes))
+            ),
             (GridSize::Large, GridSize::ExtraLarge)
         );
 
@@ -367,7 +406,7 @@ mod tests {
         let file = dir.path().join("config/dslot/settings.toml");
         let mut s = Settings::load(file.clone(), &Legacy::none(), &[], &Emulators::default());
         let gs = game(Console::Ds, "Golden Sun - Dark Dawn (USA)");
-        s.page = Console::Gba;
+        s.page = ShelfPage::Console(Console::Gba);
         s.set(Scope::System, def::SOUNDS, Value::Boolean(false));
         s.set(
             console_scope(Console::Ds),
@@ -390,7 +429,7 @@ mod tests {
         assert!(text.contains("[console.NDS.dsperate]"), "{text}");
 
         let s = Settings::load(file, &Legacy::none(), &[], &Emulators::default());
-        assert_eq!(s.page, Console::Gba);
+        assert_eq!(s.page, ShelfPage::Console(Console::Gba));
         assert!(!s.sounds());
         assert_eq!(s.emulator(&game_chain(&gs)), Some("dsperate"));
         let args = s.get(&Scope::Game(gs.key()), "dsperate.args");
@@ -402,7 +441,7 @@ mod tests {
         let dir = TempDir::new("settings-reload");
         let file = dir.path().join("settings.toml");
         let mut s = Settings::load(file.clone(), &Legacy::none(), &[], &Emulators::default());
-        s.page = Console::Gb;
+        s.page = ShelfPage::Console(Console::Gb);
         s.set(Scope::System, def::SOUNDS, Value::Boolean(false));
         s.save();
 
@@ -425,7 +464,7 @@ mod tests {
         let text = fs::read_to_string(&file).unwrap();
         assert!(text.starts_with("# DSlot's settings"), "{text}");
         assert!(text.contains("[console.GB.inkdot]"), "{text}");
-        assert_eq!(s.page, Console::Gb);
+        assert_eq!(s.page, ShelfPage::Console(Console::Gb));
     }
 
     #[test]
@@ -438,10 +477,35 @@ mod tests {
         )
         .unwrap();
         let s = Settings::load(file.clone(), &Legacy::none(), &[], &Emulators::default());
-        assert_eq!((s.view(Console::Ds), s.page), (View::Shelf, Console::Gb));
+        assert_eq!(
+            (s.view(Console::Ds), s.page),
+            (View::Shelf, ShelfPage::Console(Console::Gb))
+        );
         // Not TOML at all: the defaults.
         fs::write(&file, "view = = grid").unwrap();
         let s = Settings::load(file, &Legacy::none(), &[], &Emulators::default());
+        assert_eq!(s.view(Console::Ds), View::Shelf);
+    }
+
+    #[test]
+    fn home_page_and_section_round_trip() {
+        let dir = TempDir::new("settings-home");
+        let file = dir.path().join("settings.toml");
+        let mut s = Settings::load(file.clone(), &Legacy::none(), &[], &Emulators::default());
+        assert_eq!(s.home_section(), HomeSection::Recent);
+        s.page = ShelfPage::Home;
+        s.set_home_section(HomeSection::Favourites);
+        s.set(
+            Scope::Console("HOME".into()),
+            def::VIEW,
+            Value::from("grid"),
+        );
+        s.save();
+
+        let s = Settings::load(file, &Legacy::none(), &[], &Emulators::default());
+        assert_eq!(s.page, ShelfPage::Home);
+        assert_eq!(s.home_section(), HomeSection::Favourites);
+        assert_eq!(s.view_for(ShelfPage::Home), View::Grid);
         assert_eq!(s.view(Console::Ds), View::Shelf);
     }
 }

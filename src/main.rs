@@ -230,10 +230,34 @@ fn run() -> Result<(), String> {
         // scanned by `rescan` right after frame 0 is shown.
         let early_settings = (on_device && !is_shot && bg_settings_path.exists())
             .then(|| Settings::load(bg_settings_path.clone(), &bg_legacy, &[], &emulators));
-        let active_only = early_settings
-            .as_ref()
-            .map(|s| s.page)
-            .filter(|&p| !searched[p as usize].is_empty());
+        let initial_consoles: Option<Vec<Console>> =
+            early_settings.as_ref().and_then(|s| match s.page {
+                rom::ShelfPage::Console(p) if !searched[p as usize].is_empty() => Some(vec![p]),
+                rom::ShelfPage::Home => {
+                    // Booting onto Home: scan only the consoles that appear in recent/favourite stats
+                    // before frame 0 so boot stays fast; the remaining consoles scan after frame 0.
+                    let paths = stats.recent_and_fave_paths();
+                    let mut needed: Vec<Console> = Console::ALL
+                        .into_iter()
+                        .filter(|&c| {
+                            !searched[c as usize].is_empty()
+                                && paths.iter().any(|p| {
+                                    searched[c as usize].iter().any(|dir| p.starts_with(dir))
+                                })
+                        })
+                        .collect();
+                    if needed.is_empty() {
+                        if let Some(first) = Console::ALL
+                            .into_iter()
+                            .find(|&c| !searched[c as usize].is_empty())
+                        {
+                            needed.push(first);
+                        }
+                    }
+                    (!needed.is_empty()).then_some(needed)
+                }
+                _ => None,
+            });
 
         let spawn_scan = |console: Console, scan_dirs: Vec<PathBuf>, known: PathBuf| {
             std::thread::spawn(move || {
@@ -249,8 +273,8 @@ fn run() -> Result<(), String> {
             })
         };
 
-        let scan_consoles: Vec<Console> = match active_only {
-            Some(page) => vec![page],
+        let scan_consoles: Vec<Console> = match &initial_consoles {
+            Some(list) => list.clone(),
             None => Console::ALL
                 .into_iter()
                 .filter(|&s| !searched[s as usize].is_empty())
@@ -280,10 +304,10 @@ fn run() -> Result<(), String> {
             games.extend(found);
         }
         let mut deferred = Vec::new();
-        if let Some(page) = active_only {
+        if let Some(scanned) = initial_consoles {
             let others: Vec<Console> = Console::ALL
                 .into_iter()
-                .filter(|&s| s != page && !searched[s as usize].is_empty())
+                .filter(|s| !scanned.contains(s) && !searched[*s as usize].is_empty())
                 .collect();
             if games.is_empty() {
                 let rest: Vec<_> = others

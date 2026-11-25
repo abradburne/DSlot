@@ -77,7 +77,9 @@ fn settings_ini(settings: &mut Settings, text: &str) {
             "case" | "view" | "sort" => settings.set(Scope::System, key, Value::from(value)),
             "show" => settings.set(Scope::System, def::SHOW, Value::from(value)),
             "sound" => settings.set(Scope::System, def::SOUNDS, Value::Boolean(value != "off")),
-            "page" => settings.page = Console::from_key(value).unwrap_or(settings.page),
+            "page" => {
+                settings.page = crate::rom::ShelfPage::from_key(value).unwrap_or(settings.page)
+            }
             _ => {
                 let console = key.strip_prefix("emulator.").and_then(Console::from_key);
                 if let Some(console) = console.filter(|_| !value.is_empty()) {
@@ -284,7 +286,7 @@ mod tests {
 
         assert_eq!(
             (
-                s.case(Console::Ds),
+                s.case_for(crate::rom::ShelfPage::Console(Console::Ds)),
                 s.view(Console::Gba),
                 s.show(Console::Ds)
             ),
@@ -295,7 +297,7 @@ mod tests {
             )
         );
         assert!(!s.sounds());
-        assert_eq!(s.page, Console::Gba);
+        assert_eq!(s.page, crate::rom::ShelfPage::Console(Console::Gba));
         let ds = console_scope(Console::Ds);
         let int = |scope: &Scope, key: &str| s.get(scope, key).and_then(Value::as_integer);
         let text =

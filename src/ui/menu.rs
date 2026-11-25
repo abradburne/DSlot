@@ -681,6 +681,9 @@ impl Context<'_> {
         match (page, self.game) {
             (Page::Game, Some(game)) => game_chain(game).to_vec(),
             (Page::System | Page::Achievements, _) => vec![Scope::System],
+            (Page::View, _) if self.settings.page.is_home() => {
+                crate::settings::page_chain(crate::rom::ShelfPage::Home).to_vec()
+            }
             _ => console_chain(self.console).to_vec(),
         }
     }
@@ -989,6 +992,8 @@ impl Menu {
             return vec![Page::View];
         }
         let game = cx.game.is_some().then_some(Page::Game);
+        let console_page =
+            (!cx.settings.page.is_home() || cx.game.is_some()).then_some(Page::Console);
         let radios = self
             .radios
             .is_some()
@@ -996,7 +1001,8 @@ impl Menu {
         let updates = update::there().then_some(Page::Update);
         let achievements = achievements::available().then_some(Page::Achievements);
         game.into_iter()
-            .chain([Page::Console, Page::System])
+            .chain(console_page)
+            .chain([Page::System])
             .chain(radios.into_iter().flatten())
             .chain(updates)
             .chain(achievements)
@@ -1120,6 +1126,16 @@ impl Menu {
                     && !matches!(cx.console, Console::Ports | Console::Apps)
                 {
                     items.push(Item::ArtworkConsole("Get missing artwork".into()));
+                }
+            }
+            (Page::View, _) if cx.settings.page.is_home() => {
+                if cx.settings.home_section() == crate::rom::HomeSection::Favourites {
+                    setting(
+                        &mut items,
+                        &[def::VIEW, def::GRID_SIZE, def::SORT, def::CASE],
+                    );
+                } else {
+                    setting(&mut items, &[def::VIEW, def::GRID_SIZE, def::CASE]);
                 }
             }
             (Page::View, _) => shelf(&mut items),
@@ -2274,6 +2290,7 @@ impl Menu {
             (Page::System, _) if here.1 == Part::About => self.sys.summary(),
             (Page::System, _) if here.1 == Part::Help => self.help.title(),
             (Page::System, _) => "DSlot and the device".to_owned(),
+            (Page::View, _) if cx.settings.page.is_home() => "How Home is shown".to_owned(),
             (Page::View, _) if cx.console == Console::Apps => "How Apps are shown".to_owned(),
             (Page::View, _) => format!("How the {} page is shown", cx.console.label()),
             _ if cx.console == Console::Apps => "Every app".to_owned(),

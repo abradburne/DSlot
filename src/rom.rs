@@ -72,6 +72,98 @@ pub enum Console {
     Apps,
 }
 
+/// A tab on the shelf: either the pinned cross-console Home shelf (Recents & Favourites across
+/// every system) or a single console's page.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ShelfPage {
+    Home,
+    Console(Console),
+}
+
+impl ShelfPage {
+    pub fn label(self) -> &'static str {
+        match self {
+            ShelfPage::Home => "Home",
+            ShelfPage::Console(c) => c.label(),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ShelfPage::Home => "Home",
+            ShelfPage::Console(c) => c.name(),
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            ShelfPage::Home => "home",
+            ShelfPage::Console(c) => c.key(),
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<ShelfPage> {
+        if key.eq_ignore_ascii_case("home") {
+            Some(ShelfPage::Home)
+        } else {
+            Console::from_key(key).map(ShelfPage::Console)
+        }
+    }
+
+    pub fn console(self) -> Option<Console> {
+        match self {
+            ShelfPage::Home => None,
+            ShelfPage::Console(c) => Some(c),
+        }
+    }
+
+    pub fn is_home(self) -> bool {
+        matches!(self, ShelfPage::Home)
+    }
+
+    /// Position in tab order (Home at 0, then consoles in `Console::PAGES` order).
+    pub fn order_index(self) -> usize {
+        match self {
+            ShelfPage::Home => 0,
+            ShelfPage::Console(c) => 1 + Console::PAGES.iter().position(|&p| p == c).unwrap_or(0),
+        }
+    }
+}
+
+/// The two sub-sections on the cross-console Home shelf (`L2 / R2` or tapped).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum HomeSection {
+    #[default]
+    Recent,
+    Favourites,
+}
+
+impl HomeSection {
+    pub const ALL: [HomeSection; 2] = [HomeSection::Recent, HomeSection::Favourites];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            HomeSection::Recent => "Recent",
+            HomeSection::Favourites => "Favourites",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            HomeSection::Recent => "recent",
+            HomeSection::Favourites => "favourites",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<HomeSection> {
+        match s {
+            "recent" => Some(HomeSection::Recent),
+            "favourites" => Some(HomeSection::Favourites),
+            _ => None,
+        }
+    }
+}
+
 impl Console {
     /// The consoles, as against the apps, in tab order.
     pub const ALL: [Console; 25] = [

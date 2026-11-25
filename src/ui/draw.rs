@@ -15,7 +15,7 @@ use crate::device::About;
 use crate::gfx::{self, Fonts, Img};
 use crate::loader::{Job, Loader, Made, Source};
 use crate::resume::{Resume, Wanted};
-use crate::rom::{Console, Game};
+use crate::rom::{Console, Game, ShelfPage};
 use crate::stats::{self, Stats};
 use crate::systems::Card;
 use nibkit::menu::colour;
@@ -603,8 +603,16 @@ impl Ui<'_> {
                     } else {
                         None
                     };
+                    // Consoles without cart shells (Arcade, Ports, G&W, SMS, PCE, etc.) return a
+                    // 1x1 placeholder for `cart`: use their box cover on the bottom renderer so
+                    // they display cleanly on the mixed Home carousel and System Picker blades.
+                    let cart_img = if cart.w <= 1 && cart.h <= 1 {
+                        &cover
+                    } else {
+                        &cart
+                    };
                     let (cart, cover) = (
-                        texture(&self.creators[self.bot.c], &cart)?,
+                        texture(&self.creators[self.bot.c], cart_img)?,
                         texture(&self.creators[self.top.c], &cover)?,
                     );
                     if let Some(old) = self.arts.insert(g, Art { cart, cover, blade }) {
@@ -910,7 +918,9 @@ impl Ui<'_> {
     }
 
     /// The top screen: the game's box, and `beside` it its name and details, its play time and
-    /// rating (or what has their place).
+    /// rating (or what has their place). When `mixed` is true (Home shelf), shows a compact
+    /// system badge above the title.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_top(
         &mut self,
         games: &[Game],
@@ -919,6 +929,7 @@ impl Ui<'_> {
         resume: Option<&Wanted>,
         fade: f32,
         beside: Beside,
+        mixed: bool,
     ) -> Result<(), String> {
         let v = self.top;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
@@ -957,8 +968,13 @@ impl Ui<'_> {
         let (x, width) = (580.0, 400.0);
         let size = self.fonts.fit(game.name(), 58.0, 28.0, width, true);
         let mut y = 228.0;
-        if stats.fave(&game.path) {
+        let fave = stats.fave(&game.path);
+        if fave {
             self.heart(v, x, y - 44.0, RED)?;
+        }
+        if mixed {
+            let bx = if fave { x + ICON + 12.0 } else { x };
+            self.console_badge(v, game.console, bx, y - 44.0, 16.0)?;
         }
         self.text(v, game.name(), (size, true), (x, y), 0.0, WHITE)?;
         y += size * 1.3;
@@ -1164,11 +1180,45 @@ impl Ui<'_> {
         )
     }
 
+    /// Compact pill showing `console`'s short label in its accent colour (used on the mixed
+    /// cross-console Home shelf). Returns the pill's drawn width.
+    fn console_badge(
+        &mut self,
+        v: View,
+        console: Console,
+        x: f32,
+        y: f32,
+        size: f32,
+    ) -> Result<f32, String> {
+        let label = console.label();
+        let pad_x = (size * 0.55).round();
+        let h = (size + 10.0).round();
+        let tw = self.fonts.width(label, size, true);
+        let w = (tw + pad_x * 2.0).max(38.0);
+        let c = console_colour(console);
+        self.white[v.c].set_color_mod(18, 22, 32);
+        self.white[v.c].set_alpha_mod(215);
+        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, w, h))?;
+        self.white[v.c].set_color_mod(c.r, c.g, c.b);
+        self.white[v.c].set_alpha_mod(245);
+        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, 4.0, h))?;
+        self.white[v.c].set_alpha_mod(255);
+        self.text(
+            v,
+            label,
+            (size, true),
+            (x + 2.0 + (w - 2.0) / 2.0, y + (h - size) * 0.42),
+            0.5,
+            WHITE,
+        )?;
+        Ok(w)
+    }
+
     /// The carts (or discs) over the slot. `carousel` is where the row is (a place in the list,
     /// between two while it moves), `launch` how the selected one is inserting or spinning up.
     pub fn draw_carts(&mut self, page: &Page, carousel: f32, launch: Launch) -> Result<(), String> {
         let Page {
-            games: _,
+            games,
             list,
             sel,
             console,
@@ -1176,8 +1226,11 @@ impl Ui<'_> {
             strip,
             fade,
             inside: _,
+            mixed,
         } = *page;
-        let (cart_w, cart_h, pitch) = cart_geometry(console);
+        let (page_w, page_h, page_pitch) = cart_geometry(console);
+        let pitch = if mixed { MIXED_CART_PITCH } else { page_pitch };
+        let base_y = if mixed { CART_Y + 14.0 } else { CART_Y };
         let v = self.bot;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         self.heading(heading, &strip)?;
@@ -1191,9 +1244,27 @@ impl Ui<'_> {
             let d = i as f32 - p;
             let away = d.abs().min(1.0);
             let scale = if i == sel { launch.scale } else { 1.0 };
+            let (cart_w, cart_h) = if mixed {
+                let gc = games[list[i]].console;
+                if art::has_shell(gc) {
+                    let (cw, ch, _) = cart_geometry(gc);
+                    if ch > 400.0 {
+                        let k = 400.0 / ch;
+                        (cw * k, 400.0)
+                    } else {
+                        (cw, ch)
+                    }
+                } else {
+                    let (bw, bh) = art::box_size(gc);
+                    let k = (370.0 / bw as f32).min(380.0 / bh as f32);
+                    (bw as f32 * k, bh as f32 * k)
+                }
+            } else {
+                (page_w, page_h)
+            };
             let w = cart_w * (1.0 - 0.3 * away) * scale;
             let h = w * cart_h / cart_w;
-            let y = CART_Y + if i == sel { launch.pull } else { 0.0 };
+            let y = base_y + if i == sel { launch.pull } else { 0.0 };
             let dst = v.rect(SW / 2.0 + d * pitch - w / 2.0, y - h / 2.0, w, h);
             if let Some(a) = self.arts.get_mut(&list[i]) {
                 let dim = if i == sel {
@@ -1238,6 +1309,7 @@ impl Ui<'_> {
             strip,
             fade,
             inside: _,
+            mixed,
         } = *page;
         let v = self.bot;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
@@ -1251,8 +1323,6 @@ impl Ui<'_> {
         self.canvases[v.c].set_clip_rect(v.rect(0.0, clip_top, SW, clip_h));
         let first = scroll.max(0.0) as usize * grid.cols;
         let cell = (grid.cover.0 as usize, grid.cover.1 as usize);
-        let (tw, th) = art::thumb_size(console, cell);
-        let (w, h) = (tw as f32, th as f32);
         let frame = grid.frame;
         for (place, &g) in list
             .iter()
@@ -1260,6 +1330,9 @@ impl Ui<'_> {
             .skip(first)
             .take(grid.cols * grid.visible_rows())
         {
+            let gc = if mixed { games[g].console } else { console };
+            let (tw, th) = art::thumb_size(gc, cell);
+            let (w, h) = (tw as f32, th as f32);
             let (x, y) = grid.cell(place, scroll);
             let (x, y) = (x + (grid.cover.0 - w) / 2.0, y + (grid.cover.1 - h) / 2.0);
             self.white[v.c].set_alpha_mod(255);
@@ -1279,6 +1352,11 @@ impl Ui<'_> {
                 t.set_alpha_mod(if place == sel { 255 } else { 205 });
                 self.canvases[v.c].copy(t, None, v.rect(x, y, w, h))?;
                 t.set_alpha_mod(255);
+            }
+            if mixed {
+                let badge_size: f32 = if grid.cover.0 < 160.0 { 12.0 } else { 14.0 };
+                let badge_h = (badge_size + 10.0).round();
+                self.console_badge(v, gc, x + 5.0, y + h - badge_h - 5.0, badge_size)?;
             }
             if stats.fave(&games[g].path) {
                 self.heart(v, x + w - ICON - 9.0, y + 11.0, Color::RGB(0, 0, 0))?;
@@ -1306,6 +1384,7 @@ impl Ui<'_> {
             strip,
             fade,
             inside: _,
+            mixed,
         } = *page;
         let v = self.bot;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
@@ -1318,13 +1397,7 @@ impl Ui<'_> {
         let (x0, w) = (LIST_AT.0, LIST_W);
         let list_top = layout::list_top();
         self.canvases[v.c].set_clip_rect(v.rect(0.0, list_top, SW, on_screen as f32 * row_h));
-        // A small box, as the grid's cover is shaped, made to fit the room beside the name.
-        let (bw, bh) = {
-            let cell = (GRID_COVER.0 as usize, GRID_COVER.1 as usize);
-            let (w, h) = art::thumb_size(console, cell);
-            let fit = (LIST_COVER.0 / w as f32).min(LIST_COVER.1 / h as f32);
-            (w as f32 * fit, h as f32 * fit)
-        };
+        let cell = (GRID_COVER.0 as usize, GRID_COVER.1 as usize);
         let first = scroll.max(0.0) as usize;
         for (place, &g) in list.iter().enumerate().skip(first).take(on_screen + 1) {
             let y = list_row(place, scroll, covers);
@@ -1344,8 +1417,13 @@ impl Ui<'_> {
                     v.rect(x0, y + 2.0, 5.0, row_h - 4.0),
                 )?;
             }
+            let game = &games[g];
+            let gc = if mixed { game.console } else { console };
             let mut x = x0 + 22.0;
             if covers {
+                let (tw, th) = art::thumb_size(gc, cell);
+                let fit = (LIST_COVER.0 / tw as f32).min(LIST_COVER.1 / th as f32);
+                let (bw, bh) = (tw as f32 * fit, th as f32 * fit);
                 let (bx, by) = (x + (LIST_COVER.0 - bw) / 2.0, y + (row_h - bh) / 2.0);
                 self.white[v.c].set_alpha_mod(255);
                 self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
@@ -1358,10 +1436,10 @@ impl Ui<'_> {
                 }
                 x += LIST_COVER.0 + 22.0;
             }
-            let game = &games[g];
             let fave = stats.fave(&game.path);
-            // Room for the name, short of the heart at the end of the row.
-            let room = x0 + w - x - ICON - 40.0;
+            let badge_reserve = if mixed { 92.0 } else { 0.0 };
+            // Room for the name, short of the console badge and heart at the end of the row.
+            let room = x0 + w - x - ICON - 40.0 - badge_reserve;
             let ink = if lit { WHITE } else { DIM };
             let name = self.fonts.wrap(game.name(), 26.0, lit, room, 1);
             let name = name.first().map_or("", String::as_str).to_owned();
@@ -1382,6 +1460,14 @@ impl Ui<'_> {
                     0.0,
                     ink,
                 )?;
+            }
+            if mixed {
+                let bsize: f32 = 15.0;
+                let bh = (bsize + 10.0).round();
+                let bw = (self.fonts.width(gc.label(), bsize, true) + (bsize * 0.55).round() * 2.0)
+                    .max(38.0);
+                let bx = x0 + w - ICON - 32.0 - bw;
+                self.console_badge(v, gc, bx, y + (row_h - bh) / 2.0, bsize)?;
             }
             if fave {
                 self.heart(v, x0 + w - ICON - 18.0, y + (row_h - ICON) / 2.0, RED)?;
@@ -1406,7 +1492,12 @@ impl Ui<'_> {
 
     /// The shelf's page tabs, the page on show lit, in their strip: scrolled as it is, faded
     /// toward an edge that has more tabs past it, with a chevron there.
-    pub fn tab(&mut self, page: Console, pages: &[Console], strip: &Strip) -> Result<(), String> {
+    pub fn tab(
+        &mut self,
+        page: ShelfPage,
+        pages: &[ShelfPage],
+        strip: &Strip,
+    ) -> Result<(), String> {
         let v = self.bot;
         let (_, y, _, h) = TAB;
         self.canvases[v.c].set_clip_rect(v.rect(strip.x, y - 2.0, strip.width, h + 4.0));
@@ -1420,6 +1511,14 @@ impl Ui<'_> {
             self.white[v.c].set_color_mod(c.r, c.g, c.b);
             self.white[v.c].set_alpha_mod(255);
             self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, w - 2.0, h))?;
+            if p.is_home() {
+                self.white[v.c].set_color_mod(GOLD.r, GOLD.g, GOLD.b);
+                self.canvases[v.c].copy(
+                    &self.white[v.c],
+                    None,
+                    v.rect(x, y + h - 3.0, w - 2.0, 3.0),
+                )?;
+            }
             let ink = if on { Color::RGB(20, 23, 30) } else { DIM };
             self.text(
                 v,
@@ -1885,6 +1984,96 @@ impl Ui<'_> {
         Ok(true)
     }
 
+    /// The Home blade's top-screen card in the system picker: an overview of the player's
+    /// library across every console, with the featured game's cover on the right.
+    pub fn draw_home_card(&mut self, summary: &HomeSummary) -> Result<(), String> {
+        let v = self.top;
+        let colour = HOME_COLOUR;
+        let light = |c: Color, k: f32| {
+            Color::RGB(
+                (c.r as f32 + (255.0 - c.r as f32) * k) as u8,
+                (c.g as f32 + (255.0 - c.g as f32) * k) as u8,
+                (c.b as f32 + (255.0 - c.b as f32) * k) as u8,
+            )
+        };
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
+        let fill = |ui: &mut Self, c: Color, (x, y, w, h): (f32, f32, f32, f32)| {
+            ui.white[v.c].set_color_mod(c.r, c.g, c.b);
+            ui.white[v.c].set_alpha_mod(255);
+            ui.canvases[v.c].copy(&ui.white[v.c], None, v.rect(x, y, w, h))
+        };
+        fill(self, Color::RGB(0, 0, 0), (0.0, 0.0, SW, SH))?;
+        let (x0, y0, w0, h0) = (20.0, 20.0, SW - 40.0, SH - 40.0);
+        fill(self, colour, (x0, y0, w0, h0))?;
+        fill(
+            self,
+            Color::RGB(22, 26, 36),
+            (x0 + 6.0, y0 + 6.0, w0 - 12.0, h0 - 12.0),
+        )?;
+        fill(self, colour, (x0 + 6.0, y0 + 6.0, w0 - 12.0, 104.0))?;
+        self.text(v, "Home", (52.0, true), (52.0, 34.0), 0.0, WHITE)?;
+        self.text(
+            v,
+            "Recents and favourites across every system",
+            (22.0, false),
+            (54.0, 92.0),
+            0.0,
+            light(colour, 0.72),
+        )?;
+
+        let (left, right) = (52.0, 560.0);
+        let rule = Color::RGB(44, 50, 64);
+        let play_time = if summary.secs == 0 {
+            "Not yet".to_owned()
+        } else if summary.secs < 60 {
+            "Under 1 min".to_owned()
+        } else if summary.secs < 3600 {
+            format!("{} min", summary.secs / 60)
+        } else {
+            format!("{}h {}m", summary.secs / 3600, (summary.secs % 3600) / 60)
+        };
+        let rows = [
+            ("Total games", summary.games.to_string()),
+            ("Systems", summary.systems.to_string()),
+            ("Recently played", summary.recent.to_string()),
+            ("Favourites", summary.favourites.to_string()),
+            ("Total play time", play_time),
+        ];
+        let mut y = 166.0;
+        for (label, value) in rows {
+            self.text(v, label, (22.0, false), (left, y), 0.0, DIM)?;
+            self.text(v, &value, (24.0, true), (right, y - 2.0), 1.0, WHITE)?;
+            fill(self, rule, (left, y + 36.0, right - left, 2.0))?;
+            y += 48.0;
+        }
+        if let Some(most) = &summary.most {
+            y += 14.0;
+            self.text(v, "Most played", (20.0, false), (left, y), 0.0, DIM)?;
+            let lines = self.fonts.wrap(most, 24.0, true, right - left, 2);
+            let mut my = y + 30.0;
+            for line in lines {
+                self.text(v, &line, (24.0, true), (left, my), 0.0, GOLD)?;
+                my += 30.0;
+            }
+        }
+
+        let pic = (608.0, 158.0, 364.0, 420.0);
+        if let Some((g, console)) = summary.featured {
+            self.draw_box_in(g, console, pic)?;
+        }
+        if let Some(last) = &summary.last_played {
+            self.text(
+                v,
+                &format!("Last played {last}"),
+                (20.0, false),
+                (pic.0 + pic.2 / 2.0, pic.1 + pic.3 + 22.0),
+                0.5,
+                DIM,
+            )?;
+        }
+        Ok(())
+    }
+
     /// The system picker over the touch screen: a blade for each page, the stack at `pos` (the
     /// chosen blade's place, between two while it glides), `at` the chosen one. A blade is the
     /// system's colour, with box art from one of its games over it (cropped to fill it, kept
@@ -1946,7 +2135,7 @@ impl Ui<'_> {
         for &(i, top, h, k) in &blades {
             let blade = &shown[i];
             let bottom = top + h - BLADE_GAP;
-            let field = quad(top, bottom, dim(console_colour(blade.console), k));
+            let field = quad(top, bottom, dim(page_colour(blade.page), k));
             self.canvases[v.c].render_geometry(&field, None, &TWO[..])?;
             let art = blade.game.filter(|_| blade.art);
             let Some(cover) = art
@@ -1983,7 +2172,7 @@ impl Ui<'_> {
         for &(i, top, h, k) in &blades {
             let blade = &shown[i];
             let mid = top + h / 2.0;
-            let name = blade.console.name();
+            let name = blade.page.name();
             if i == at && h > 120.0 {
                 // The chosen blade: a darker band behind its words, the cart at the right.
                 let band = quad(mid - 58.0, mid + 58.0, Color::RGBA(0, 0, 0, 150));
@@ -2016,18 +2205,22 @@ impl Ui<'_> {
                     None,
                     v.rect(44.0, y + 70.0, 64.0, 3.0),
                 )?;
-                let (noun, last) = if blade.console == Console::Apps {
-                    ("app", "Last used")
+                let line = if let Some(sub) = &blade.subtitle {
+                    sub.clone()
                 } else {
-                    ("game", "Last played")
-                };
-                let games = match blade.games {
-                    1 => format!("1 {noun}"),
-                    n => format!("{n} {noun}s"),
-                };
-                let line = match &blade.last {
-                    Some(when) => format!("{games}   \u{b7}   {last} {when}"),
-                    None => games,
+                    let (noun, last) = if blade.page == ShelfPage::Console(Console::Apps) {
+                        ("app", "Last used")
+                    } else {
+                        ("game", "Last played")
+                    };
+                    let games = match blade.games {
+                        1 => format!("1 {noun}"),
+                        n => format!("{n} {noun}s"),
+                    };
+                    match &blade.last {
+                        Some(when) => format!("{games}   \u{b7}   {last} {when}"),
+                        None => games,
+                    }
                 };
                 self.text(v, &line, (22.0, false), (44.0, y + 80.0), 0.0, DIM)?;
             } else if h > 26.0 {
@@ -2436,16 +2629,41 @@ impl Ui<'_> {
     }
 }
 
-/// A page of the shelf as it is drawn this frame.
 /// A blade in the system picker: its page, how many games it has and when one was last
 /// played, and the game whose art it shows (its box, and its cart when it is chosen).
 pub struct Blade {
-    pub console: Console,
+    pub page: ShelfPage,
     pub games: usize,
     pub last: Option<String>,
+    pub subtitle: Option<String>,
     pub game: Option<usize>,
     /// Whether that game has box art of its own (in `Imgs/`), rather than a printed box.
     pub art: bool,
+}
+
+/// Library-wide summary shown on the top screen when the Home blade is highlighted in the picker.
+pub struct HomeSummary {
+    pub games: usize,
+    pub systems: usize,
+    pub recent: usize,
+    pub favourites: usize,
+    pub secs: u64,
+    pub most: Option<String>,
+    pub featured: Option<(usize, Console)>,
+    pub last_played: Option<String>,
+}
+
+/// Colour of the cross-console Home blade and card.
+const HOME_COLOUR: Color = Color::RGB(56, 52, 82);
+
+/// Balanced horizontal pitch between carts/discs/boxes on the mixed-console Home carousel.
+pub const MIXED_CART_PITCH: f32 = 410.0;
+
+pub(crate) fn page_colour(page: ShelfPage) -> Color {
+    match page {
+        ShelfPage::Home => HOME_COLOUR,
+        ShelfPage::Console(c) => console_colour(c),
+    }
 }
 
 /// What a system's card says of the player's own games for it.
@@ -2516,6 +2734,8 @@ pub struct Page<'a> {
     pub fade: f32,
     /// Whether a folder of games is open, which B goes back out of.
     pub inside: bool,
+    /// Whether this page mixes games from multiple consoles (Home shelf).
+    pub mixed: bool,
 }
 
 impl Page<'_> {

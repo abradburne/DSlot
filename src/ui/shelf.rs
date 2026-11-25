@@ -4,7 +4,9 @@
 //! device is powered off.
 
 use super::bouncer::{self, Bouncer};
-use super::draw::{Beside, Blade, Launch, Page, Ui, Yours, DIM, WHITE};
+use super::draw::{
+    Beside, Blade, HomeSummary, Launch, Page, Ui, Yours, DIM, MIXED_CART_PITCH, WHITE,
+};
 use super::game::{self, GamePage};
 use super::input::{self, Input, Key, Reader};
 use super::layout::{self, *};
@@ -18,7 +20,7 @@ use crate::library::{self, Filter};
 use crate::loader::Job;
 use crate::platform;
 use crate::rescan::Found;
-use crate::rom::{Console, Game};
+use crate::rom::{Console, Game, HomeSection, ShelfPage};
 use crate::settings::{SaverLook, Settings, Show, Sort, View as Layout};
 use crate::stats::Stats;
 use nibkit::touch::{Panel, Pointer};
@@ -89,7 +91,7 @@ pub fn run(
             canvases,
             (top, bot),
             (fonts, shell, &opts.cache),
-            settings.look(settings.page),
+            settings.look_for(settings.page),
             shelf.ra,
         )?;
         let screens = Frame {
@@ -200,8 +202,8 @@ fn rubber(over: f32, on_screen: f32) -> f32 {
 
 /// Where the shelf is: its page, the selection, and everything that moves.
 struct State {
-    /// The consoles with pages, in tab order: those DSlot can draw carts for.
-    pages: Vec<Console>,
+    /// The pages in tab order: Home (when any games exist), then consoles and apps.
+    pages: Vec<ShelfPage>,
     /// The games on show, in order, as indices into `games`. `sel` and `carousel` are places
     /// in this list.
     order: Vec<usize>,
@@ -232,18 +234,18 @@ struct State {
     /// Why the game just left came straight back, over the shelf until any button is pressed.
     notice: Option<Notice>,
     /// The game last selected on each page, by index into `games`.
-    kept: [Option<usize>; Console::COUNT],
+    kept: HashMap<ShelfPage, usize>,
     /// A page to turn to at the top of the next frame.
-    turn_page: Option<Console>,
+    turn_page: Option<ShelfPage>,
     /// The tab strip: how far it is scrolled and how far it is heading, and the page (and
     /// how many pages there were) it was last centred for.
     strip: (f32, f32),
-    strip_on: Option<(Console, usize)>,
+    strip_on: Option<(ShelfPage, usize)>,
     /// The system picker (Select), open.
     picker: Option<Picker>,
     /// The page the shelf had to leave (its games gone, or not there yet at the start): turned
     /// back to when its games are, unless another page has been chosen since.
-    away_from: Option<Console>,
+    away_from: Option<ShelfPage>,
     /// The folder of games open on each page (`Game::sub`): empty for the console's folder.
     dirs: [String; Console::COUNT],
     /// B pressed on the shelf: out of the folder of games open, to the one it is in.
@@ -523,8 +525,12 @@ fn woken_by(event: &Event) -> bool {
     )
 }
 
-fn filter<'a>(settings: &'a Settings, games: &[Game], dirs: &'a [String]) -> Filter<'a> {
-    let console = settings.page;
+fn filter<'a>(
+    console: Console,
+    settings: &'a Settings,
+    games: &[Game],
+    dirs: &'a [String],
+) -> Filter<'a> {
     let faves_only = settings.show(console) == Show::Favourites;
     // The section chosen, while the page has it (its games may have gone since).
     let group = settings
@@ -536,6 +542,21 @@ fn filter<'a>(settings: &'a Settings, games: &[Game], dirs: &'a [String]) -> Fil
         faves_only,
         group,
         dir: &dirs[console as usize],
+    }
+}
+
+/// Lists the active page (either cross-console Home or a single console's page).
+fn list_page(games: &[Game], stats: &Stats, settings: &Settings, dirs: &[String]) -> Vec<usize> {
+    match settings.page {
+        ShelfPage::Home => library::home_order(
+            games,
+            stats,
+            settings.home_section(),
+            settings.sort_for(ShelfPage::Home),
+        ),
+        ShelfPage::Console(console) => {
+            library::order(games, stats, filter(console, settings, games, dirs))
+        }
     }
 }
 
@@ -575,13 +596,15 @@ pub fn sections(games: &[Game], console: Console) -> Vec<String> {
     groups.into_iter().map(|(g, _)| g.to_owned()).collect()
 }
 
-/// How soon a held D-pad repeats, and then how often (the Button repeat setting).
-/// How `console`'s page is shown: its view, but a page DSlot draws no carts for (Game & Watch,
-/// disks and discs, the apps) shows its boxes in the grid in place of them.
-fn mode(console: Console, settings: &Settings) -> Layout {
-    match settings.view(console) {
-        Layout::Shelf if !crate::art::has_shell(console) => Layout::Grid,
-        view => view,
+/// How `page` is shown: Home supports every view (mixing real carts, discs, and boxes in
+/// Carts view), while a console page DSlot draws no carts for shows its boxes in the grid.
+fn mode(page: ShelfPage, settings: &Settings) -> Layout {
+    match page {
+        ShelfPage::Home => settings.view_for(ShelfPage::Home),
+        ShelfPage::Console(console) => match settings.view(console) {
+            Layout::Shelf if !crate::art::has_shell(console) => Layout::Grid,
+            view => view,
+        },
     }
 }
 
@@ -598,50 +621,159 @@ fn rows(mode: Layout, grid: Grid) -> Option<(usize, usize, f32)> {
     }
 }
 
-/// The shelf's pages, in tab order: each console with games on a card (with Show systems with
-/// no games, every console looked for), then the apps when there are any. With no games on
-/// any console, every console looked for: each page says where its games go.
+/// The shelf's pages, in tab order: Home pinned first (whenever at least one game exists), then
+/// each console with games on a card (with Show systems with no games, every console looked for),
+/// then the apps when there are any. With no games on any console, every console looked for.
 fn pages(
     games: &[Game],
     searched: &[Vec<PathBuf>; Console::COUNT],
     show_empty: bool,
-) -> Vec<Console> {
+) -> Vec<ShelfPage> {
     let has = |c: Console| games.iter().any(|g| g.console == c && !g.gone && !g.folder);
     let looked = |c: Console| !searched[c as usize].is_empty();
     let any = Console::ALL.into_iter().any(|c| looked(c) && has(c));
-    Console::PAGES
-        .into_iter()
-        .filter(|&c| match c {
-            Console::Apps => has(c),
-            c => looked(c) && (has(c) || show_empty || !any),
-        })
-        .collect()
+    let mut out = Vec::new();
+    if any {
+        out.push(ShelfPage::Home);
+    }
+    out.extend(
+        Console::PAGES
+            .into_iter()
+            .filter(|&c| match c {
+                Console::Apps => has(c),
+                c => looked(c) && (has(c) || show_empty || !any),
+            })
+            .map(ShelfPage::Console),
+    );
+    out
 }
 
 /// A page's blade in the system picker: its games, the game whose art it shows (the one last
 /// played, else the first by name), and when that was.
-fn blade(games: &[Game], stats: &Stats, console: Console, cache: &Path) -> Blade {
-    let mine = || {
-        games
-            .iter()
-            .enumerate()
-            .filter(move |(_, g)| g.console == console && !g.gone && !g.folder)
-    };
-    let last = mine()
-        .map(|(i, g)| (stats.last(&g.path), i))
-        .filter(|&(t, _)| t > 0)
-        .max();
-    let game = last.map(|(_, i)| i).or_else(|| {
-        mine()
-            .min_by_key(|(_, g)| g.name().to_lowercase())
-            .map(|(i, _)| i)
-    });
-    Blade {
-        console,
-        games: mine().count(),
-        last: last.map(|(_, i)| stats.last_played(&games[i].path)),
-        art: game.is_some_and(|i| crate::art::box_art(&games[i], cache).is_file()),
-        game,
+fn blade(games: &[Game], stats: &Stats, page: ShelfPage, cache: &Path) -> Blade {
+    match page {
+        ShelfPage::Home => {
+            let all = || {
+                games
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, g)| !g.gone && !g.folder && g.console != Console::Apps)
+            };
+            let recent = all().filter(|(_, g)| stats.last(&g.path) > 0).count();
+            let faves = all().filter(|(_, g)| stats.fave(&g.path)).count();
+            let last = all()
+                .map(|(i, g)| (stats.last(&g.path), i))
+                .filter(|&(t, _)| t > 0)
+                .max();
+            let game = last
+                .map(|(_, i)| i)
+                .or_else(|| {
+                    all()
+                        .filter(|(_, g)| stats.fave(&g.path))
+                        .min_by_key(|(_, g)| g.name().to_lowercase())
+                        .map(|(i, _)| i)
+                })
+                .or_else(|| {
+                    all()
+                        .min_by_key(|(_, g)| g.name().to_lowercase())
+                        .map(|(i, _)| i)
+                });
+            let last_str = last.map(|(_, i)| stats.last_played(&games[i].path));
+            let subtitle = match (recent, faves) {
+                (r, f) if r > 0 && f > 0 => Some(format!(
+                    "{r} recent   \u{b7}   {f} {}",
+                    if f == 1 { "favourite" } else { "favourites" }
+                )),
+                (r, 0) if r > 0 => match &last_str {
+                    Some(when) => Some(format!("{r} recent   \u{b7}   Last played {when}")),
+                    None => Some(format!("{r} recent")),
+                },
+                (0, f) if f > 0 => Some(format!(
+                    "{f} {}",
+                    if f == 1 { "favourite" } else { "favourites" }
+                )),
+                _ => Some("Recents and favourites across every system".into()),
+            };
+            Blade {
+                page,
+                games: recent.max(faves),
+                last: last_str,
+                subtitle,
+                art: game.is_some_and(|i| crate::art::box_art(&games[i], cache).is_file()),
+                game,
+            }
+        }
+        ShelfPage::Console(console) => {
+            let mine = || {
+                games
+                    .iter()
+                    .enumerate()
+                    .filter(move |(_, g)| g.console == console && !g.gone && !g.folder)
+            };
+            let last = mine()
+                .map(|(i, g)| (stats.last(&g.path), i))
+                .filter(|&(t, _)| t > 0)
+                .max();
+            let game = last.map(|(_, i)| i).or_else(|| {
+                mine()
+                    .min_by_key(|(_, g)| g.name().to_lowercase())
+                    .map(|(i, _)| i)
+            });
+            Blade {
+                page,
+                games: mine().count(),
+                last: last.map(|(_, i)| stats.last_played(&games[i].path)),
+                subtitle: None,
+                art: game.is_some_and(|i| crate::art::box_art(&games[i], cache).is_file()),
+                game,
+            }
+        }
+    }
+}
+
+/// Library-wide summary shown on the top screen when the Home blade is selected in the picker.
+fn home_summary(games: &[Game], stats: &Stats) -> HomeSummary {
+    let mut systems = HashSet::new();
+    let mut total = 0usize;
+    let mut recent = 0usize;
+    let mut favourites = 0usize;
+    let mut secs = 0u64;
+    let mut most: Option<(u64, &str)> = None;
+    let mut latest: Option<(i64, usize)> = None;
+    let mut first_fave: Option<usize> = None;
+    for (i, g) in games.iter().enumerate() {
+        if g.gone || g.folder || g.console == Console::Apps {
+            continue;
+        }
+        total += 1;
+        systems.insert(g.console);
+        let s = stats.secs(&g.path);
+        secs += s;
+        if s > 0 && most.is_none_or(|(best, _)| s > best) {
+            most = Some((s, g.name()));
+        }
+        let last = stats.last(&g.path);
+        if last > 0 {
+            recent += 1;
+            if latest.is_none_or(|(t, _)| last > t) {
+                latest = Some((last, i));
+            }
+        }
+        if stats.fave(&g.path) {
+            favourites += 1;
+            first_fave.get_or_insert(i);
+        }
+    }
+    let featured_idx = latest.map(|(_, i)| i).or(first_fave);
+    HomeSummary {
+        games: total,
+        systems: systems.len(),
+        recent,
+        favourites,
+        secs,
+        most: most.map(|(_, name)| name.to_owned()),
+        featured: featured_idx.map(|i| (i, games[i].console)),
+        last_played: latest.map(|(_, i)| stats.last_played(&games[i].path)),
     }
 }
 
@@ -729,13 +861,13 @@ fn yours(games: &[Game], stats: &Stats, console: Console) -> Yours {
 }
 
 /// The page nearest `page` in tab order, of `pages`: the one after it on a tie.
-fn nearest(page: Console, pages: &[Console]) -> Console {
-    let at = |c: Console| Console::PAGES.iter().position(|&p| p == c).unwrap_or(0) as i32;
+fn nearest(page: ShelfPage, pages: &[ShelfPage]) -> ShelfPage {
+    let at = |p: ShelfPage| p.order_index() as i32;
     pages
         .iter()
         .copied()
         .min_by_key(|&p| ((at(p) - at(page)).abs(), at(p) < at(page)))
-        .unwrap_or(Console::Ds)
+        .unwrap_or(ShelfPage::Console(Console::Ds))
 }
 
 fn repeat_times(settings: &Settings) -> (Duration, Duration) {
@@ -756,9 +888,11 @@ impl State {
         let put_away = back.as_ref().filter(|b| b.put_away).map(|b| b.game);
         let notice = back.and_then(|b| b.notice).map(Notice::new);
         let pages = pages(games, searched, settings.show_empty());
-        // Back from a game: on the page it was on.
+        // Back from a game: stay on Home if launched from Home; otherwise open its console page.
         if let Some(g) = back_from.and_then(|i| games.get(i)) {
-            settings.page = g.console;
+            if !settings.page.is_home() {
+                settings.page = ShelfPage::Console(g.console);
+            }
         }
         // A page with no games (its card not in yet, say): the nearest, until it has some.
         let mut away_from = None;
@@ -769,9 +903,11 @@ impl State {
         // Back from a game in a folder of games: in that folder.
         let mut dirs: [String; Console::COUNT] = std::array::from_fn(|_| String::new());
         if let Some(g) = back_from.and_then(|i| games.get(i)) {
-            dirs[g.console as usize] = g.sub.clone();
+            if settings.page == ShelfPage::Console(g.console) {
+                dirs[g.console as usize] = g.sub.clone();
+            }
         }
-        let order = library::order(games, stats, filter(settings, games, &dirs));
+        let order = list_page(games, stats, settings, &dirs);
         let sel = order
             .iter()
             .position(|&g| back_from == Some(g))
@@ -779,14 +915,17 @@ impl State {
         let game = order.get(sel).is_some();
         // The cart pops out of the slot (or a CD spins down); unless the power menu is what the
         // game was put away for.
+        let back_is_cd = back_from
+            .and_then(|i| games.get(i))
+            .is_some_and(|g| crate::art::disc::is_cd(g.console));
         let eject = (back_from.is_some() && put_away.is_none() && !order.is_empty()).then_some(
-            if crate::art::disc::is_cd(settings.page) {
+            if back_is_cd {
                 0.0
             } else {
                 -sound::EJECT_WARMUP
             },
         );
-        let grid = Grid::of(settings.grid_size(settings.page));
+        let grid = Grid::of(settings.grid_size_for(settings.page));
         State {
             pages,
             scroll: (sel / grid.cols).saturating_sub(1) as f32,
@@ -810,7 +949,7 @@ impl State {
             game_page: None,
             power: put_away.map(|g| PowerMenu::open(Some(g))),
             notice,
-            kept: [None; Console::COUNT],
+            kept: HashMap::new(),
             turn_page: None,
             strip: (0.0, 0.0),
             strip_on: None,
@@ -846,7 +985,7 @@ impl State {
     /// The tab strip for this frame, beside a heading `heading` wide on `page`: it scrolls to
     /// the page's tab when the page (or the number of pages) changes, briefly, and at once the
     /// first time.
-    fn strip(&mut self, heading: f32, page: Console, dt: f32) -> Strip {
+    fn strip(&mut self, heading: f32, page: ShelfPage, dt: f32) -> Strip {
         let mut strip = Strip::new(self.pages.len(), heading, self.strip.0);
         let on = Some((page, self.pages.len()));
         if self.strip_on != on {
@@ -901,23 +1040,30 @@ impl State {
     }
 
     /// The page `d` tabs along from this one, round from the last to the first.
-    fn beside(&self, page: Console, d: i32) -> Console {
+    fn beside(&self, page: ShelfPage, d: i32) -> ShelfPage {
         let at = self.pages.iter().position(|&s| s == page).unwrap_or(0) as i32;
         self.pages[(at + d).rem_euclid(self.pages.len() as i32) as usize]
     }
 
     /// Turns to `to`'s page, on the game last selected there.
-    fn turn_to(&mut self, games: &[Game], to: Console, stats: &Stats, settings: &mut Settings) {
-        self.kept[settings.page as usize] = self.order.get(self.sel).copied();
+    fn turn_to(&mut self, games: &[Game], to: ShelfPage, stats: &Stats, settings: &mut Settings) {
+        if let Some(&g) = self.order.get(self.sel) {
+            self.kept.insert(settings.page, g);
+        } else {
+            self.kept.remove(&settings.page);
+        }
         settings.page = to;
         settings.save();
         crate::mark(&format!("page {}", to.label()));
-        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
-        self.sel = self.kept[to as usize]
+        self.order = list_page(games, stats, settings, &self.dirs);
+        self.sel = self
+            .kept
+            .get(&to)
+            .copied()
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(0);
         self.carousel = self.sel as f32;
-        self.scroll = rows(mode(to, settings), Grid::of(settings.grid_size(to)))
+        self.scroll = rows(mode(to, settings), Grid::of(settings.grid_size_for(to)))
             .map_or(0.0, |(per_row, ..)| {
                 (self.sel / per_row).saturating_sub(1) as f32
             });
@@ -930,7 +1076,7 @@ impl State {
     /// on the same game where it is still listed.
     fn relist(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
         let was = self.order.get(self.sel).copied();
-        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        self.order = list_page(games, stats, settings, &self.dirs);
         let sel = was.and_then(|g| self.order.iter().position(|&o| o == g));
         self.sel = sel.unwrap_or(self.sel.min(self.last()));
         self.carousel = self.sel as f32;
@@ -941,13 +1087,16 @@ impl State {
 
     /// Opens the folder of games `games[g]` on this page, on its first entry.
     fn open_folder(&mut self, games: &[Game], g: usize, stats: &Stats, settings: &Settings) {
+        let Some(console) = settings.page.console() else {
+            return;
+        };
         let folder = &games[g];
         let into = match folder.sub.is_empty() {
             true => folder.stem.clone(),
             false => format!("{}/{}", folder.sub, folder.stem),
         };
         crate::mark(&format!("folder {into}"));
-        self.dirs[settings.page as usize] = into;
+        self.dirs[console as usize] = into;
         self.show_dir(games, None, stats, settings);
     }
 
@@ -955,30 +1104,32 @@ impl State {
     /// just left. Nothing in the console's folder itself, nor where favourites alone or a
     /// section are shown (no folders there).
     fn leave_folder(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
-        let page = settings.page;
-        let open = self.dirs[page as usize].clone();
-        if open.is_empty() || filter(settings, games, &self.dirs).flat() {
+        let Some(console) = settings.page.console() else {
+            return;
+        };
+        let open = self.dirs[console as usize].clone();
+        if open.is_empty() || filter(console, settings, games, &self.dirs).flat() {
             return;
         }
         let (up, name) = parent_dir(&open);
         crate::mark(&format!("folder {up}"));
-        self.dirs[page as usize] = up.to_owned();
+        self.dirs[console as usize] = up.to_owned();
         let left = games.iter().position(|g| {
-            g.folder && !g.gone && g.console == page && g.sub == up && g.stem == name
+            g.folder && !g.gone && g.console == console && g.sub == up && g.stem == name
         });
         self.show_dir(games, left, stats, settings);
     }
 
     /// Lists the folder of games just opened, on `on` where it is listed (else the first).
     fn show_dir(&mut self, games: &[Game], on: Option<usize>, stats: &Stats, settings: &Settings) {
-        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        self.order = list_page(games, stats, settings, &self.dirs);
         self.sel = on
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(0);
         self.carousel = self.sel as f32;
         self.scroll = rows(
             mode(settings.page, settings),
-            Grid::of(settings.grid_size(settings.page)),
+            Grid::of(settings.grid_size_for(settings.page)),
         )
         .map_or(0.0, |(per_row, ..)| {
             (self.sel / per_row).saturating_sub(1) as f32
@@ -992,13 +1143,15 @@ impl State {
     /// (or, if it went, the one now in its place), and nothing on screen moves on its account.
     fn rescanned(&mut self, games: &[Game], stats: &Stats, settings: &Settings) {
         let was = self.order.get(self.sel).copied();
-        self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        self.order = list_page(games, stats, settings, &self.dirs);
         // The folder of games open has gone (its games with it): out to the nearest one left.
-        let page = settings.page as usize;
-        while self.order.is_empty() && !self.dirs[page].is_empty() {
-            let (up, _) = parent_dir(&self.dirs[page]);
-            self.dirs[page] = up.to_owned();
-            self.order = library::order(games, stats, filter(settings, games, &self.dirs));
+        if let Some(console) = settings.page.console() {
+            let page = console as usize;
+            while self.order.is_empty() && !self.dirs[page].is_empty() {
+                let (up, _) = parent_dir(&self.dirs[page]);
+                self.dirs[page] = up.to_owned();
+                self.order = list_page(games, stats, settings, &self.dirs);
+            }
         }
         let sel = was
             .and_then(|g| self.order.iter().position(|&o| o == g))
@@ -1007,7 +1160,7 @@ impl State {
         self.carousel += sel as f32 - self.sel as f32;
         if let Some((per_row, ..)) = rows(
             mode(settings.page, settings),
-            Grid::of(settings.grid_size(settings.page)),
+            Grid::of(settings.grid_size_for(settings.page)),
         ) {
             self.scroll += (sel / per_row) as f32 - (self.sel / per_row) as f32;
         }
@@ -1415,20 +1568,35 @@ fn parent_dir(dir: &str) -> (&str, &str) {
 fn heading(state: &State, settings: &Settings) -> String {
     let n = state.order.len();
     let place = (n > 0).then(|| format!("{} / {n}", state.sel + 1));
-    let (show, sort) = (settings.show(settings.page), settings.sort(settings.page));
-    // The folder of games open, by its name.
-    let open = &state.dirs[settings.page as usize];
-    let folder =
-        (!open.is_empty() && show != Show::Favourites && settings.section(settings.page).is_none())
+    let notes: Vec<&str> = match settings.page {
+        ShelfPage::Home => {
+            let sort = settings.sort_for(ShelfPage::Home);
+            if settings.home_section() == HomeSection::Favourites && sort != Sort::Name {
+                vec![sort.label()]
+            } else {
+                Vec::new()
+            }
+        }
+        ShelfPage::Console(console) => {
+            let (show, sort) = (settings.show(console), settings.sort(console));
+            let open = &state.dirs[console as usize];
+            let folder = (!open.is_empty()
+                && show != Show::Favourites
+                && settings.section(console).is_none())
             .then(|| crate::rom::folder_name(parent_dir(open).1, settings.hide_underscore()));
-    let notes = [
-        folder,
-        (show == Show::Favourites).then_some("Favourites"),
-        (sort != Sort::Name).then_some(sort.label()),
-    ];
+            [
+                folder,
+                (show == Show::Favourites).then_some("Favourites"),
+                (sort != Sort::Name).then_some(sort.label()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        }
+    };
     let parts: Vec<String> = place
         .into_iter()
-        .chain(notes.into_iter().flatten().map(str::to_owned))
+        .chain(notes.into_iter().map(str::to_owned))
         .collect();
     parts.join("   \u{b7}   ")
 }
@@ -1730,31 +1898,57 @@ fn show(
         if let Some(to) = state.turn_page.take() {
             state.turn_to(games, to, stats, settings);
         }
-        let console = settings.page;
+        let shelf_page = settings.page;
+        let console = shelf_page.console().unwrap_or_else(|| {
+            state
+                .order
+                .get(state.sel)
+                .map(|&g| games[g].console)
+                .unwrap_or(Console::Ds)
+        });
         let n = state.order.len();
-        let geometry = cart_geometry(console);
-        // Games on this page before the favourites filter: none at all is its own screen.
-        let on_page = games
-            .iter()
-            .filter(|g| g.console == console && !g.gone && !g.folder)
-            .count();
-        let mode = mode(console, settings);
-        let grid = Grid::of(settings.grid_size(console));
-        // A sectioned page's sections (All first, then each board), the one on show; the grid
-        // and the list move down under them.
-        let page_sections = sections(games, console);
-        let section_labels: Vec<&str> = std::iter::once("All")
-            .chain(page_sections.iter().map(String::as_str))
-            .collect();
-        let section_on = settings
-            .section(console)
-            .and_then(|s| page_sections.iter().position(|x| x == s))
-            .map_or(0, |i| i + 1);
-        layout::set_sections_shown(!page_sections.is_empty());
+        let mut geometry = cart_geometry(console);
+        if shelf_page.is_home() {
+            geometry.2 = MIXED_CART_PITCH;
+        }
+        // Games on this page before the favourites filter: none at all is its own screen (Home
+        // always stays on the shelf with its own empty-section message).
+        let on_page = match shelf_page {
+            ShelfPage::Home => 1,
+            ShelfPage::Console(c) => games
+                .iter()
+                .filter(|g| g.console == c && !g.gone && !g.folder)
+                .count(),
+        };
+        let mode = mode(shelf_page, settings);
+        let grid = Grid::of(settings.grid_size_for(shelf_page));
+        // A sectioned page's sections: Home has Recent | Favourites; Arcade has All + each board.
+        let page_sections = shelf_page
+            .console()
+            .map(|c| sections(games, c))
+            .unwrap_or_default();
+        let (section_labels, section_on): (Vec<&str>, usize) = if shelf_page.is_home() {
+            let on = match settings.home_section() {
+                HomeSection::Recent => 0,
+                HomeSection::Favourites => 1,
+            };
+            (HomeSection::ALL.iter().map(|s| s.label()).collect(), on)
+        } else {
+            let labels = std::iter::once("All")
+                .chain(page_sections.iter().map(String::as_str))
+                .collect();
+            let on = settings
+                .section(console)
+                .and_then(|s| page_sections.iter().position(|x| x == s))
+                .map_or(0, |i| i + 1);
+            (labels, on)
+        };
+        let has_sections = shelf_page.is_home() || !page_sections.is_empty();
+        layout::set_sections_shown(has_sections);
         let (first, next) = repeat_times(settings);
-        // Each console's page may want its boxes in another case, or its carts another shape.
-        if ui.looks != settings.look(console) {
-            ui.looks = settings.look(console);
+        // Each page may want its boxes in another case, or its carts another shape.
+        if ui.looks != settings.look_for(shelf_page) {
+            ui.looks = settings.look_for(shelf_page);
             ui.forget_art();
         }
         if matches!(mode, Layout::Grid | Layout::ListCovers) {
@@ -1765,7 +1959,7 @@ fn show(
         let busy = state.busy();
         // The heading, and the tab strip beside it, scrolled to this page's tab.
         let title = heading(&state, settings);
-        let strip = state.strip(ui.heading_width(&title), console, dt);
+        let strip = state.strip(ui.heading_width(&title), shelf_page, dt);
         let blades = Blades::DEEP;
 
         if !polled_panel {
@@ -1893,7 +2087,11 @@ fn show(
                 },
                 // Select alone: the system picker, on this page's blade.
                 Some(Input::Press(Key::Select)) => {
-                    let at = state.pages.iter().position(|&p| p == console).unwrap_or(0);
+                    let at = state
+                        .pages
+                        .iter()
+                        .position(|&p| p == shelf_page)
+                        .unwrap_or(0);
                     state.picker = Some(Picker::on(at));
                     state.repeat.stop();
                 }
@@ -1921,11 +2119,11 @@ fn show(
                     state.menu = Some(Menu::open_view(shelf.ra));
                     state.repeat.stop();
                 }
-                Some(Input::Press(Key::L)) => flip = Some(state.beside(console, -1)),
-                Some(Input::Press(Key::R)) => flip = Some(state.beside(console, 1)),
-                // L2 / R2: a sectioned page's sections, round from the last to All.
-                Some(Input::Press(Key::L2)) if !page_sections.is_empty() => section_step -= 1,
-                Some(Input::Press(Key::R2)) if !page_sections.is_empty() => section_step += 1,
+                Some(Input::Press(Key::L)) => flip = Some(state.beside(shelf_page, -1)),
+                Some(Input::Press(Key::R)) => flip = Some(state.beside(shelf_page, 1)),
+                // L2 / R2: a sectioned page's sections (Home: Recent / Favourites; Arcade: boards).
+                Some(Input::Press(Key::L2)) if has_sections => section_step -= 1,
+                Some(Input::Press(Key::R2)) if has_sections => section_step += 1,
                 Some(Input::Press(_)) if n == 0 => {}
                 Some(Input::Press(key)) => fave |= state.press(games, key, mode, grid),
             }
@@ -2246,9 +2444,9 @@ fn show(
                 _ => true,
             });
         }
-        // A section tapped, or stepped to with L2 / R2: the page lists that one's games alone
-        // (All: every game), kept for the page.
-        if !page_sections.is_empty() && state.menu.is_none() && state.picker.is_none() && !busy {
+        // A section tapped, or stepped to with L2 / R2: Home switches Recent / Favourites;
+        // Arcade filters to one board (All: every game), kept for the page.
+        if has_sections && state.menu.is_none() && state.picker.is_none() && !busy {
             let spans = layout::section_spans(&section_labels, section_on, |l| ui.section_width(l));
             let mut to = None;
             pointers.retain(|ptr| match *ptr {
@@ -2266,7 +2464,11 @@ fn show(
                 to = Some((section_on as i32 + section_step).rem_euclid(n) as usize);
             }
             if let Some(i) = to.filter(|&i| i != section_on) {
-                settings.set_section(console, (i > 0).then(|| page_sections[i - 1].as_str()));
+                if shelf_page.is_home() {
+                    settings.set_home_section(HomeSection::ALL[i]);
+                } else {
+                    settings.set_section(console, (i > 0).then(|| page_sections[i - 1].as_str()));
+                }
                 relist = true;
             }
         }
@@ -2494,8 +2696,8 @@ fn show(
         let picker_open = state.picker.is_some();
         if on_page == 0 {
             ui.empty(&opts.searched[console as usize], console)?;
-            ui.tab(console, &state.pages, &strip)?;
-            if !page_sections.is_empty() {
+            ui.tab(shelf_page, &state.pages, &strip)?;
+            if has_sections {
                 ui.sections(&section_labels, section_on)?;
             }
             let hold = (first..list.len()).collect();
@@ -2532,31 +2734,48 @@ fn show(
                     } else {
                         Beside::Details
                     };
-                    ui.draw_top(games, g, stats, resume.as_ref(), fade, beside)?
+                    ui.draw_top(
+                        games,
+                        g,
+                        stats,
+                        resume.as_ref(),
+                        fade,
+                        beside,
+                        shelf_page.is_home(),
+                    )?
                 }
                 // Under the View sheet, which is where to show them all again.
                 None if viewing => {}
                 None => {
                     let top = ui.top;
+                    let (empty_title, empty_sub) = match shelf_page {
+                        ShelfPage::Home if settings.home_section() == HomeSection::Recent => (
+                            "No recent games yet",
+                            "Play any game and it will appear here.",
+                        ),
+                        ShelfPage::Home => {
+                            ("No favourites yet", "Press Y on any game to add it here.")
+                        }
+                        ShelfPage::Console(_) => {
+                            ("No favourites yet", "Start shows all games again.")
+                        }
+                    };
                     ui.text(
                         top,
-                        "No favourites yet",
+                        empty_title,
                         (48.0, true),
                         (SW / 2.0, 320.0),
                         0.5,
                         WHITE,
                     )?;
-                    ui.text(
-                        top,
-                        "Start shows all games again.",
-                        (24.0, false),
-                        (SW / 2.0, 392.0),
-                        0.5,
-                        DIM,
-                    )?;
+                    ui.text(top, empty_sub, (24.0, false), (SW / 2.0, 392.0), 0.5, DIM)?;
                 }
             }
             let heading = heading(&state, settings);
+            let inside = shelf_page.console().is_some_and(|c| {
+                !state.dirs[c as usize].is_empty()
+                    && !filter(c, settings, games, &state.dirs).flat()
+            });
             let page = Page {
                 games,
                 list: &state.order,
@@ -2565,8 +2784,8 @@ fn show(
                 heading: &heading,
                 strip,
                 fade,
-                inside: !state.dirs[console as usize].is_empty()
-                    && !filter(settings, games, &state.dirs).flat(),
+                inside,
+                mixed: shelf_page.is_home(),
             };
             // The View sheet leaves the shelf on the touch screen, to be seen changing.
             let sheet = state.menu.as_ref().filter(|m| m.page == menu::Page::View);
@@ -2608,8 +2827,8 @@ fn show(
                 soft("the View sheet", ui.draw_sheet(&open.shown(&cx)));
             }
             if (state.menu.is_none() && state.game_page.is_none()) || sheet.is_some() {
-                ui.tab(console, &state.pages, &strip)?;
-                if !page_sections.is_empty() {
+                ui.tab(shelf_page, &state.pages, &strip)?;
+                if has_sections {
                     ui.sections(&section_labels, section_on)?;
                 }
             }
@@ -2622,24 +2841,34 @@ fn show(
         }
         // A system's card on the top screen: the chosen system's in the picker, or the console's
         // while its page of the menu is open.
-        let card_for = match (&state.picker, &state.menu) {
+        let card_for: Option<ShelfPage> = match (&state.picker, &state.menu) {
             (Some(p), _) => state.pages.get(p.at).copied(),
-            (None, Some(open)) if open.page == menu::Page::Console => Some(console),
+            (None, Some(open)) if open.page == menu::Page::Console => {
+                Some(ShelfPage::Console(console))
+            }
             _ => None,
         };
-        if let Some(c) = card_for {
-            // The Apps page's card is about the device (device.rs), made as it is shown.
-            if c == Console::Apps {
-                let about = crate::device::about(games, stats);
-                soft(
-                    "the device's card",
-                    ui.draw_about(&about, &yours(games, stats, c)),
-                );
-            } else if let Some(card) = crate::systems::card(c) {
-                soft(
-                    "a system card",
-                    ui.draw_card(c, card, &yours(games, stats, c)),
-                );
+        if let Some(p) = card_for {
+            match p {
+                ShelfPage::Home => {
+                    let summary = home_summary(games, stats);
+                    soft("the home card", ui.draw_home_card(&summary));
+                }
+                ShelfPage::Console(Console::Apps) => {
+                    let about = crate::device::about(games, stats);
+                    soft(
+                        "the device's card",
+                        ui.draw_about(&about, &yours(games, stats, Console::Apps)),
+                    );
+                }
+                ShelfPage::Console(c) => {
+                    if let Some(card) = crate::systems::card(c) {
+                        soft(
+                            "a system card",
+                            ui.draw_card(c, card, &yours(games, stats, c)),
+                        );
+                    }
+                }
             }
         }
         if let Some(notice) = &state.notice {

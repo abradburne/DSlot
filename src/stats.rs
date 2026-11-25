@@ -114,6 +114,16 @@ impl Stats {
         self.get(rom).secs
     }
 
+    /// Paths of games that have been played or favourited, used to identify which consoles to
+    /// scan before frame 0 when booting directly onto the cross-console Home shelf.
+    pub fn recent_and_fave_paths(&self) -> Vec<PathBuf> {
+        self.map
+            .iter()
+            .filter(|(_, s)| s.last > 0 || s.fave)
+            .map(|(p, _)| PathBuf::from(p))
+            .collect()
+    }
+
     pub fn played(&self, rom: &Path) -> String {
         match self.get(rom).secs / 60 {
             0 if self.get(rom).secs == 0 => "Not yet".into(),
