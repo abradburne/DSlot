@@ -2257,6 +2257,63 @@ impl Ui<'_> {
         )
     }
 
+    /// Subtle progress pill in the top-right corner of the top screen while a background artwork
+    /// download is running (or briefly after it completes) after the menu is closed.
+    pub fn draw_artwork_pill(&mut self, text: &str, progress: Option<f32>) -> Result<(), String> {
+        let v = self.top;
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
+        const PAD_X: f32 = 14.0;
+        const HEIGHT: f32 = 38.0;
+        const MAX_W: f32 = 420.0;
+        let max_text = MAX_W - PAD_X * 2.0;
+        let size = self.fonts.fit(text, 17.0, 14.0, max_text, true);
+        let line = self
+            .fonts
+            .wrap(text, size, true, max_text, 1)
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        let tw = self.fonts.width(&line, size, true);
+        let w = (tw + PAD_X * 2.0).clamp(140.0, MAX_W);
+        let (x, y) = (SW - 26.0 - w, 22.0);
+
+        // Subtle dark card with thin rim matching the shelf palette.
+        self.white[v.c].set_color_mod(58, 66, 86);
+        self.white[v.c].set_alpha_mod(215);
+        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, w, HEIGHT))?;
+        self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
+        self.white[v.c].set_alpha_mod(232);
+        self.canvases[v.c].copy(
+            &self.white[v.c],
+            None,
+            v.rect(x + 1.5, y + 1.5, w - 3.0, HEIGHT - 3.0),
+        )?;
+
+        if let Some(frac) = progress {
+            let bar_w = w - 3.0;
+            let bar_y = y + HEIGHT - 4.5;
+            self.white[v.c].set_color_mod(44, 50, 66);
+            self.white[v.c].set_alpha_mod(255);
+            self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x + 1.5, bar_y, bar_w, 3.0))?;
+            let fill = (bar_w * frac.clamp(0.0, 1.0)).max(if frac > 0.0 { 4.0 } else { 0.0 });
+            if fill > 0.0 {
+                self.white[v.c].set_color_mod(GOLD.r, GOLD.g, GOLD.b);
+                self.canvases[v.c].copy(
+                    &self.white[v.c],
+                    None,
+                    v.rect(x + 1.5, bar_y, fill, 3.0),
+                )?;
+            }
+            let ty = y + (HEIGHT - 3.0 - size) * 0.45;
+            self.text(v, &line, (size, true), (x + w / 2.0, ty), 0.5, WHITE)?;
+        } else {
+            let ty = y + (HEIGHT - size) * 0.46;
+            self.text(v, &line, (size, true), (x + w / 2.0, ty), 0.5, GOLD)?;
+        }
+        self.white[v.c].set_alpha_mod(255);
+        Ok(())
+    }
+
     /// A game came straight back: why, over both screens dimmed, in a box on the touch screen,
     /// until any button is pressed; with the bug report's state under it, where one can be sent.
     pub fn draw_notice(&mut self, shown: &NoticeShown) -> Result<(), String> {

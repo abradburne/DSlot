@@ -18,7 +18,7 @@ pub use fetch::{eligible, needs_art, ArtKind, Service};
 use crate::rom::{Console, Game};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 
@@ -101,6 +101,43 @@ impl Snapshot {
             head
         }
     }
+
+    /// Compact label and optional progress fraction (`0.0..=1.0`) for the shelf's corner
+    /// progress pill while a background job is running or right after it finishes.
+    pub fn pill(&self) -> Option<(String, Option<f32>)> {
+        if self.total == 0 {
+            return None;
+        }
+        if self.running {
+            let saved = self.saved_box + self.saved_cart;
+            let text = if saved > 0 {
+                format!(
+                    "Artwork  {}/{}  \u{b7}  {} saved",
+                    self.done, self.total, saved
+                )
+            } else {
+                format!("Artwork  {}/{}", self.done, self.total)
+            };
+            let frac = (self.done as f32 / self.total.max(1) as f32).clamp(0.0, 1.0);
+            Some((text, Some(frac)))
+        } else {
+            Some((format!("Artwork  \u{b7}  {}", self.summary()), None))
+        }
+    }
+
+    /// Lightweight fingerprint of fields visible in the progress pill and menu summary, used to
+    /// wake a resting shelf only when artwork progress actually advances.
+    pub fn progress_key(&self) -> (bool, usize, usize, usize, usize, usize, bool) {
+        (
+            self.running,
+            self.total,
+            self.done,
+            self.saved_box,
+            self.saved_cart,
+            self.errors,
+            self.stopped,
+        )
+    }
 }
 
 /// Counts how many games in `games` are missing artwork of `kind` (optionally filtered to one console).
@@ -116,6 +153,7 @@ pub fn missing_count(games: &[Game], console: Option<Console>, kind: ArtKind) ->
 pub struct Runner {
     service: Arc<Service>,
     cancel: Arc<AtomicBool>,
+    batch: Arc<AtomicU64>,
     state: Arc<Mutex<Snapshot>>,
     updated: Option<Receiver<PathBuf>>,
 }
@@ -125,6 +163,7 @@ impl Runner {
         Runner {
             service: Arc::new(Service::new(cache, art_index_dirs)),
             cancel: Arc::new(AtomicBool::new(false)),
+            batch: Arc::new(AtomicU64::new(0)),
             state: Arc::new(Mutex::new(Snapshot::default())),
             updated: None,
         }
@@ -136,10 +175,6 @@ impl Runner {
 
     pub fn snapshot(&self) -> Snapshot {
         self.state.lock().unwrap().clone()
-    }
-
-    pub fn running(&self) -> bool {
-        self.state.lock().unwrap().running
     }
 
     /// Stops any running job cleanly; already-saved files stay on disk.
@@ -184,6 +219,8 @@ impl Runner {
 
         let queue = Arc::new(Mutex::new(VecDeque::from(targets)));
         let service = self.service.clone();
+        let batch_counter = self.batch.clone();
+        let my_batch = batch_counter.fetch_add(1, Ordering::Relaxed) + 1;
         let workers = WORKERS.min(total).max(1);
         let remaining_workers = Arc::new(Mutex::new(workers));
 
@@ -194,6 +231,7 @@ impl Runner {
             let state = state.clone();
             let tx = tx.clone();
             let remaining = remaining_workers.clone();
+            let batch_counter = batch_counter.clone();
             std::thread::spawn(move || {
                 loop {
                     if cancel.load(Ordering::Relaxed) {
@@ -230,11 +268,19 @@ impl Runner {
                 let mut left = remaining.lock().unwrap();
                 *left -= 1;
                 if *left == 0 {
-                    let mut st = state.lock().unwrap();
-                    st.running = false;
-                    st.current.clear();
-                    if cancel.load(Ordering::Relaxed) {
-                        st.stopped = true;
+                    {
+                        let mut st = state.lock().unwrap();
+                        st.running = false;
+                        st.current.clear();
+                        if cancel.load(Ordering::Relaxed) {
+                            st.stopped = true;
+                        }
+                    }
+                    // Free in-memory LaunchBox/Libretro/No-Intro index maps once no newer batch is
+                    // using them, and return freed heap pages to the OS on 1 GiB handhelds.
+                    if batch_counter.load(Ordering::Relaxed) == my_batch {
+                        service.clear_caches();
+                        crate::platform::trim_memory();
                     }
                 }
             });
@@ -247,5 +293,37 @@ impl Runner {
             return Vec::new();
         };
         rx.try_iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_pill_formats_running_and_completed_batches() {
+        assert_eq!(Snapshot::default().pill(), None);
+
+        let mut snap = Snapshot {
+            running: true,
+            total: 10,
+            done: 3,
+            ..Default::default()
+        };
+        assert_eq!(snap.pill(), Some(("Artwork  3/10".into(), Some(0.3))));
+
+        snap.saved_box = 2;
+        snap.saved_cart = 1;
+        assert_eq!(
+            snap.pill(),
+            Some(("Artwork  3/10  \u{b7}  3 saved".into(), Some(0.3)))
+        );
+
+        snap.running = false;
+        snap.done = 10;
+        assert_eq!(
+            snap.pill(),
+            Some(("Artwork  \u{b7}  Saved 2 box, 1 cart".into(), None))
+        );
     }
 }

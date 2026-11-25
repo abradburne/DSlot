@@ -424,11 +424,13 @@ impl Drop for ScreensOff {
 
 /// How bright the screens go while the screensaver is on, in percent (no brighter than they
 /// were). Each frame of the drifting logo costs the GPU a wake-up and a present, so it is drawn
-/// a few times a second (`DSLOT_SAVER_FPS` overrides it, for measuring); the still logo moves
-/// once a minute. Input is looked for every `REST_POLL` meanwhile.
+/// at 10 fps (aligning cleanly with `REST_POLL` and minimizing GPU/CPU wakeups; `DSLOT_SAVER_FPS`
+/// overrides it, for measuring); the still logo moves once a minute. Input is looked for every
+/// `REST_POLL` while animated or `SAVER_IDLE_POLL` when still/off.
 const SAVER_DIM: u8 = 10;
-const SAVER_FPS: f32 = 15.0;
+const SAVER_FPS: f32 = 10.0;
 const SAVER_STILL: Duration = Duration::from_secs(60);
+const SAVER_IDLE_POLL: Duration = Duration::from_millis(100);
 
 fn saver_frame() -> Duration {
     let fps = std::env::var("DSLOT_SAVER_FPS")
@@ -438,10 +440,16 @@ fn saver_frame() -> Duration {
         .unwrap_or(SAVER_FPS);
     Duration::from_secs_f32(1.0 / fps.min(60.0))
 }
-/// How long after the last touch the shelf rests (see `resting` in `show`), and how often it
-/// looks for input meanwhile.
+/// How long after the last touch the shelf rests (see `resting` in `show`), how often it looks
+/// for input meanwhile, and how often background status/artwork/registry checks run while resting.
 const REST_AFTER: Duration = Duration::from_secs(3);
 const REST_POLL: Duration = Duration::from_millis(50);
+const REST_STATUS_POLL: Duration = Duration::from_millis(500);
+const REGISTRY_ACTIVE: Duration = Duration::from_secs(2);
+const REGISTRY_REST: Duration = Duration::from_secs(5);
+const REGISTRY_FULL: Duration = Duration::from_secs(60);
+/// How long the corner artwork pill stays visible after a background batch completes.
+const ARTWORK_PILL_LINGER: Duration = Duration::from_secs(4);
 /// A gap between frames this long means the system slept (the lid, the power button).
 const SLEPT: Duration = Duration::from_secs(2);
 
@@ -1475,7 +1483,9 @@ fn show(
     let mut idle = Instant::now();
     let mut saver: Option<Saver> = None;
     let registry = crate::emulator::signature(emulators);
+    let mut registry_stamp = crate::emulator::dirs_stamp(shelf.emulator_dirs);
     let mut registry_at = Instant::now();
+    let mut registry_full_at = Instant::now();
     // What the watch on the games' folders found, until it can be taken in; and, after Rescan
     // games in the menu, the games that came and went since.
     let mut found: Vec<Found> = Vec::new();
@@ -1485,6 +1495,9 @@ fn show(
     // only drawn when that changes (the clock's minute, the battery, the radios).
     let mut was_settled = false;
     let mut drawn_status = None;
+    let mut resting_now = false;
+    let mut rest_check_at = Instant::now();
+    let mut pending_events: Vec<Event> = Vec::new();
     // The volume and brightness indicator: what the volume keys set (nibOS announces it), over
     // the top screen for a moment; and whether the last frame drawn had it, so the frame after
     // it has faded is drawn without it.
@@ -1493,17 +1506,33 @@ fn show(
     let mut level_drawn = false;
     let mut artwork_counts: Option<(Console, crate::artwork::ArtKind, u64, usize, usize)> = None;
     let mut artwork_gen: u64 = 0;
+    let mut was_artwork_running = false;
+    let mut artwork_done_at: Option<Instant> = None;
+    let mut drawn_artwork_key = None;
+    let mut drawn_artwork_current = String::new();
+    let mut artwork_pill_drawn = false;
     loop {
         // A game chosen (or one put away carrying on): this frame is drawn, then the shelf
         // goes.
         let mut leaving = None;
         // Packages install their own descriptions. Notice additions, removals, changed options,
         // and binaries/cores becoming available, including while the screensaver is up.
-        if opts.shot.is_none() && registry_at.elapsed() >= Duration::from_secs(2) {
+        let registry_every = if resting_now || saver.is_some() {
+            REGISTRY_REST
+        } else {
+            REGISTRY_ACTIVE
+        };
+        if opts.shot.is_none() && registry_at.elapsed() >= registry_every {
             registry_at = Instant::now();
-            let current = crate::emulator::Emulators::load(shelf.emulator_dirs);
-            if crate::emulator::signature(&current) != registry {
-                leaving = Some(Outcome::Refresh(state.order.get(state.sel).copied()));
+            let stamp = crate::emulator::dirs_stamp(shelf.emulator_dirs);
+            let changed = stamp != registry_stamp;
+            if changed || registry_full_at.elapsed() >= REGISTRY_FULL {
+                registry_stamp = stamp;
+                registry_full_at = Instant::now();
+                let current = crate::emulator::Emulators::load(shelf.emulator_dirs);
+                if crate::emulator::signature(&current) != registry {
+                    leaving = Some(Outcome::Refresh(state.order.get(state.sel).copied()));
+                }
             }
         }
         let gap = tick.elapsed();
@@ -1514,6 +1543,7 @@ fn show(
         // it (the system having slept too), and does nothing else: the first press is its.
         if leaving.is_some() {
             saver = None;
+            resting_now = false;
         }
         if let Some(on) = saver.as_mut() {
             let mut wake = gap >= SLEPT;
@@ -1541,6 +1571,7 @@ fn show(
             }
             if wake {
                 saver = None;
+                resting_now = false;
                 crate::mark("screensaver off");
                 idle = Instant::now();
                 continue;
@@ -1553,8 +1584,102 @@ fn show(
                 on.shown = now;
                 on.drawn = Some(Instant::now());
             }
-            std::thread::sleep(REST_POLL);
+            let poll = if matches!(on.look, SaverLook::Animated) {
+                REST_POLL
+            } else {
+                SAVER_IDLE_POLL
+            };
+            std::thread::sleep(poll);
             continue;
+        }
+        // Fast resting path for the idle shelf: poll input/events with zero per-frame allocations,
+        // and check status/artwork/notices/screensaver at 2 Hz instead of 20 Hz.
+        let mut polled_panel = false;
+        let mut power_pressed = false;
+        if resting_now && leaving.is_none() {
+            let mut wake = gap >= SLEPT;
+            if wake {
+                idle = Instant::now();
+            }
+            pending_events.extend(events.poll_iter());
+            if !pending_events.is_empty() {
+                wake = true;
+            }
+            pointers.clear();
+            if let Some(panel) = panel.as_mut() {
+                panel.poll(&mut pointers);
+                pointers
+                    .iter_mut()
+                    .for_each(|ptr| *ptr = ptr.scaled(SW, SH));
+                polled_panel = true;
+            }
+            if !pointers.is_empty() {
+                idle = Instant::now();
+                wake = true;
+            }
+            if power.take() {
+                power_pressed = true;
+                wake = true;
+            }
+            if let Some(level) = levels.as_mut().and_then(|w| w.changed()) {
+                indicator.show(level, Instant::now());
+                wake = true;
+            }
+            found.extend(shelf.rescan.found());
+            if !found.is_empty() {
+                wake = true;
+            }
+            if !wake && rest_check_at.elapsed() >= REST_STATUS_POLL {
+                rest_check_at = Instant::now();
+                let saver_due = settings
+                    .saver()
+                    .after()
+                    .is_some_and(|after| idle.elapsed() >= after);
+                if saver_due {
+                    saver = Some(Saver::start(settings.saver_look()));
+                    state.repeat.stop();
+                    resting_now = false;
+                    continue;
+                }
+                if artwork_done_at.is_some_and(|t| t.elapsed() >= ARTWORK_PILL_LINGER) {
+                    artwork_done_at = None;
+                    wake = true;
+                }
+                if !wake {
+                    let key = opts
+                        .artwork
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .snapshot()
+                        .progress_key();
+                    if drawn_artwork_key != Some(key) {
+                        wake = true;
+                    }
+                }
+                if !wake {
+                    let status = ui.status();
+                    if status.is_none() || status != drawn_status {
+                        wake = true;
+                    }
+                }
+                if !wake {
+                    if let Some(text) = opts
+                        .notices
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .next()
+                    {
+                        state.notice = Some(Notice::from_system(text));
+                        idle = Instant::now();
+                        wake = true;
+                    }
+                }
+            }
+            if !wake {
+                std::thread::sleep(REST_POLL);
+                continue;
+            }
+            resting_now = false;
         }
         // One scripted key a frame, as a person would press them.
         if let Some(name) = opts.press.get(frame as usize) {
@@ -1584,6 +1709,7 @@ fn show(
                         if let (Some(counts), Some(open)) = (asked.take(), state.menu.as_mut()) {
                             open.rescanned(counts);
                         }
+                        crate::platform::trim_memory();
                     }
                 }
             }
@@ -1642,26 +1768,28 @@ fn show(
         let strip = state.strip(ui.heading_width(&title), console, dt);
         let blades = Blades::DEEP;
 
-        pointers.clear();
-        if dual
-            && panel.is_none()
-            && frame.is_multiple_of(PANEL_RETRY)
-            && (1..PANEL_RETRY_FOR).contains(&frame)
-        {
-            panel = Panel::open();
-        }
-        if let Some(panel) = panel.as_mut() {
-            panel.poll(&mut pointers);
-            pointers
-                .iter_mut()
-                .for_each(|ptr| *ptr = ptr.scaled(SW, SH));
-        }
-        if !pointers.is_empty() {
-            idle = Instant::now();
+        if !polled_panel {
+            pointers.clear();
+            if dual
+                && panel.is_none()
+                && frame.is_multiple_of(PANEL_RETRY)
+                && (1..PANEL_RETRY_FOR).contains(&frame)
+            {
+                panel = Panel::open();
+            }
+            if let Some(panel) = panel.as_mut() {
+                panel.poll(&mut pointers);
+                pointers
+                    .iter_mut()
+                    .for_each(|ptr| *ptr = ptr.scaled(SW, SH));
+            }
+            if !pointers.is_empty() {
+                idle = Instant::now();
+            }
         }
 
         // The power menu, asked for (a long press of power): over whatever is going on.
-        if power.take() && state.power.is_none() {
+        if (power_pressed || power.take()) && state.power.is_none() {
             crate::mark("power menu");
             (state.power, state.menu, state.insert, state.drag) =
                 (Some(PowerMenu::open(None)), None, None, None);
@@ -1677,7 +1805,7 @@ fn show(
         let (mut pick_go, mut pick_close) = (false, false);
         // With the panel read directly, SDL's copies of the same touches are ignored.
         let mouse = panel.is_none().then_some(bot);
-        for event in events.poll_iter() {
+        for event in pending_events.drain(..).chain(events.poll_iter()) {
             if let Some(pads) = pads.as_mut() {
                 pads.event(&event);
             }
@@ -2256,8 +2384,8 @@ fn show(
             }
         }
         // Artwork fetched in the background: drop the game's old cached textures so the new
-        // cover / cart appears immediately on the shelf.
-        let artwork_running = {
+        // cover / cart appears immediately on the shelf, and track progress for the corner pill.
+        let artwork_snap = {
             let mut runner = opts.artwork.lock().unwrap_or_else(|e| e.into_inner());
             let updated = runner.drain_updated();
             for path in &updated {
@@ -2269,10 +2397,34 @@ fn show(
             }
             if !updated.is_empty() {
                 artwork_gen += 1;
-                idle = Instant::now();
+                was_settled = false;
             }
-            runner.running()
+            runner.snapshot()
         };
+        if artwork_snap.running {
+            was_artwork_running = true;
+            artwork_done_at = None;
+        } else if was_artwork_running {
+            was_artwork_running = false;
+            artwork_done_at = Some(Instant::now());
+        }
+        if artwork_done_at.is_some_and(|t| t.elapsed() >= ARTWORK_PILL_LINGER) {
+            artwork_done_at = None;
+        }
+        let artwork_key = artwork_snap.progress_key();
+        let show_artwork_pill = state.menu.is_none()
+            && state.power.is_none()
+            && state.picker.is_none()
+            && state.game_page.is_none()
+            && state.notice.is_none()
+            && leaving.is_none()
+            && (artwork_snap.running || artwork_done_at.is_some());
+        let artwork_pill = show_artwork_pill.then(|| artwork_snap.pill()).flatten();
+        let artwork_changed = drawn_artwork_key != Some(artwork_key)
+            || artwork_pill.is_some() != artwork_pill_drawn
+            || (state.menu.is_some()
+                && artwork_snap.running
+                && drawn_artwork_current != artwork_snap.current);
 
         // A level the keys just set: shown from now, then faded.
         if let Some(level) = levels.as_mut().and_then(|w| w.changed()) {
@@ -2281,9 +2433,9 @@ fn show(
         let level_opacity = indicator.tick(Instant::now());
         // Resting: the screens stay as they are, and the loop only looks for input, a few
         // times a second, until something changes. A held direction, a finger down, a cart
-        // moving, games found, artwork coming in or a report on its way keep it drawing.
+        // moving, games found, artwork progress changing or a report on its way keep it drawing.
         let resting = !headless
-            && !artwork_running
+            && !artwork_changed
             && !state.notice.as_ref().is_some_and(Notice::sending)
             && opts.shot.is_none()
             && idle.elapsed() >= REST_AFTER
@@ -2299,10 +2451,24 @@ fn show(
             && !ui.waiting();
         let status = ui.status();
         if resting && status.is_some() && status == drawn_status {
+            if state.menu.is_none()
+                && state.power.is_none()
+                && state.picker.is_none()
+                && state.game_page.is_none()
+                && state.notice.is_none()
+                && !check_update
+                && opts.press.is_empty()
+            {
+                resting_now = true;
+                rest_check_at = Instant::now();
+            }
             std::thread::sleep(REST_POLL);
             continue;
         }
         drawn_status = status;
+        drawn_artwork_key = Some(artwork_key);
+        drawn_artwork_current = artwork_snap.current.clone();
+        artwork_pill_drawn = artwork_pill.is_some();
 
         ui.clear();
         let settled;
@@ -2482,6 +2648,9 @@ fn show(
         if let Some(open) = &state.power {
             let labels: Vec<&str> = open.choices.iter().map(|c| c.label()).collect();
             ui.draw_power(&labels, open.row)?;
+        }
+        if let Some((text, progress)) = &artwork_pill {
+            soft("the artwork pill", ui.draw_artwork_pill(text, *progress));
         }
         // The indicator over everything, but not on the frame kept while a game starts.
         level_drawn = level_opacity > 0.0 && leaving.is_none();

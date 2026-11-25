@@ -170,6 +170,12 @@ impl Service {
         }
     }
 
+    /// Drops cached LaunchBox, Libretro, No-Intro, FBNeo, and slot-cfw index maps from RAM once
+    /// a batch completes; on-disk caches stay intact for future runs.
+    pub fn clear_caches(&self) {
+        *self.state.lock().unwrap_or_else(|e| e.into_inner()) = CacheState::default();
+    }
+
     /// Fetches and saves requested artwork for `game` into `Imgs/`, `Labels/`, and/or `Carts/`
     /// beside the ROM. Never overwrites existing files unless `replace` is true.
     pub fn process_game(
@@ -1060,5 +1066,26 @@ mod tests {
         let o = svc.process_game(&gw, ArtKind::BoxOnly, false, &cancel);
         assert!(o.box_saved, "G&W: {o:?}");
         assert!(gw.art("Imgs").is_file());
+    }
+
+    #[test]
+    fn clear_caches_drops_in_memory_index_maps() {
+        let svc = Service::new(Path::new("/tmp/dslot-test-art"), Vec::new());
+        {
+            let mut st = svc.state.lock().unwrap();
+            st.libretro_indexes.insert("Nintendo_Game_Boy".into(), None);
+            st.nointro
+                .insert("Game Boy".into(), Arc::new(HashMap::new()));
+            st.arcade = Some(Arc::new(HashMap::new()));
+            st.slot_labels = Some(Arc::new(HashMap::new()));
+            st.launchbox.insert("SNES".into(), None);
+        }
+        svc.clear_caches();
+        let st = svc.state.lock().unwrap();
+        assert!(st.libretro_indexes.is_empty());
+        assert!(st.nointro.is_empty());
+        assert!(st.arcade.is_none());
+        assert!(st.slot_labels.is_none());
+        assert!(st.launchbox.is_empty());
     }
 }

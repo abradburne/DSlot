@@ -2,12 +2,40 @@
 //! module reads them (docs/emulators.md); DSlot names a description's systems by its consoles'
 //! folder names (`Console::folder`).
 
+use std::path::PathBuf;
+use std::time::SystemTime;
+
 pub use nibkit::dslot::{Action, Emulator, Emulators, Seed};
 
 /// The parsed, available registry is deterministic (file order, then stable priority order).
 /// Comparing it also notices required cores/programs appearing without a descriptor edit.
 pub fn signature(emulators: &Emulators) -> String {
     format!("{emulators:?}")
+}
+
+/// Fast mtime fingerprint of the emulator descriptor directories (and standard package/core
+/// directories when present) so the shelf does not re-read and re-parse every `.toml` file
+/// every few seconds while idle.
+pub fn dirs_stamp(dirs: &[PathBuf]) -> Vec<(PathBuf, Option<SystemTime>)> {
+    let mut out = Vec::new();
+    let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    for dir in dirs {
+        out.push((dir.clone(), mtime(dir)));
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                out.push((p.clone(), mtime(&p)));
+            }
+        }
+    }
+    for sys in ["/usr/bin", "/usr/lib/libretro", "/var/lib/pacman/local"] {
+        let p = PathBuf::from(sys);
+        if let Some(t) = mtime(&p) {
+            out.push((p, Some(t)));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
 }
 
 #[cfg(test)]
