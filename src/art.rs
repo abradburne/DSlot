@@ -1378,6 +1378,40 @@ fn boxart(game: &Game, fonts: &Fonts, black: bool, src: Option<&Img>) -> Img {
     }
     if game.console != Console::Ds {
         let (w, h) = box_size(game.console);
+        // When a real box scan has a different physical shape from the default console box
+        // (e.g. tall Japanese Game Boy / Super Famicom boxes or wide Japanese GBA boxes),
+        // size the cardboard box to match the cover's true aspect ratio inside (w, h) so the
+        // cover is never cropped and the drop shadow hugs its real silhouette.
+        if let Some(src) = src.filter(|s| game.console != Console::GameWatch && s.w > 0 && s.h > 0)
+        {
+            let (max_w, max_h) = ((w - 4) as f32, (h - 4) as f32);
+            let src_ar = src.w as f32 / src.h as f32;
+            let dst_ar = max_w / max_h;
+            let mismatch = (src_ar / dst_ar).max(dst_ar / src_ar);
+            if mismatch > 1.08 {
+                let scale = (max_w / src.w as f32).min(max_h / src.h as f32);
+                let cw = ((src.w as f32 * scale).round() as usize).clamp(1, w - 4);
+                let ch = ((src.h as f32 * scale).round() as usize).clamp(1, h - 4);
+                let (bw, bh) = (cw + 4, ch + 4);
+                let (bx, by) = ((w - bw) / 2, (h - bh) / 2);
+                let mut img = Img::new(w, h);
+                img.rrect(
+                    bx as f32,
+                    by as f32,
+                    bw as f32,
+                    bh as f32,
+                    [4.0; 4],
+                    [226, 226, 222, 255],
+                );
+                img.blit(
+                    src,
+                    (0.0, 0.0, src.w as f32, src.h as f32),
+                    (bx as i32 + 2, by as i32 + 2, cw as i32, ch as i32),
+                    false,
+                );
+                return img;
+            }
+        }
         let cover = cover(game, fonts, src, w - 4, h - 4);
         let mut img = Img::new(w, h);
         img.rrect(0.0, 0.0, w as f32, h as f32, [4.0; 4], [226, 226, 222, 255]);
@@ -1474,7 +1508,12 @@ pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cach
         true => format!("|folder|{}", game.name()),
         false => String::new(),
     };
-    let key = format!("{}|{black}|{w}x{h}{folder}", game.path.display());
+    let ver = if game.console == Console::Ds {
+        ""
+    } else {
+        "|boxfit2"
+    };
+    let key = format!("{}|{black}|{w}x{h}{folder}{ver}", game.path.display());
     let hash = key.bytes().fold(0xcbf29ce484222325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x100000001b3)
     });
@@ -1862,6 +1901,36 @@ mod tests {
         let img = cart(&shell, &game, &fonts, None, looks());
         let i = ((sy + sh / 2) as usize * img.w + (sx + 8) as usize) * 4;
         assert_eq!(&img.px[i..i + 3], [0, 255, 0]);
+    }
+
+    /// A tall Japanese Game Boy box (e.g. Astro Rabby, 406x512) keeps its true portrait cardboard
+    /// shape inside the GB box canvas rather than cropping away the top and bottom of the cover.
+    #[test]
+    fn japanese_gb_box_preserves_full_cover_shape() {
+        let dir = TempDir::new("jp-gb-box");
+        let game = studio_game(dir.path(), Console::Gb, "Astro Rabby (Japan)", "gb");
+        let (cw, ch) = (406usize, 512usize);
+        let mut src = Img::new(cw, ch);
+        for y in 0..ch {
+            let colour = if y < 24 {
+                [255, 0, 0, 255]
+            } else if y >= ch - 24 {
+                [0, 0, 255, 255]
+            } else {
+                [0, 220, 0, 255]
+            };
+            for x in 0..cw {
+                src.px[(y * cw + x) * 4..][..4].copy_from_slice(&colour);
+            }
+        }
+        let img = boxart(&game, &Fonts::load(), false, Some(&src));
+        assert_eq!((img.w, img.h), GBA_BOX);
+        // Top and bottom bands are intact (not cropped).
+        assert!(img.get(img.w / 2, 6)[0] > 200);
+        assert!(img.get(img.w / 2, img.h - 7)[2] > 200);
+        // Outside the narrower portrait cardboard box is transparent so the drop shadow hugs it.
+        assert_eq!(img.get(4, img.h / 2)[3], 0);
+        assert_eq!(img.get(img.w - 5, img.h / 2)[3], 0);
     }
 
     /// Portrait box art used as a fallback label on GB, GBC, GG, and Lynx carts is shown whole
