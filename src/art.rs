@@ -272,6 +272,16 @@ pub fn has_shell(console: Console) -> bool {
     shell_of(console).is_some() || disc::is_disc(console)
 }
 
+/// Cards to check for Cart Studio's `Labels/<system>/<stem>.png` beside a game.
+pub fn studio_cards(game: &Game) -> Vec<std::path::PathBuf> {
+    studio::cards(game)
+}
+
+/// Label paths in lookup order (DSlot's own `Labels/` followed by Cart Studio's on each card).
+pub fn studio_labels(game: &Game, cards: &[std::path::PathBuf]) -> Vec<(std::path::PathBuf, bool)> {
+    studio::labels(game, cards)
+}
+
 /// The slot a console's carts go into: the DS's own, at the back of a DS Lite, or slot-2 at the
 /// front, which takes GBA carts (and on a GBA, GB and GBC ones).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1017,18 +1027,44 @@ pub fn art(shell: &Shell, game: &Game, fonts: &Fonts, looks: Looks, cache: &Path
     }
     // An app's page is a grid of boxes alone: no cart to draw.
     let cart = if disc::is_disc(game.console) {
-        disc::disc(
-            game,
-            fonts,
-            load_png(&game.art("Labels")).as_ref(),
-            src.as_ref(),
-        )
+        if let Some(c) = load_png(&game.art("Carts")) {
+            // Finished disc/UMD scan (e.g. a PSP UMD in its shell from LaunchBox), fitted cleanly.
+            fit_contain(&c, disc::SIZE.0, disc::SIZE.1)
+        } else {
+            disc::disc(
+                game,
+                fonts,
+                load_png(&game.art("Labels")).as_ref(),
+                src.as_ref(),
+            )
+        }
     } else if has_shell(game.console) {
         cart(shell, game, fonts, src.as_ref(), looks)
     } else {
         Img::new(1, 1)
     };
     (cart, boxart(game, fonts, looks.black(game), src.as_ref()))
+}
+
+/// Scales `src` to fit inside `w` x `h` while preserving its aspect ratio, centred horizontally
+/// and aligned to the bottom so finished cart/UMD scans sit cleanly over the slot.
+fn fit_contain(src: &Img, w: usize, h: usize) -> Img {
+    let mut img = Img::new(w, h);
+    if src.w == 0 || src.h == 0 || w == 0 || h == 0 {
+        return img;
+    }
+    let scale = (w as f32 / src.w as f32).min(h as f32 / src.h as f32);
+    let dw = ((src.w as f32 * scale).round() as i32).clamp(1, w as i32);
+    let dh = ((src.h as f32 * scale).round() as i32).clamp(1, h as i32);
+    let dx = (w as i32 - dw) / 2;
+    let dy = h as i32 - dh;
+    img.blit(
+        src,
+        (0.0, 0.0, src.w as f32, src.h as f32),
+        (dx, dy, dw, dh),
+        false,
+    );
+    img
 }
 
 /// `Carts/<rom>.png` is a finished cart and is drawn as it is. `Labels/<rom>.png` is the
@@ -1039,8 +1075,7 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
     let mut img = Img::new(w, h);
     let full = |src: &Img| (0.0, 0.0, src.w as f32, src.h as f32);
     if let Some(c) = load_png(&game.art("Carts")) {
-        img.blit(&c, full(&c), (0, 0, w as i32, h as i32), false);
-        return img;
+        return fit_contain(&c, w, h);
     }
     // A SNES cart is one of two shapes, its label laid out to match.
     let us = game.console == Console::Snes && looks.us_snes(game);
@@ -1057,7 +1092,7 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
         .into_iter()
         .find_map(|(path, studio)| Some((load_png(&path)?, studio)));
     let label = label.map(|(img, studio)| match studio {
-        true => cover_label(Some(&img), sw, sh),
+        true => fill_label(Some(&img), sw, sh),
         false => img,
     });
     let sticker = label.unwrap_or_else(|| match game.console {
@@ -1103,9 +1138,15 @@ fn cart(shell: &Shell, game: &Game, fonts: &Fonts, cover: Option<&Img>, looks: L
 }
 
 /// A Lynx label made from the box art (or printed without it): the art inside a black frame,
-/// as on every Lynx cart, a deep band across the top and a strip along the bottom.
+/// as on every Lynx cart. When using box art (typically tall portrait), use most of the label
+/// height inside the black frame so the whole cover fits clearly instead of being squeezed into
+/// a narrow slit.
 fn lynx_label(game: &Game, fonts: &Fonts, w: i32, h: i32, cover: Option<&Img>) -> Img {
-    let (l, t, r, b) = lynx::ART;
+    let (l, t, r, b) = if cover.is_some() {
+        (0.025, 0.06, 0.975, 0.94)
+    } else {
+        lynx::ART
+    };
     let (ax, ay) = ((l * w as f32) as i32, (t * h as f32) as i32);
     let (aw, ah) = (((r - l) * w as f32) as i32, ((b - t) * h as f32) as i32);
     let art = match cover {
@@ -1123,8 +1164,9 @@ fn lynx_label(game: &Game, fonts: &Fonts, w: i32, h: i32, cover: Option<&Img>) -
     img
 }
 
-/// A label that is the box art, filling it and cropped about its centre.
-fn cover_label(cover: Option<&Img>, w: i32, h: i32) -> Img {
+/// A real sticker scan (e.g. Cart Studio's `Labels/<SYS>/`), filled edge-to-edge and cropped
+/// about its centre.
+fn fill_label(cover: Option<&Img>, w: i32, h: i32) -> Img {
     let mut img = Img::new(w as usize, h as usize);
     if let Some(src) = cover {
         let k = (src.w as f32 / w as f32).min(src.h as f32 / h as f32);
@@ -1136,6 +1178,38 @@ fn cover_label(cover: Option<&Img>, w: i32, h: i32) -> Img {
             false,
         );
     }
+    img
+}
+
+/// A fallback cart label made from box art: if the cover's aspect ratio already matches the
+/// sticker window (within 10%), fill edge-to-edge; otherwise show the whole uncropped box art
+/// centred over a soft blurred copy of itself so portrait/square covers on GB, GBC, GG, and
+/// Lynx carts never lose their title or artwork to cropping.
+fn cover_label(cover: Option<&Img>, w: i32, h: i32) -> Img {
+    let Some(src) = cover else {
+        return Img::new(w as usize, h as usize);
+    };
+    if src.w == 0 || src.h == 0 || w <= 0 || h <= 0 {
+        return Img::new(w.max(0) as usize, h.max(0) as usize);
+    }
+    let src_ar = src.w as f32 / src.h as f32;
+    let dst_ar = w as f32 / h as f32;
+    let mismatch = (src_ar / dst_ar).max(dst_ar / src_ar);
+    if mismatch <= 1.10 {
+        return fill_label(Some(src), w, h);
+    }
+    let mut img = backdrop(src, w as usize, h as usize);
+    let scale = (w as f32 / src.w as f32).min(h as f32 / src.h as f32);
+    let dw = ((src.w as f32 * scale).round() as i32).clamp(1, w);
+    let dh = ((src.h as f32 * scale).round() as i32).clamp(1, h);
+    let dx = (w - dw) / 2;
+    let dy = (h - dh) / 2;
+    img.blit(
+        src,
+        (0.0, 0.0, src.w as f32, src.h as f32),
+        (dx, dy, dw, dh),
+        false,
+    );
     img
 }
 
@@ -1788,6 +1862,57 @@ mod tests {
         let img = cart(&shell, &game, &fonts, None, looks());
         let i = ((sy + sh / 2) as usize * img.w + (sx + 8) as usize) * 4;
         assert_eq!(&img.px[i..i + 3], [0, 255, 0]);
+    }
+
+    /// Portrait box art used as a fallback label on GB, GBC, GG, and Lynx carts is shown whole
+    /// over a blurred backdrop rather than cropping away the top title and bottom artwork.
+    #[test]
+    fn fallback_cart_labels_show_whole_box_art() {
+        let dir = TempDir::new("fallback-cart-fit");
+        let card = dir.path();
+        let (shell, fonts) = (Shell::load(), Fonts::load());
+        // Portrait cover: red top band, green middle, blue bottom band.
+        let (cw, ch) = (100usize, 140usize);
+        let mut src = Img::new(cw, ch);
+        for y in 0..ch {
+            let colour = if y < 14 {
+                [255, 0, 0, 255]
+            } else if y >= ch - 14 {
+                [0, 0, 255, 255]
+            } else {
+                [0, 220, 0, 255]
+            };
+            for x in 0..cw {
+                src.px[(y * cw + x) * 4..][..4].copy_from_slice(&colour);
+            }
+        }
+        for (console, ext) in [
+            (Console::Gb, "gb"),
+            (Console::Gbc, "gbc"),
+            (Console::GameGear, "gg"),
+            (Console::Lynx, "lnx"),
+        ] {
+            let game = studio_game(card, console, "Portrait", ext);
+            let img = cart(&shell, &game, &fonts, Some(&src), looks());
+            let (sx, sy, sw, sh) = shell.frame(console).sticker;
+            // Search inside the sticker's middle vertical strip for both the red top and blue bottom.
+            let mid_x = (sx + sw / 2) as usize;
+            let mut has_red = false;
+            let mut has_blue = false;
+            for y in sy.max(0) as usize..(sy + sh).min(img.h as i32) as usize {
+                let px = img.get(mid_x, y);
+                if px[0] > 200 && px[1] < 50 && px[2] < 50 {
+                    has_red = true;
+                }
+                if px[2] > 200 && px[0] < 50 && px[1] < 50 {
+                    has_blue = true;
+                }
+            }
+            assert!(
+                has_red && has_blue,
+                "{console:?} cropped away top or bottom of portrait cover (red={has_red}, blue={has_blue})"
+            );
+        }
     }
 
     /// The Game Boy's notch is cut out of the top right corner; the Color-only cart has none.
