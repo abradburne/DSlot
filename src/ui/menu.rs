@@ -1129,14 +1129,7 @@ impl Menu {
                 }
             }
             (Page::View, _) if cx.settings.page.is_home() => {
-                if cx.settings.home_section() == crate::rom::HomeSection::Favourites {
-                    setting(
-                        &mut items,
-                        &[def::VIEW, def::GRID_SIZE, def::SORT, def::CASE],
-                    );
-                } else {
-                    setting(&mut items, &[def::VIEW, def::GRID_SIZE, def::CASE]);
-                }
+                setting(&mut items, &[def::VIEW, def::GRID_SIZE, def::CASE]);
             }
             (Page::View, _) => shelf(&mut items),
             (Page::System, Part::Shelf) => {

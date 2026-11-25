@@ -1243,7 +1243,8 @@ impl Ui<'_> {
         } = *page;
         let (page_w, page_h, page_pitch) = cart_geometry(console);
         let pitch = if mixed { MIXED_CART_PITCH } else { page_pitch };
-        let base_y = if mixed { CART_Y + 14.0 } else { CART_Y };
+        let base_y = layout::cart_y();
+        let sectioned = layout::shift() > 0.0;
         let v = self.bot;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         self.heading(heading, &strip)?;
@@ -1257,16 +1258,11 @@ impl Ui<'_> {
             let d = i as f32 - p;
             let away = d.abs().min(1.0);
             let scale = if i == sel { launch.scale } else { 1.0 };
-            let (cart_w, cart_h) = if mixed {
+            let (mut cart_w, mut cart_h) = if mixed {
                 let gc = games[list[i]].console;
                 if art::has_shell(gc) {
                     let (cw, ch, _) = cart_geometry(gc);
-                    if ch > 400.0 {
-                        let k = 400.0 / ch;
-                        (cw * k, 400.0)
-                    } else {
-                        (cw, ch)
-                    }
+                    (cw, ch)
                 } else {
                     let (bw, bh) = art::box_size(gc);
                     let k = (370.0 / bw as f32).min(380.0 / bh as f32);
@@ -1275,6 +1271,11 @@ impl Ui<'_> {
             } else {
                 (page_w, page_h)
             };
+            if sectioned && cart_h > 400.0 {
+                let k = 400.0 / cart_h;
+                cart_w *= k;
+                cart_h = 400.0;
+            }
             let w = cart_w * (1.0 - 0.3 * away) * scale;
             let h = w * cart_h / cart_w;
             let y = base_y + if i == sel { launch.pull } else { 0.0 };

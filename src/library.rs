@@ -68,8 +68,9 @@ pub fn order(games: &[Game], stats: &Stats, filter: Filter) -> Vec<usize> {
 ///
 /// - `HomeSection::Recent`: games played at least once across all consoles (excluding Apps and
 ///   folders), newest first, capped at [`HOME_RECENT_MAX`].
-/// - `HomeSection::Favourites`: all favourited games across all consoles (excluding Apps and
-///   folders), sorted by `sort` (name tie-breaker).
+/// - `HomeSection::Favourites`: all favourited games across all consoles, sorted by `sort`.
+/// - `HomeSection::Rating`: all rated games across all consoles, highest rating first.
+/// - `HomeSection::Name`: every game across all consoles (excluding Apps and folders), A–Z.
 pub fn home_order(games: &[Game], stats: &Stats, section: HomeSection, sort: Sort) -> Vec<usize> {
     let mut order: Vec<usize> = (0..games.len())
         .filter(|&i| {
@@ -80,6 +81,8 @@ pub fn home_order(games: &[Game], stats: &Stats, section: HomeSection, sort: Sor
                 && match section {
                     HomeSection::Recent => stats.last(&g.path) > 0,
                     HomeSection::Favourites => stats.fave(&g.path),
+                    HomeSection::Rating => stats.rating(&g.path) > 0,
+                    HomeSection::Name => true,
                 }
         })
         .collect();
@@ -94,6 +97,10 @@ pub fn home_order(games: &[Game], stats: &Stats, section: HomeSection, sort: Sor
             Sort::Recent => order.sort_by_key(|&i| std::cmp::Reverse(stats.last(&games[i].path))),
             Sort::Rating => order.sort_by_key(|&i| std::cmp::Reverse(stats.rating(&games[i].path))),
         },
+        HomeSection::Rating => {
+            order.sort_by_key(|&i| std::cmp::Reverse(stats.rating(&games[i].path)));
+        }
+        HomeSection::Name => {}
     }
     order
 }
@@ -428,6 +435,16 @@ mod tests {
         assert_eq!(
             home_order(&games, &stats, HomeSection::Favourites, Sort::Rating),
             [0, 2]
+        );
+        // Rating: all rated games across consoles, highest first (Crash 5★, Zelda 4★, Metroid 3★).
+        assert_eq!(
+            home_order(&games, &stats, HomeSection::Rating, Sort::Name),
+            [1, 0, 2]
+        );
+        // Name: all games across consoles A–Z (excluding folders and Apps).
+        assert_eq!(
+            home_order(&games, &stats, HomeSection::Name, Sort::Name),
+            [1, 2, 0]
         );
     }
 }

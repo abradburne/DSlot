@@ -130,21 +130,30 @@ impl ShelfPage {
     }
 }
 
-/// The two sub-sections on the cross-console Home shelf (`L2 / R2` or tapped).
+/// The sub-sections on the cross-console Home shelf (`L2 / R2` or tapped).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum HomeSection {
     #[default]
     Recent,
     Favourites,
+    Rating,
+    Name,
 }
 
 impl HomeSection {
-    pub const ALL: [HomeSection; 2] = [HomeSection::Recent, HomeSection::Favourites];
+    pub const ALL: [HomeSection; 4] = [
+        HomeSection::Recent,
+        HomeSection::Favourites,
+        HomeSection::Rating,
+        HomeSection::Name,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             HomeSection::Recent => "Recent",
             HomeSection::Favourites => "Favourites",
+            HomeSection::Rating => "Rating",
+            HomeSection::Name => "Name",
         }
     }
 
@@ -152,6 +161,8 @@ impl HomeSection {
         match self {
             HomeSection::Recent => "recent",
             HomeSection::Favourites => "favourites",
+            HomeSection::Rating => "rating",
+            HomeSection::Name => "name",
         }
     }
 
@@ -159,6 +170,8 @@ impl HomeSection {
         match s {
             "recent" => Some(HomeSection::Recent),
             "favourites" => Some(HomeSection::Favourites),
+            "rating" => Some(HomeSection::Rating),
+            "name" => Some(HomeSection::Name),
             _ => None,
         }
     }

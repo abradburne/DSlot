@@ -237,6 +237,54 @@ impl Settings {
         self.choice(&console_chain(console), def::SHOW, Show::parse)
     }
 
+    /// Active index in a console tab's sort/filter bar (`["Name", "Recent", "Favourites", "Rating"]`).
+    pub fn sort_bar_index(&self, console: Console) -> usize {
+        if self.show(console) == Show::Favourites {
+            2
+        } else {
+            match self.sort(console) {
+                Sort::Name => 0,
+                Sort::Recent => 1,
+                Sort::Rating => 3,
+            }
+        }
+    }
+
+    /// Updates a console's `show` / `sort` setting from its sort/filter bar (`0=Name`,
+    /// `1=Recent`, `2=Favourites`, `3=Rating`), resetting overrides when they match `[system]`.
+    pub fn set_sort_bar_index(&mut self, console: Console, index: usize) {
+        let scope = console_scope(console);
+        let set_or_inherit = |s: &mut Self, key: &str, want: &str| {
+            let sys_default = def::builtin(key)
+                .and_then(|d| s.value(&[Scope::System], &d))
+                .and_then(|v| v.as_str().map(str::to_owned));
+            if sys_default.as_deref() == Some(want) {
+                s.reset(&scope, key);
+            } else {
+                s.set(scope.clone(), key, Value::from(want));
+            }
+        };
+        match index {
+            0 => {
+                set_or_inherit(self, def::SHOW, "all");
+                set_or_inherit(self, def::SORT, "name");
+            }
+            1 => {
+                set_or_inherit(self, def::SHOW, "all");
+                set_or_inherit(self, def::SORT, "recent");
+            }
+            2 => {
+                set_or_inherit(self, def::SHOW, "favourites");
+            }
+            3 => {
+                set_or_inherit(self, def::SHOW, "all");
+                set_or_inherit(self, def::SORT, "rating");
+            }
+            _ => return,
+        }
+        self.save();
+    }
+
     pub fn case_for(&self, page: ShelfPage) -> Case {
         self.choice(&page_chain(page), def::CASE, Case::parse)
     }
@@ -507,5 +555,40 @@ mod tests {
         assert_eq!(s.home_section(), HomeSection::Favourites);
         assert_eq!(s.view_for(ShelfPage::Home), View::Grid);
         assert_eq!(s.view(Console::Ds), View::Shelf);
+
+        let mut s = s;
+        assert_eq!(s.sort_bar_index(Console::Gba), 0);
+        s.set_sort_bar_index(Console::Gba, 1);
+        assert_eq!(
+            (
+                s.show(Console::Gba),
+                s.sort(Console::Gba),
+                s.sort_bar_index(Console::Gba)
+            ),
+            (Show::All, Sort::Recent, 1)
+        );
+        s.set_sort_bar_index(Console::Gba, 2);
+        assert_eq!(
+            (s.show(Console::Gba), s.sort_bar_index(Console::Gba)),
+            (Show::Favourites, 2)
+        );
+        s.set_sort_bar_index(Console::Gba, 3);
+        assert_eq!(
+            (
+                s.show(Console::Gba),
+                s.sort(Console::Gba),
+                s.sort_bar_index(Console::Gba)
+            ),
+            (Show::All, Sort::Rating, 3)
+        );
+        s.set_sort_bar_index(Console::Gba, 0);
+        assert_eq!(
+            (
+                s.show(Console::Gba),
+                s.sort(Console::Gba),
+                s.sort_bar_index(Console::Gba)
+            ),
+            (Show::All, Sort::Name, 0)
+        );
     }
 }

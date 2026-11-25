@@ -560,6 +560,9 @@ fn list_page(games: &[Game], stats: &Stats, settings: &Settings, dirs: &[String]
     }
 }
 
+/// Sort/filter tabs shown in the sub-bar under console pages (when not showing Arcade boards).
+const CONSOLE_SORT_BAR: [&str; 4] = ["Name", "Recent", "Favourites", "Rating"];
+
 /// The section of a page's games that are in no other (`library::OTHER`).
 use crate::library::OTHER;
 
@@ -1231,7 +1234,7 @@ impl State {
                 Pointer::Down(x, y) => {
                     let on_cart = mode == Layout::Shelf
                         && (x - SW / 2.0).abs() < cart_w / 2.0
-                        && (y - CART_Y).abs() < cart_h / 2.0;
+                        && (y - layout::cart_y()).abs() < cart_h / 2.0;
                     let mut drag = Drag {
                         start: (x, y),
                         at: (x, y),
@@ -1565,18 +1568,11 @@ fn parent_dir(dir: &str) -> (&str, &str) {
 
 /// The line at the top of the touch screen: where the selection is, and what is filtering or
 /// sorting the list.
-fn heading(state: &State, settings: &Settings) -> String {
+fn heading(state: &State, settings: &Settings, show_sort_notes: bool) -> String {
     let n = state.order.len();
     let place = (n > 0).then(|| format!("{} / {n}", state.sel + 1));
     let notes: Vec<&str> = match settings.page {
-        ShelfPage::Home => {
-            let sort = settings.sort_for(ShelfPage::Home);
-            if settings.home_section() == HomeSection::Favourites && sort != Sort::Name {
-                vec![sort.label()]
-            } else {
-                Vec::new()
-            }
-        }
+        ShelfPage::Home => Vec::new(),
         ShelfPage::Console(console) => {
             let (show, sort) = (settings.show(console), settings.sort(console));
             let open = &state.dirs[console as usize];
@@ -1584,14 +1580,18 @@ fn heading(state: &State, settings: &Settings) -> String {
                 && show != Show::Favourites
                 && settings.section(console).is_none())
             .then(|| crate::rom::folder_name(parent_dir(open).1, settings.hide_underscore()));
-            [
-                folder,
-                (show == Show::Favourites).then_some("Favourites"),
-                (sort != Sort::Name).then_some(sort.label()),
-            ]
-            .into_iter()
-            .flatten()
-            .collect()
+            if show_sort_notes {
+                [
+                    folder,
+                    (show == Show::Favourites).then_some("Favourites"),
+                    (sort != Sort::Name).then_some(sort.label()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect()
+            } else {
+                folder.into_iter().collect()
+            }
         }
     };
     let parts: Vec<String> = place
@@ -1922,18 +1922,23 @@ fn show(
         };
         let mode = mode(shelf_page, settings);
         let grid = Grid::of(settings.grid_size_for(shelf_page));
-        // A sectioned page's sections: Home has Recent | Favourites; Arcade has All + each board.
+        // Sub-bar under the page tabs:
+        // - Home: Recent | Favourites | Rating | Name
+        // - Arcade with multiple boards: All | <board> ...
+        // - Every other console tab (when it has games): Name | Recent | Favourites | Rating
         let page_sections = shelf_page
             .console()
             .map(|c| sections(games, c))
             .unwrap_or_default();
+        let board_sections = !shelf_page.is_home() && !page_sections.is_empty();
+        let sort_bar = !shelf_page.is_home() && !board_sections && on_page > 0;
         let (section_labels, section_on): (Vec<&str>, usize) = if shelf_page.is_home() {
-            let on = match settings.home_section() {
-                HomeSection::Recent => 0,
-                HomeSection::Favourites => 1,
-            };
+            let on = HomeSection::ALL
+                .iter()
+                .position(|&s| s == settings.home_section())
+                .unwrap_or(0);
             (HomeSection::ALL.iter().map(|s| s.label()).collect(), on)
-        } else {
+        } else if board_sections {
             let labels = std::iter::once("All")
                 .chain(page_sections.iter().map(String::as_str))
                 .collect();
@@ -1942,8 +1947,12 @@ fn show(
                 .and_then(|s| page_sections.iter().position(|x| x == s))
                 .map_or(0, |i| i + 1);
             (labels, on)
+        } else if sort_bar {
+            (CONSOLE_SORT_BAR.to_vec(), settings.sort_bar_index(console))
+        } else {
+            (Vec::new(), 0)
         };
-        let has_sections = shelf_page.is_home() || !page_sections.is_empty();
+        let has_sections = !section_labels.is_empty();
         layout::set_sections_shown(has_sections);
         let (first, next) = repeat_times(settings);
         // Each page may want its boxes in another case, or its carts another shape.
@@ -1958,7 +1967,7 @@ fn show(
         }
         let busy = state.busy();
         // The heading, and the tab strip beside it, scrolled to this page's tab.
-        let title = heading(&state, settings);
+        let title = heading(&state, settings, board_sections);
         let strip = state.strip(ui.heading_width(&title), shelf_page, dt);
         let blades = Blades::DEEP;
 
@@ -2466,8 +2475,10 @@ fn show(
             if let Some(i) = to.filter(|&i| i != section_on) {
                 if shelf_page.is_home() {
                     settings.set_home_section(HomeSection::ALL[i]);
-                } else {
+                } else if board_sections {
                     settings.set_section(console, (i > 0).then(|| page_sections[i - 1].as_str()));
+                } else if sort_bar {
+                    settings.set_sort_bar_index(console, i);
                 }
                 relist = true;
             }
@@ -2749,15 +2760,24 @@ fn show(
                 None => {
                     let top = ui.top;
                     let (empty_title, empty_sub) = match shelf_page {
-                        ShelfPage::Home if settings.home_section() == HomeSection::Recent => (
-                            "No recent games yet",
-                            "Play any game and it will appear here.",
-                        ),
-                        ShelfPage::Home => {
-                            ("No favourites yet", "Press Y on any game to add it here.")
-                        }
+                        ShelfPage::Home => match settings.home_section() {
+                            HomeSection::Recent => (
+                                "No recent games yet",
+                                "Play any game and it will appear here.",
+                            ),
+                            HomeSection::Favourites => {
+                                ("No favourites yet", "Press Y on any game to add it here.")
+                            }
+                            HomeSection::Rating => (
+                                "No rated games yet",
+                                "Rate a game from its menu (Back) to see it here.",
+                            ),
+                            HomeSection::Name => {
+                                ("No games found", "Add ROMs to your card to see them here.")
+                            }
+                        },
                         ShelfPage::Console(_) => {
-                            ("No favourites yet", "Start shows all games again.")
+                            ("No favourites yet", "Press Y on any game to add it here.")
                         }
                     };
                     ui.text(
@@ -2771,7 +2791,7 @@ fn show(
                     ui.text(top, empty_sub, (24.0, false), (SW / 2.0, 392.0), 0.5, DIM)?;
                 }
             }
-            let heading = heading(&state, settings);
+            let heading = heading(&state, settings, board_sections);
             let inside = shelf_page.console().is_some_and(|c| {
                 !state.dirs[c as usize].is_empty()
                     && !filter(c, settings, games, &state.dirs).flat()

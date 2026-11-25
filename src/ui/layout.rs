@@ -161,6 +161,12 @@ pub fn list_top() -> f32 {
     LIST_AT.1 + shift()
 }
 
+/// The vertical centre of the carts on the shelf, nudged down slightly when the section bar is
+/// shown so tall cartridges stay clear of the sub-bar.
+pub fn cart_y() -> f32 {
+    CART_Y + if shift() > 0.0 { 14.0 } else { 0.0 }
+}
+
 /// The sections' labels laid out in their row: each one's left edge and width, `width` giving a
 /// label's width at [`SECTION_TEXT`]. A row wider than the screen is moved left as far as
 /// the one at `on` needs to be seen whole.
