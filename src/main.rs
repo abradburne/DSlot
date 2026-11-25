@@ -465,6 +465,10 @@ fn run() -> Result<(), String> {
                 let began = Instant::now();
                 // The shelf's windows are gone: its last frame stays up until the game's first.
                 hold_last_frame(&opts);
+                // Release cached styled shells and return freed heap arenas to the OS before
+                // spawning an emulator on this 1 GiB handheld.
+                shell.trim();
+                platform::trim_memory();
                 mark("game starting");
                 let played = if game.is_app() {
                     start_app(game, &apps, &power).map(|ended| (ended, None))

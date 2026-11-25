@@ -4,7 +4,7 @@
 //! device is powered off.
 
 use super::bouncer::{self, Bouncer};
-use super::draw::{Beside, Blade, Page, Ui, Yours, DIM, THUMBS, WHITE};
+use super::draw::{Beside, Blade, Launch, Page, Ui, Yours, DIM, WHITE};
 use super::game::{self, GamePage};
 use super::input::{self, Input, Key, Reader};
 use super::layout::{self, *};
@@ -32,6 +32,12 @@ const INSERT_SECS: f32 = 0.42;
 const FADE_SECS: f32 = 0.2;
 /// Coming back from a game: the cart thrown clear of the slot.
 const EJECT_SECS: f32 = 0.28;
+/// Spinning up a bare CD (PlayStation, Mega CD, PC Engine CD) before fading to black, and
+/// spinning back down to rest when returning from a game.
+const SPIN_UP_SECS: f32 = 0.72;
+const SPIN_DOWN_SECS: f32 = 0.55;
+/// Cubic spin-up coefficient (deg/s³): smooth motor ramp from 0 up to ~30 deg/frame at 60 fps.
+const SPIN_ACCEL: f32 = 700.0;
 /// How deep the cart sits in the slot, and how much further a push takes it before it latches.
 const SEAT: f32 = 560.0;
 const PRESS: f32 = 16.0;
@@ -573,10 +579,10 @@ fn mode(console: Console, settings: &Settings) -> Layout {
 
 /// A view that scrolls in rows (all but the carts): games to a row, rows on screen, and a
 /// row's height.
-fn rows(mode: Layout) -> Option<(usize, usize, f32)> {
+fn rows(mode: Layout, grid: Grid) -> Option<(usize, usize, f32)> {
     match mode {
         Layout::Shelf => None,
-        Layout::Grid => Some((COLS, GRID_ROWS, GRID_STEP.1)),
+        Layout::Grid => Some((grid.cols, grid.rows, grid.step.1)),
         Layout::List | Layout::ListCovers => {
             let (h, on_screen) = list_rows(mode == Layout::ListCovers);
             Some((1, on_screen, h))
@@ -763,12 +769,19 @@ impl State {
             .position(|&g| back_from == Some(g))
             .unwrap_or(0);
         let game = order.get(sel).is_some();
-        // The cart pops out of the slot; unless the power menu is what the game was put away for.
-        let eject = (back_from.is_some() && put_away.is_none() && !order.is_empty())
-            .then_some(-sound::EJECT_WARMUP);
+        // The cart pops out of the slot (or a CD spins down); unless the power menu is what the
+        // game was put away for.
+        let eject = (back_from.is_some() && put_away.is_none() && !order.is_empty()).then_some(
+            if crate::art::disc::is_cd(settings.page) {
+                0.0
+            } else {
+                -sound::EJECT_WARMUP
+            },
+        );
+        let grid = Grid::of(settings.grid_size(settings.page));
         State {
             pages,
-            scroll: (sel / COLS).saturating_sub(1) as f32,
+            scroll: (sel / grid.cols).saturating_sub(1) as f32,
             fling: None,
             carousel: sel as f32,
             order,
@@ -860,8 +873,8 @@ impl State {
     }
 
     /// Up and down: a row in the grid or the list, a letter of the alphabet on the shelf.
-    fn vertical(&self, games: &[Game], d: i32, mode: Layout) -> usize {
-        match rows(mode) {
+    fn vertical(&self, games: &[Game], d: i32, mode: Layout, grid: Grid) -> usize {
+        match rows(mode, grid) {
             Some((per_row, ..)) => self.step(d * per_row as i32),
             None => self.letter(games, d),
         }
@@ -896,9 +909,10 @@ impl State {
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(0);
         self.carousel = self.sel as f32;
-        self.scroll = rows(mode(to, settings)).map_or(0.0, |(per_row, ..)| {
-            (self.sel / per_row).saturating_sub(1) as f32
-        });
+        self.scroll = rows(mode(to, settings), Grid::of(settings.grid_size(to)))
+            .map_or(0.0, |(per_row, ..)| {
+                (self.sel / per_row).saturating_sub(1) as f32
+            });
         self.repeat.stop();
         self.drag = None;
         self.fling = None;
@@ -954,7 +968,11 @@ impl State {
             .and_then(|g| self.order.iter().position(|&o| o == g))
             .unwrap_or(0);
         self.carousel = self.sel as f32;
-        self.scroll = rows(mode(settings.page, settings)).map_or(0.0, |(per_row, ..)| {
+        self.scroll = rows(
+            mode(settings.page, settings),
+            Grid::of(settings.grid_size(settings.page)),
+        )
+        .map_or(0.0, |(per_row, ..)| {
             (self.sel / per_row).saturating_sub(1) as f32
         });
         self.repeat.stop();
@@ -979,7 +997,10 @@ impl State {
             .unwrap_or(self.sel.min(self.last()));
         // The carts, the grid and the list keep where they are relative to the selection.
         self.carousel += sel as f32 - self.sel as f32;
-        if let Some((per_row, ..)) = rows(mode(settings.page, settings)) {
+        if let Some((per_row, ..)) = rows(
+            mode(settings.page, settings),
+            Grid::of(settings.grid_size(settings.page)),
+        ) {
             self.scroll += (sel / per_row) as f32 - (self.sel / per_row) as f32;
         }
         self.sel = sel;
@@ -997,7 +1018,7 @@ impl State {
     }
 
     /// A button on the shelf (not in the menu). Returns whether it asks for a favourite.
-    fn press(&mut self, games: &[Game], key: Key, mode: Layout) -> bool {
+    fn press(&mut self, games: &[Game], key: Key, mode: Layout, grid: Grid) -> bool {
         match key {
             Key::Left | Key::Right => {
                 let dir = self.hold(key);
@@ -1005,7 +1026,7 @@ impl State {
             }
             Key::Up | Key::Down => {
                 let dir = self.hold(key);
-                self.sel = self.vertical(games, dir, mode);
+                self.sel = self.vertical(games, dir, mode, grid);
             }
             Key::A => (self.insert, self.fling) = (Some(0.0), None),
             // B never plays a game: it comes out of a folder of games.
@@ -1035,11 +1056,13 @@ impl State {
     }
 
     /// Touches on the carts, the grid or the list: drag to browse or scroll, tap to pick, pull
-    /// the centre cart down (or tap the picked cover or name) to play.
+    /// the centre cart down (or tap a centre CD, or tap the picked cover or name) to play.
     fn touch(
         &mut self,
         pointers: &[Pointer],
         mode: Layout,
+        grid: Grid,
+        console: Console,
         (cart_w, cart_h, pitch): (f32, f32, f32),
     ) {
         for ptr in pointers {
@@ -1069,7 +1092,7 @@ impl State {
                 Pointer::Up => {
                     if let Some(mut d) = self.drag.take() {
                         d.note(Instant::now());
-                        self.lift(&d, mode, pitch);
+                        self.lift(&d, mode, grid, console, pitch);
                     }
                 }
             }
@@ -1077,16 +1100,17 @@ impl State {
     }
 
     /// A touch lifted.
-    fn lift(&mut self, d: &Drag, mode: Layout, pitch: f32) {
+    fn lift(&mut self, d: &Drag, mode: Layout, grid: Grid, console: Console, pitch: f32) {
         let (dx, dy) = d.moved();
         let (n, last) = (self.order.len(), self.last());
-        if let Some((_, _, row_h)) = rows(mode) {
+        let cd = crate::art::disc::is_cd(console);
+        if let Some((_, _, row_h)) = rows(mode, grid) {
             if d.is_tap() && d.caught {
                 // A tap on a list still moving only stops it.
             } else if d.is_tap() {
                 // A tap picks a cover or a name; a tap on the one already picked plays it.
                 let hit = match mode {
-                    Layout::Grid => grid_hit(d.start, self.scroll),
+                    Layout::Grid => grid.hit(d.start, self.scroll),
                     _ => list_hit(d.start, self.scroll, mode == Layout::ListCovers),
                 };
                 match hit.filter(|&i| i < n) {
@@ -1101,17 +1125,21 @@ impl State {
                     let rows = -speed.clamp(-FLING_MAX, FLING_MAX) / row_h;
                     self.fling = Some(Fling::Rows(rows));
                 }
-                self.keep_in_view(mode);
+                self.keep_in_view(mode, grid);
             }
-        } else if d.on_cart && dy > PULL_TO_INSERT && dy > dx.abs() {
+        } else if !cd && d.on_cart && dy > PULL_TO_INSERT && dy > dx.abs() {
             self.insert = Some(0.0);
         } else if d.is_tap() && d.caught {
             // A tap on carts still moving stops them, on the nearest.
             self.sel = self.carousel.round().clamp(0.0, last as f32) as usize;
         } else if d.is_tap() {
-            // A tap on a neighbouring cart brings it to the centre.
+            // A tap on a neighbouring cart brings it to the centre; tapping the centre CD spins it.
             let side = ((d.start.0 - SW / 2.0) / pitch).round() as i32;
-            self.sel = self.step(side);
+            if cd && d.on_cart && side == 0 {
+                self.insert = Some(0.0);
+            } else {
+                self.sel = self.step(side);
+            }
         } else {
             // Flicked: they carry on, slowing, to rest on a cart. Dragged and let go: the nearest.
             self.sel = self.carousel.round().clamp(0.0, last as f32) as usize;
@@ -1126,8 +1154,8 @@ impl State {
     /// Keeps the selection on the rows of the grid or list in view (in the list, a row in
     /// from either edge where it can be), in its column: as a finger or a flick scrolls them,
     /// the top screen shows a game that is on screen.
-    fn keep_in_view(&mut self, mode: Layout) {
-        let Some((per_row, on_screen, _)) = rows(mode) else {
+    fn keep_in_view(&mut self, mode: Layout, grid: Grid) {
+        let Some((per_row, on_screen, _)) = rows(mode, grid) else {
             return;
         };
         let rows_in = self.order.len().div_ceil(per_row).max(1) as f32;
@@ -1147,17 +1175,18 @@ impl State {
 
     /// Moves the carts, the grid or the list toward the selection, or with a finger. Returns
     /// how far the centre cart is pulled toward the slot.
-    fn follow(&mut self, dt: f32, mode: Layout, pitch: f32) -> f32 {
+    fn follow(&mut self, dt: f32, mode: Layout, grid: Grid, console: Console, pitch: f32) -> f32 {
         let (n, last) = (self.order.len(), self.last() as f32);
         let ease = 1.0 - (-dt * FOLLOW).exp();
         let mut pull = 0.0;
+        let cd = crate::art::disc::is_cd(console);
         // A flick left over from another layout (the view changed under it) has nothing to move.
         let carts = matches!(self.fling, Some(Fling::Carts { .. }));
         if carts != (mode == Layout::Shelf) {
             self.fling = None;
         }
         match self.drag.as_ref().filter(|_| mode == Layout::Shelf) {
-            Some(d) if d.on_cart && d.moved().1 > d.moved().0.abs() => pull = d.moved().1,
+            Some(d) if !cd && d.on_cart && d.moved().1 > d.moved().0.abs() => pull = d.moved().1,
             Some(d) if d.moved().0.abs() > TAP_SLOP => {
                 self.carousel = (d.carousel - d.moved().0 / pitch).clamp(-0.3, last + 0.3);
                 self.sel = self.carousel.round().clamp(0.0, last) as usize;
@@ -1176,7 +1205,7 @@ impl State {
                 _ => self.carousel += (self.sel as f32 - self.carousel) * ease,
             },
         }
-        if let Some((per_row, on_screen, row_h)) = rows(mode) {
+        if let Some((per_row, on_screen, row_h)) = rows(mode, grid) {
             let most = n.div_ceil(per_row).saturating_sub(on_screen) as f32;
             match (&self.drag, self.fling) {
                 (Some(d), _) if d.moved().1.abs() > TAP_SLOP => {
@@ -1190,14 +1219,14 @@ impl State {
                     } else {
                         to
                     };
-                    self.keep_in_view(mode);
+                    self.keep_in_view(mode, grid);
                 }
                 (Some(_), _) => {}
                 // Flicked: coasting, slowing, the selection kept on screen as it goes.
                 (None, Some(Fling::Rows(speed))) => {
                     let (scroll, speed) = coast(self.scroll, speed, dt, most, row_h);
                     (self.scroll, self.fling) = (scroll, speed.map(Fling::Rows));
-                    self.keep_in_view(mode);
+                    self.keep_in_view(mode, grid);
                 }
                 // Scroll just far enough to keep the selected row in view; in the list, with
                 // a row either side of it, so that what is next shows before it is reached.
@@ -1216,64 +1245,97 @@ impl State {
         pull
     }
 
-    /// The cart going into the slot, or coming out: its pull, and whether the insert is done
-    /// (its click played out, the screens faded).
-    fn slot(&mut self, dt: f32, sound: &mut Sound, pull: f32) -> (f32, bool) {
-        let mut pull = pull;
+    /// The cart going into the slot (or a bare CD spinning up in place), or coming out (or
+    /// spinning down): its launch motion, and whether the launch animation is done.
+    fn slot(&mut self, dt: f32, sound: &mut Sound, pull: f32, console: Console) -> (Launch, bool) {
+        let cd = crate::art::disc::is_cd(console);
+        let mut launch = Launch {
+            pull: if cd { 0.0 } else { pull },
+            ..Launch::default()
+        };
         let mut done = false;
         if let Some(t) = self.insert.as_mut() {
             *t += dt;
-            // Slide in and push past the seat; the cart springs back as the latch clicks.
-            let latch = ((*t - INSERT_SECS - sound::LATCH_GAP) / SPRING_SECS).clamp(0.0, 1.0);
-            pull = (*t / INSERT_SECS).min(1.0).powi(2) * (SEAT + PRESS) - PRESS * latch;
-            // Queue the clip as the cart starts to move, behind enough silence that its first
-            // click lands as the cart bottoms out. The silence gives the sound card time to wake.
-            if !self.clicked {
-                crate::mark("insert started");
-                sound.play_after(INSERT_SECS - sound::CLICK_LEAD, sound::INSERT);
-                self.clicked = true;
+            if cd {
+                launch = cd_spin_up(*t);
+                if !self.clicked {
+                    crate::mark("disc spin started");
+                    sound.play_after(0.0, sound::spin_up());
+                    self.clicked = true;
+                }
+                done = *t > SPIN_UP_SECS + FADE_SECS && sound.drained();
+            } else {
+                // Slide in and push past the seat; the cart springs back as the latch clicks.
+                let latch = ((*t - INSERT_SECS - sound::LATCH_GAP) / SPRING_SECS).clamp(0.0, 1.0);
+                launch.pull = (*t / INSERT_SECS).min(1.0).powi(2) * (SEAT + PRESS) - PRESS * latch;
+                // Queue the clip as the cart starts to move, behind enough silence that its first
+                // click lands as the cart bottoms out. The silence gives the sound card time to wake.
+                if !self.clicked {
+                    crate::mark("insert started");
+                    sound.play_after(INSERT_SECS - sound::CLICK_LEAD, sound::INSERT);
+                    self.clicked = true;
+                }
+                // Leaving closes the audio device, so let the latch click finish first.
+                done = *t > INSERT_SECS + sound::LATCH_GAP + FADE_SECS && sound.drained();
             }
-            // Leaving closes the audio device, so let the latch click finish first.
-            done = *t > INSERT_SECS + sound::LATCH_GAP + FADE_SECS && sound.drained();
         }
         if let Some(t) = self.eject {
-            if !self.popped {
-                sound.play_after(sound::EJECT_WARMUP, sound::EJECT);
-                self.popped = true;
+            if cd {
+                if !self.popped {
+                    sound.play_after(0.05, sound::spin_down());
+                    self.popped = true;
+                }
+                launch = cd_spin_down(t);
+                self.eject = (t < SPIN_DOWN_SECS).then_some(t + dt.max(0.001));
+            } else {
+                if !self.popped {
+                    sound.play_after(sound::EJECT_WARMUP, sound::EJECT);
+                    self.popped = true;
+                }
+                // Pushed in on the first click, then thrown clear on the second.
+                let pop = sound::CLICK_LEAD + sound::POP_GAP;
+                let push = ((t - sound::CLICK_LEAD) / SPRING_SECS).clamp(0.0, 1.0);
+                let out = ((t - pop) / EJECT_SECS).clamp(0.0, 1.0);
+                launch.pull = (SEAT + PRESS * push) * (1.0 - out).powi(2);
+                self.eject = (t < pop + EJECT_SECS).then_some(t + dt.max(0.001));
             }
-            // Pushed in on the first click, then thrown clear on the second.
-            let pop = sound::CLICK_LEAD + sound::POP_GAP;
-            let push = ((t - sound::CLICK_LEAD) / SPRING_SECS).clamp(0.0, 1.0);
-            let out = ((t - pop) / EJECT_SECS).clamp(0.0, 1.0);
-            pull = (SEAT + PRESS * push) * (1.0 - out).powi(2);
-            self.eject = (t < pop + EJECT_SECS).then_some(t + dt.max(0.001));
         }
-        (pull, done)
+        (launch, done)
     }
 
     /// How far the screens have faded to black as the game starts.
-    fn fade(&self) -> f32 {
-        self.insert.map_or(0.0, |t| {
-            ((t - INSERT_SECS - sound::LATCH_GAP) / FADE_SECS).clamp(0.0, 1.0)
-        })
+    fn fade(&self, console: Console) -> f32 {
+        let start = if crate::art::disc::is_cd(console) {
+            SPIN_UP_SECS
+        } else {
+            INSERT_SECS + sound::LATCH_GAP
+        };
+        self.insert
+            .map_or(0.0, |t| ((t - start) / FADE_SECS).clamp(0.0, 1.0))
     }
 
     /// The artwork to ask for, most wanted first, and whose full-size artwork to keep: the
-    /// selection, what else is on screen, then what is next to it. Every small cover follows,
-    /// nearest first, so that scrolling finds them already made. Places in `order`; those past
-    /// either end come to nothing.
-    fn wanted(&self, mode: Layout) -> (Vec<Job>, HashSet<usize>) {
+    /// selection, what else is on screen, then what is next to it. Small covers are only asked
+    /// for in views that draw them (Grid and List with covers), nearest first. Places in `order`;
+    /// those past either end come to nothing.
+    fn wanted(&self, mode: Layout, grid: Grid, thumb_limit: usize) -> (Vec<Job>, HashSet<usize>) {
         let sel = self.sel;
-        let near: Vec<usize> = match rows(mode) {
+        let uses_thumbs = matches!(mode, Layout::Grid | Layout::ListCovers);
+        let near: Vec<usize> = match rows(mode, grid) {
             Some((per_row, on_screen, _)) => {
                 let top = self.scroll.max(0.0) as usize * per_row;
-                (top..top + per_row * (on_screen + 1)).collect()
+                let span = if mode == Layout::Grid {
+                    grid.visible_rows()
+                } else {
+                    on_screen + 1
+                };
+                (top..top + per_row * span).collect()
             }
             None => (1..=3)
                 .flat_map(|d| [sel.wrapping_sub(d), sel + d])
                 .collect(),
         };
-        let next: Vec<usize> = match rows(mode) {
+        let next: Vec<usize> = match rows(mode, grid) {
             // The games the top screen shows next: either side and a row up or down in the
             // grid, the next two either way in the list.
             Some((per_row, ..)) => vec![
@@ -1282,27 +1344,55 @@ impl State {
                 sel.wrapping_sub(per_row.max(2)),
                 sel + per_row.max(2),
             ],
-            None => (4..=8)
+            None => (4..=6)
                 .flat_map(|d| [sel.wrapping_sub(d), sel + d])
                 .collect(),
         };
-        let grid = rows(mode).is_some();
-        let kind = |i: &usize| if grid { Job::Thumb(*i) } else { Job::Art(*i) };
-        let wants = [Job::Art(sel), Job::Thumb(sel)]
-            .into_iter()
-            .chain(near.iter().map(kind))
-            .chain(next.iter().map(|&i| Job::Art(i)))
-            .chain(
-                (1..=THUMBS / 2)
+        let is_rows = rows(mode, grid).is_some();
+        let mut wants = vec![Job::Art(sel)];
+        if uses_thumbs {
+            wants.push(Job::Thumb(sel));
+            wants.extend(near.iter().map(|&i| Job::Thumb(i)));
+        } else if !is_rows {
+            wants.extend(near.iter().map(|&i| Job::Art(i)));
+        }
+        wants.extend(next.iter().map(|&i| Job::Art(i)));
+        if uses_thumbs {
+            wants.extend(
+                (1..=thumb_limit / 2)
                     .flat_map(|d| [Job::Thumb(sel.wrapping_sub(d)), Job::Thumb(sel + d)]),
-            )
-            .collect();
-        let hold = if grid {
+            );
+        }
+        let hold = if is_rows {
             next.into_iter().chain([sel]).collect()
         } else {
             near.into_iter().chain(next).chain([sel]).collect()
         };
         (wants, hold)
+    }
+}
+
+/// A CD spinning up on the spindle: brief subtle clamp pulse, smooth cubic angular acceleration
+/// (angular speed ramps quadratically from 0 up to ~30 deg/frame at 60 fps), and neighbour dim.
+fn cd_spin_up(t: f32) -> Launch {
+    let t = t.max(0.0);
+    let clamp = (t / 0.14).clamp(0.0, 1.0);
+    Launch {
+        pull: 0.0,
+        angle: SPIN_ACCEL * t.powi(3),
+        scale: 1.0 - 0.028 * (clamp * std::f32::consts::PI).sin(),
+        spin: (t / SPIN_UP_SECS).clamp(0.0, 1.0),
+    }
+}
+
+/// A CD spinning back down clockwise to rest upright at 0 degrees when returning from a game.
+fn cd_spin_down(t: f32) -> Launch {
+    let out = (t / SPIN_DOWN_SECS).clamp(0.0, 1.0);
+    Launch {
+        pull: 0.0,
+        angle: -360.0 * (1.0 - out).powi(3),
+        scale: 1.0,
+        spin: 0.0,
     }
 }
 
@@ -1523,6 +1613,7 @@ fn show(
             .filter(|g| g.console == console && !g.gone && !g.folder)
             .count();
         let mode = mode(console, settings);
+        let grid = Grid::of(settings.grid_size(console));
         // A sectioned page's sections (All first, then each board), the one on show; the grid
         // and the list move down under them.
         let page_sections = sections(games, console);
@@ -1539,6 +1630,11 @@ fn show(
         if ui.looks != settings.look(console) {
             ui.looks = settings.look(console);
             ui.forget_art();
+        }
+        if matches!(mode, Layout::Grid | Layout::ListCovers) {
+            ui.set_thumb(grid.cover);
+        } else {
+            ui.clear_thumbs();
         }
         let busy = state.busy();
         // The heading, and the tab strip beside it, scrolled to this page's tab.
@@ -1703,7 +1799,7 @@ fn show(
                 Some(Input::Press(Key::L2)) if !page_sections.is_empty() => section_step -= 1,
                 Some(Input::Press(Key::R2)) if !page_sections.is_empty() => section_step += 1,
                 Some(Input::Press(_)) if n == 0 => {}
-                Some(Input::Press(key)) => fave |= state.press(games, key, mode),
+                Some(Input::Press(key)) => fave |= state.press(games, key, mode, grid),
             }
         }
         // A direction held: once more, to whatever is showing.
@@ -1721,7 +1817,7 @@ fn show(
             } else if let Some(p) = state.picker.as_mut() {
                 p.step(d, state.pages.len());
             } else if vertical {
-                state.sel = state.vertical(games, d, mode);
+                state.sel = state.vertical(games, d, mode, grid);
             } else {
                 state.sel = state.horizontal(games, d, mode);
             }
@@ -2073,7 +2169,7 @@ fn show(
             }
         }
         if !busy && n > 0 {
-            state.touch(&pointers, mode, geometry);
+            state.touch(&pointers, mode, grid, console, geometry);
         }
 
         // Left alone long enough, on the shelf or its menu: the screensaver. Not over the power
@@ -2108,8 +2204,8 @@ fn show(
 
         // Select held as A is pressed, or at any time while the cart goes in: started fresh.
         state.fresh = state.insert.is_some() && (state.fresh || reader.select_held());
-        let pull = state.follow(dt, mode, geometry.2);
-        let (pull, inserted) = state.slot(dt, &mut sound, pull);
+        let pull = state.follow(dt, mode, grid, console, geometry.2);
+        let (launch, inserted) = state.slot(dt, &mut sound, pull, console);
         if inserted {
             opts.artwork
                 .lock()
@@ -2229,6 +2325,7 @@ fn show(
             places.sort_by_key(|&k| (k as i32 - at as i32).abs());
             places.into_iter().map(move |k| Job::Art(first + k))
         };
+        let picker_open = state.picker.is_some();
         if on_page == 0 {
             ui.empty(&opts.searched[console as usize], console)?;
             ui.tab(console, &state.pages, &strip)?;
@@ -2236,18 +2333,18 @@ fn show(
                 ui.sections(&section_labels, section_on)?;
             }
             let hold = (first..list.len()).collect();
-            settled = ui.load(games, &list, blade_wants(), &hold, 0)?;
+            settled = ui.load(games, &list, blade_wants(), &hold, 0, picker_open)?;
             was_settled = settled;
         } else {
-            let (wants, mut hold) = state.wanted(mode);
+            let (wants, mut hold) = state.wanted(mode, grid, ui.thumb_limit());
             hold.extend(first..list.len());
             let wants = blade_wants().chain(wants);
-            settled = ui.load(games, &list, wants, &hold, state.sel)?;
+            settled = ui.load(games, &list, wants, &hold, state.sel, picker_open)?;
             was_settled = settled;
             if frame == 0 {
                 crate::mark("artwork asked for");
             }
-            let fade = state.fade();
+            let fade = state.fade(console);
             let current = state.order.get(state.sel).copied();
             let viewing = state
                 .menu
@@ -2325,8 +2422,8 @@ fn show(
                     ui.draw_menu(&open.shown(&cx), console)?;
                 }
                 _ => match mode {
-                    Layout::Shelf => ui.draw_carts(&page, state.carousel, pull)?,
-                    Layout::Grid => ui.draw_grid(&page, state.scroll, stats)?,
+                    Layout::Shelf => ui.draw_carts(&page, state.carousel, launch)?,
+                    Layout::Grid => ui.draw_grid(&page, grid, state.scroll, stats)?,
                     Layout::List | Layout::ListCovers => {
                         ui.draw_list(&page, state.scroll, stats, mode == Layout::ListCovers)?
                     }
@@ -2476,7 +2573,6 @@ fn show(
             {
                 crate::folders::make_soon(&roots, shelf.emulators);
             }
-            crate::gfx::warm_fallback();
         }
         frame += 1;
         if frame.is_multiple_of(300) && std::env::var_os("DSLOT_FPS").is_some() {
@@ -2608,5 +2704,24 @@ mod tests {
         let (one, two) = (rubber(1.0, 11.0), rubber(2.0, 11.0));
         assert!(one < 1.0 && two - one < one && two < 2.0);
         assert!(rubber(1000.0, 11.0) < 11.0);
+    }
+
+    #[test]
+    fn cd_spin_accelerates_up_and_settles_upright_down() {
+        // Spin-up starts at 0 deg and accelerates strictly clockwise without vertical pull.
+        let a = cd_spin_up(0.0);
+        let b = cd_spin_up(0.25);
+        let c = cd_spin_up(0.50);
+        let d = cd_spin_up(SPIN_UP_SECS);
+        assert_eq!((a.pull, a.angle, a.scale), (0.0, 0.0, 1.0));
+        assert_eq!(d.pull, 0.0);
+        assert!(b.angle > a.angle && (c.angle - b.angle) > (b.angle - a.angle));
+        assert!(d.angle > 200.0 && d.spin == 1.0);
+        // Spin-down rotates clockwise (increasing angle) and lands upright at 0 deg.
+        let s0 = cd_spin_down(0.0);
+        let s1 = cd_spin_down(SPIN_DOWN_SECS * 0.5);
+        let s2 = cd_spin_down(SPIN_DOWN_SECS);
+        assert!(s0.angle < s1.angle && s1.angle < s2.angle);
+        assert_eq!((s2.pull, s2.angle), (0.0, 0.0));
     }
 }

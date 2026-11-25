@@ -574,6 +574,10 @@ pub fn decode_png(source: impl std::io::Read) -> Option<Img> {
     let info = reader.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width as usize, info.height as usize);
     let n = w * h;
+    if info.color_type == png::ColorType::Rgba && info.buffer_size() == n * 4 {
+        buf.truncate(n * 4);
+        return Some(Img { w, h, px: buf });
+    }
     let mut img = Img::new(w, h);
     let src = &buf[..info.buffer_size()];
     for i in 0..n {
@@ -603,10 +607,8 @@ pub struct Fonts {
     bold: fontdue::Font,
 }
 
-/// CJK fallback, loaded from the system when present (platform::FALLBACK_FONTS; the embedded
-/// faces are Latin only).
-/// Reading it takes about a second there and holds up everything else being read from the
-/// card, so it is left until the shelf is on screen; only text that needs it sooner waits.
+/// CJK fallback, loaded lazily from the system only when a title actually contains a character
+/// outside the embedded Latin font (avoiding ~30-40 MiB of fontdue tables when unused).
 fn fallback() -> Option<&'static fontdue::Font> {
     static FALLBACK: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
     FALLBACK
@@ -617,11 +619,6 @@ fn fallback() -> Option<&'static fontdue::Font> {
             })
         })
         .as_ref()
-}
-
-/// Reads the fallback font in the background, ahead of the first title that wants it.
-pub fn warm_fallback() {
-    std::thread::spawn(fallback);
 }
 
 impl Fonts {

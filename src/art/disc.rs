@@ -29,11 +29,20 @@ const STACKING_RING: f32 = 0.2;
 const MIRROR: f32 = 23.0 / 60.0;
 const RIM: f32 = 0.985;
 
-/// Whether `console`'s games are discs.
+/// Whether `console`'s games are discs (CDs or PSP UMDs).
 pub fn is_disc(console: Console) -> bool {
     matches!(
         console,
         Console::PlayStation | Console::Psp | Console::PcEngineCd | Console::MegaCd
+    )
+}
+
+/// Whether `console`'s games are bare round optical CDs (which spin up in place when started,
+/// unlike cartridges and PSP UMDs that slide into a slot).
+pub fn is_cd(console: Console) -> bool {
+    matches!(
+        console,
+        Console::PlayStation | Console::PcEngineCd | Console::MegaCd
     )
 }
 

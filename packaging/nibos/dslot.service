@@ -39,6 +39,9 @@ AmbientCapabilities=CAP_DAC_OVERRIDE
 ExecStart=/usr/bin/dslot $DSLOT_ARGS
 Environment=DSLOT_ARGS=
 Environment=SDL_VIDEODRIVER=kmsdrm
+# Limit glibc per-thread malloc arenas: worker threads otherwise create up to 8-10 separate
+# arenas that each inflate to 2 MiB under transparent huge pages on this 1 GiB handheld.
+Environment=MALLOC_ARENA_MAX=2
 # DSlot starts with the skeleton through KMS, then the shelf on GL. In /etc/default/dslot:
 # DSLOT_KMS=0 for GL only, DSLOT_KMS=1 for KMS only, DSLOT_PRELOAD=0 to leave loading Mesa to
 # SDL, DSLOT_ARGS for other Roms folders (`dslot --help`).

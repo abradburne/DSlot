@@ -11,10 +11,75 @@ use sdl2::audio::{AudioQueue, AudioSpecDesired};
 use sdl2::AudioSubsystem;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 pub const INSERT: &[u8] = include_bytes!("../../assets/insert.pcm");
 pub const EJECT: &[u8] = include_bytes!("../../assets/eject.pcm");
 const CLIP_HZ: usize = 48_000;
+
+/// Synthesized 48 kHz mono 16-bit PCM for a CD drive spinning up (PlayStation, Mega CD,
+/// PC Engine CD): a soft spindle clamp tick followed by a warm rising motor whirr.
+pub fn spin_up() -> &'static [u8] {
+    static PCM: OnceLock<Vec<u8>> = OnceLock::new();
+    PCM.get_or_init(|| synth_spin(0.88, true))
+}
+
+/// Synthesized 48 kHz mono 16-bit PCM for a CD drive spinning down when returning to the shelf.
+pub fn spin_down() -> &'static [u8] {
+    static PCM: OnceLock<Vec<u8>> = OnceLock::new();
+    PCM.get_or_init(|| synth_spin(0.50, false))
+}
+
+fn synth_spin(secs: f32, up: bool) -> Vec<u8> {
+    let n = (secs * CLIP_HZ as f32) as usize;
+    let mut pcm = Vec::with_capacity(n * 2);
+    let mut phase = 0.0f32;
+    let mut noise_lp = 0.0f32;
+    let mut rng: u32 = if up { 0x51a7_c0de } else { 0x51a7_d00d };
+    let tau = std::f32::consts::TAU;
+    for i in 0..n {
+        let t = i as f32 / CLIP_HZ as f32;
+        let p = t / secs;
+        // Spindle motor frequency sweep: rises quadratically on spin-up, drops smoothly on spin-down.
+        let freq = if up {
+            88.0 + 272.0 * p * p
+        } else {
+            320.0 - 245.0 * (1.0 - (1.0 - p).powi(2))
+        };
+        phase += tau * freq / CLIP_HZ as f32;
+        if phase > tau {
+            phase -= tau;
+        }
+        // Soft warm motor tone (fundamental + gentle 2nd & 3rd harmonics).
+        let motor = phase.sin() + 0.32 * (2.0 * phase).sin() + 0.10 * (3.0 * phase).sin();
+        // Faint filtered air-whoosh texture from deterministic LCG noise.
+        rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+        let white = ((rng >> 16) as i16) as f32 / 32768.0;
+        noise_lp += 0.06 * (white - noise_lp);
+        // Smooth envelope: gentle attack and cosine fade-out (zero clicks at boundaries).
+        let env = if up {
+            let attack = (t / 0.08).min(1.0);
+            let release = ((secs - t) / 0.18).clamp(0.0, 1.0);
+            let release = 0.5 - 0.5 * (release * std::f32::consts::PI).cos();
+            attack * release * (0.35 + 0.65 * p)
+        } else {
+            let attack = (t / 0.04).min(1.0);
+            let release = (1.0 - p).powf(1.4);
+            attack * release
+        };
+        // Brief soft spindle-clamp tick right as spin-up begins.
+        let tick = if up && t < 0.032 {
+            let d = (-t * 150.0).exp();
+            d * (0.55 * (tau * 1180.0 * t).sin() + 0.45 * (tau * 410.0 * t).sin()) * 0.28
+        } else {
+            0.0
+        };
+        let gain = if up { 0.14 } else { 0.10 };
+        let sample = ((motor * 0.65 + noise_lp * 0.55) * env * gain + tick).clamp(-0.85, 0.85);
+        pcm.extend_from_slice(&((sample * i16::MAX as f32) as i16).to_le_bytes());
+    }
+    pcm
+}
 /// Seconds into each clip at which the first click lands.
 pub const CLICK_LEAD: f32 = 0.025;
 /// Seconds from the push click to the latch click (insert) and to the pop (eject).
@@ -179,5 +244,19 @@ mod tests {
         assert!(out[..8820].iter().all(|&s| s == 0));
         assert_eq!(out[8820], out[8821]);
         assert_eq!(*out.last().unwrap() / 10, 478);
+    }
+
+    #[test]
+    fn cd_spin_clips_are_bounded_and_non_empty() {
+        for clip in [spin_up(), spin_down()] {
+            assert!(clip.len() > CLIP_HZ / 2);
+            assert_eq!(clip.len() % 2, 0);
+            let peak = clip
+                .chunks_exact(2)
+                .map(|b| i16::from_le_bytes([b[0], b[1]]).unsigned_abs())
+                .max()
+                .unwrap_or(0);
+            assert!(peak > 500 && peak < 20_000, "unexpected peak: {peak}");
+        }
     }
 }

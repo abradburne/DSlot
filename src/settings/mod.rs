@@ -29,7 +29,7 @@
 pub mod def;
 mod migrate;
 
-pub use def::{Case, Repeat, Saver, SaverLook, Show, SnesCart, Sort, View};
+pub use def::{Case, GridSize, Repeat, Saver, SaverLook, Show, SnesCart, Sort, View};
 pub use migrate::Legacy;
 pub use nibkit::settings::Scope;
 
@@ -167,6 +167,10 @@ impl Settings {
     /// How `console`'s page is shown, sorted and filtered.
     pub fn view(&self, console: Console) -> View {
         self.choice(&console_chain(console), def::VIEW, View::parse)
+    }
+
+    pub fn grid_size(&self, console: Console) -> GridSize {
+        self.choice(&console_chain(console), def::GRID_SIZE, GridSize::parse)
     }
 
     /// The section of `console`'s page on show (an arcade board), None for all its games: kept
@@ -315,6 +319,17 @@ mod tests {
         assert_eq!(
             (s.view(Console::Ds), s.view(Console::Gba)),
             (View::Grid, View::Shelf)
+        );
+        assert_eq!(s.grid_size(Console::Ds), GridSize::Medium);
+        s.set(Scope::System, def::GRID_SIZE, Value::from("large"));
+        s.set(
+            console_scope(Console::Snes),
+            def::GRID_SIZE,
+            Value::from("xlarge"),
+        );
+        assert_eq!(
+            (s.grid_size(Console::Ds), s.grid_size(Console::Snes)),
+            (GridSize::Large, GridSize::ExtraLarge)
         );
 
         s.set(

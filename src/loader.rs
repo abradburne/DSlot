@@ -33,14 +33,13 @@ pub enum Made {
 pub struct Source<'a> {
     pub fonts: &'a Fonts,
     pub shell: &'a Shell,
-    /// Size of a grid cover in pixels, and where finished ones are kept between runs.
-    pub thumb: (usize, usize),
+    /// Where finished grid covers are kept between runs.
     pub cache: &'a Path,
 }
 
 /// A job, its game (the list of games may grow while the job is out), how the page's artwork
-/// looks, and the generation it was asked for in.
-type Task = (Job, Game, art::Looks, u32);
+/// looks, the grid cover size in pixels, and the generation it was asked for in.
+type Task = (Job, Game, art::Looks, (usize, usize), u32);
 
 pub struct Loader {
     tasks: Sender<Task>,
@@ -63,7 +62,7 @@ impl Loader {
             let (tasks, done) = (tasks.clone(), done.clone());
             scope.spawn(move || loop {
                 // The lock is held while waiting, which is fine: an idle worker has nothing else to do.
-                let Ok((job, game, looks, generation)) = tasks.lock().unwrap().recv() else {
+                let Ok((job, game, looks, thumb, generation)) = tasks.lock().unwrap().recv() else {
                     return;
                 };
                 let made = match job {
@@ -76,7 +75,7 @@ impl Loader {
                         &game,
                         source.fonts,
                         looks.black(&game),
-                        source.thumb,
+                        thumb,
                         source.cache,
                     )),
                 };
@@ -106,9 +105,11 @@ impl Loader {
         self.out.contains(&job)
     }
 
-    pub fn ask(&mut self, job: Job, game: &Game, looks: art::Looks) {
+    pub fn ask(&mut self, job: Job, game: &Game, looks: art::Looks, thumb: (usize, usize)) {
         if self.out.insert(job) {
-            let _ = self.tasks.send((job, game.clone(), looks, self.generation));
+            let _ = self
+                .tasks
+                .send((job, game.clone(), looks, thumb, self.generation));
         }
     }
 

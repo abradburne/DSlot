@@ -55,6 +55,16 @@ choice! {
 }
 
 choice! {
+    /// How large covers are in the cover grid: from six across down to three across.
+    GridSize {
+        Small = "small", "Small";
+        Medium = "medium", "Medium";
+        Large = "large", "Large";
+        ExtraLarge = "xlarge", "Extra large";
+    }
+}
+
+choice! {
     /// What a SNES cart looks like: the US one, or the Super Famicom's (Japan, Europe and
     /// everywhere else), or whichever the game's region had.
     SnesCart {
@@ -177,6 +187,12 @@ pub fn builtin(key: &str) -> Option<Def> {
             Levels::SYSTEM_AND_CONSOLE,
             View::Shelf.key(),
         ),
+        GRID_SIZE => def(
+            "Grid size",
+            GridSize::choices(),
+            Levels::SYSTEM_AND_CONSOLE,
+            GridSize::Medium.key(),
+        ),
         SORT => def(
             "Sort by",
             Sort::choices(),
@@ -257,6 +273,7 @@ pub fn builtin(key: &str) -> Option<Def> {
 }
 
 pub const VIEW: &str = "view";
+pub const GRID_SIZE: &str = "grid_size";
 pub const SORT: &str = "sort";
 pub const SHOW: &str = "show";
 pub const CASE: &str = "case";
@@ -295,6 +312,18 @@ mod tests {
         assert_eq!(view.show(&Value::from("list-covers")), "List with covers");
         assert_eq!(view.show(&Value::from("grid")), "Cover grid");
         assert!(view.accepts(&Value::from("shelf")) && !view.accepts(&Value::from("wall")));
+
+        let grid = builtin(GRID_SIZE).unwrap();
+        assert_eq!(grid.step(None, 1), Value::from("large"));
+        assert_eq!(
+            grid.step(Some(&Value::from("large")), 1),
+            Value::from("xlarge")
+        );
+        assert_eq!(
+            grid.step(Some(&Value::from("xlarge")), 1),
+            Value::from("small")
+        );
+        assert_eq!(grid.show(&Value::from("xlarge")), "Extra large");
 
         let sounds = builtin(SOUNDS).unwrap();
         assert_eq!(sounds.step(None, 1), Value::Boolean(false));

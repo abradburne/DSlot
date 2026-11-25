@@ -43,6 +43,30 @@ const fn rgb([r, g, b]: colour::Rgb) -> Color {
     Color::RGB(r, g, b)
 }
 
+/// How the selected cart or disc is moving during a launch or exit.
+#[derive(Clone, Copy, Debug)]
+pub struct Launch {
+    /// How far a cart has moved down toward the slot (0 for spinning CDs).
+    pub pull: f32,
+    /// Rotation of a spinning CD, in degrees (0 for carts).
+    pub angle: f32,
+    /// Scale multiplier for the selected cart or disc (1.0 at rest).
+    pub scale: f32,
+    /// 0..=1 progress of a CD spin-up, used to gently dim neighbouring discs.
+    pub spin: f32,
+}
+
+impl Default for Launch {
+    fn default() -> Launch {
+        Launch {
+            pull: 0.0,
+            angle: 0.0,
+            scale: 1.0,
+            spin: 0.0,
+        }
+    }
+}
+
 /// What the top screen shows beside the game's box.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Beside {
@@ -73,8 +97,12 @@ pub struct NoticeShown<'a> {
 
 const PICKER_HINT: &str = "D-pad  choose   \u{b7}   A  go   \u{b7}   B / Select  back";
 /// What the touch screen's hint line says in the menu.
-/// Grid covers kept as textures. They are small, so in most libraries that is all of them.
-pub const THUMBS: usize = 600;
+/// Grid covers kept as textures at Medium size; larger grid covers keep fewer so texture memory
+/// stays within the same pixel budget (~14 MiB max on this 1 GiB handheld).
+pub const THUMBS: usize = 120;
+const THUMB_BUDGET: usize = THUMBS * GRID_COVER.0 as usize * GRID_COVER.1 as usize;
+/// Resume screenshots kept as textures on the top screen.
+const RESUMES: usize = 16;
 /// Lines of text kept as textures before they are all let go.
 const TEXTS: usize = 160;
 /// The status bar's battery icon's height, in screen units.
@@ -133,8 +161,11 @@ pub struct Ui<'a> {
     pub top: View,
     pub bot: View,
     arts: HashMap<usize, Art>,
-    /// Grid covers, by game, one for each canvas.
-    thumbs: HashMap<usize, Vec<Texture>>,
+    /// Grid cover size in pixels the loader is composing thumbs at.
+    thumb: (usize, usize),
+    /// Grid covers, by game: the pixel size they were composed at, and one texture on the bottom
+    /// screen's canvas (never duplicated onto the top screen's GL context on dual-screen hardware).
+    thumbs: HashMap<usize, ((usize, usize), Texture)>,
     /// Lines of text, with their width and height.
     texts: HashMap<TextKey, (Texture, u32, u32)>,
     /// A white pixel for each canvas, stretched and tinted for panels and highlights.
@@ -250,7 +281,6 @@ impl<'a> Ui<'a> {
                 Source {
                     fonts,
                     shell,
-                    thumb,
                     cache,
                 },
             ),
@@ -261,6 +291,7 @@ impl<'a> Ui<'a> {
             top,
             bot,
             arts: HashMap::new(),
+            thumb,
             thumbs: HashMap::new(),
             texts: HashMap::new(),
             white,
@@ -496,9 +527,22 @@ impl Ui<'_> {
         for (_, a) in self.arts.drain() {
             a.destroy();
         }
-        for t in self.thumbs.drain().flat_map(|(_, ts)| ts) {
+        for (_, (_, t)) in self.thumbs.drain() {
             destroy(t);
         }
+        crate::platform::trim_memory();
+    }
+
+    /// Drops cached grid thumbnails when switching to a view that does not draw them (Carts or
+    /// text-only List), immediately freeing their GPU texture memory.
+    pub(super) fn clear_thumbs(&mut self) {
+        if self.thumbs.is_empty() {
+            return;
+        }
+        for (_, (_, t)) in self.thumbs.drain() {
+            destroy(t);
+        }
+        crate::platform::trim_memory();
     }
 
     /// Forget game `g`'s artwork, to be composed again as it is wanted: its box art changed.
@@ -506,14 +550,41 @@ impl Ui<'_> {
         if let Some(a) = self.arts.remove(&g) {
             a.destroy();
         }
-        for t in self.thumbs.remove(&g).into_iter().flatten() {
+        if let Some((_, t)) = self.thumbs.remove(&g) {
             destroy(t);
         }
     }
 
+    /// Update the grid cover size thumbnails are composed at. Existing thumbnails stay on screen
+    /// until crisp replacements at the new size arrive, so live-resizing the grid never flashes.
+    pub(super) fn set_thumb(&mut self, cover: (f32, f32)) {
+        let px = (
+            (cover.0 * self.bot.s).round().max(1.0) as usize,
+            (cover.1 * self.bot.s).round().max(1.0) as usize,
+        );
+        if self.thumb != px {
+            self.thumb = px;
+            self.loader.forget();
+        }
+    }
+
+    /// How many grid thumbnails to keep in texture memory for the current grid size.
+    pub(super) fn thumb_limit(&self) -> usize {
+        let (w, h) = (
+            (self.thumb.0 as f32 / self.bot.s.max(0.01))
+                .round()
+                .max(1.0) as usize,
+            (self.thumb.1 as f32 / self.bot.s.max(0.01))
+                .round()
+                .max(1.0) as usize,
+        );
+        (THUMB_BUDGET / (w * h).max(1)).clamp(48, THUMBS)
+    }
+
     /// Take in artwork the workers have finished and hand out more. `wants` and `hold` are
     /// places in `list`: what to make, most wanted first, and whose full-size artwork to keep.
-    /// Returns whether everything wanted is here.
+    /// `picker_open` controls whether duplicate bottom-screen blade covers are uploaded on
+    /// dual-screen hardware. Returns whether everything wanted is here.
     pub fn load(
         &mut self,
         games: &[Game],
@@ -521,26 +592,31 @@ impl Ui<'_> {
         wants: impl Iterator<Item = Job>,
         hold: &HashSet<usize>,
         sel: usize,
+        picker_open: bool,
     ) -> Result<bool, String> {
+        let need_blade = picker_open && self.top.c != self.bot.c;
         for (job, made) in self.loader.take() {
             match (job, made) {
                 (Job::Art(g), Made::Art { cart, cover }) => {
-                    let blade = if self.top.c == self.bot.c {
-                        None
-                    } else {
+                    let blade = if need_blade {
                         Some(texture(&self.creators[self.bot.c], &cover)?)
+                    } else {
+                        None
                     };
                     let (cart, cover) = (
                         texture(&self.creators[self.bot.c], &cart)?,
                         texture(&self.creators[self.top.c], &cover)?,
                     );
-                    self.arts.insert(g, Art { cart, cover, blade });
+                    if let Some(old) = self.arts.insert(g, Art { cart, cover, blade }) {
+                        old.destroy();
+                    }
                 }
                 (Job::Thumb(g), Made::Thumb(img)) => {
-                    // Shown in the grid, and on the top screen while the full-size box is made.
-                    let each: Result<Vec<_>, _> =
-                        self.creators.iter().map(|tc| texture(tc, &img)).collect();
-                    self.thumbs.insert(g, each?);
+                    // Grid and list-cover thumbnails only draw on the bottom screen's canvas.
+                    let t = texture(&self.creators[self.bot.c], &img)?;
+                    if let Some((_, old)) = self.thumbs.insert(g, (self.thumb, t)) {
+                        destroy(old);
+                    }
                 }
                 _ => {}
             }
@@ -558,12 +634,20 @@ impl Ui<'_> {
                 a.destroy();
             }
         }
-        if self.thumbs.len() > THUMBS {
-            // A very large library: keep the covers around the selection.
+        if !need_blade {
+            for a in self.arts.values_mut() {
+                if let Some(b) = a.blade.take() {
+                    destroy(b);
+                }
+            }
+        }
+        let limit = self.thumb_limit();
+        if self.thumbs.len() > limit + 2 {
+            // A large library: keep only the covers around the selection on the current page.
             let around: HashSet<usize> = list
                 .iter()
-                .skip(sel.saturating_sub(THUMBS / 2))
-                .take(THUMBS)
+                .skip(sel.saturating_sub(limit / 2))
+                .take(limit)
                 .copied()
                 .collect();
             let gone: Vec<usize> = self
@@ -573,11 +657,9 @@ impl Ui<'_> {
                 .filter(|g| !around.contains(g))
                 .collect();
             for g in gone {
-                self.thumbs
-                    .remove(&g)
-                    .into_iter()
-                    .flatten()
-                    .for_each(destroy);
+                if let Some((_, t)) = self.thumbs.remove(&g) {
+                    destroy(t);
+                }
             }
         }
 
@@ -587,13 +669,23 @@ impl Ui<'_> {
             let (place, have) = match want {
                 Job::Art(i) => (
                     i,
-                    list.get(i)
-                        .map(|&g| (Job::Art(g), self.arts.contains_key(&g))),
+                    list.get(i).map(|&g| {
+                        (
+                            Job::Art(g),
+                            self.arts
+                                .get(&g)
+                                .is_some_and(|a| !need_blade || a.blade.is_some()),
+                        )
+                    }),
                 ),
                 Job::Thumb(i) => (
                     i,
-                    list.get(i)
-                        .map(|&g| (Job::Thumb(g), self.thumbs.contains_key(&g))),
+                    list.get(i).map(|&g| {
+                        (
+                            Job::Thumb(g),
+                            self.thumbs.get(&g).is_some_and(|(sz, _)| *sz == self.thumb),
+                        )
+                    }),
                 ),
             };
             let Some((job, false)) = have else { continue };
@@ -603,7 +695,7 @@ impl Ui<'_> {
             }
             if !self.loader.asked(job) {
                 let game = &games[list[place]];
-                self.loader.ask(job, game, self.looks);
+                self.loader.ask(job, game, self.looks, self.thumb);
             }
         }
         Ok(settled)
@@ -780,7 +872,7 @@ impl Ui<'_> {
     ) -> Result<(), String> {
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         let hint = match hint {
-            HINT if !art::has_shell(console) => START_HINT,
+            HINT if !art::has_shell(console) || art::disc::is_cd(console) => START_HINT,
             hint => hint,
         };
         self.text(v, hint, (18.0, false), (SW / 2.0, 636.0), 0.5, FAINT)?;
@@ -835,11 +927,12 @@ impl Ui<'_> {
 
         // Until the full-size box is ready, its grid cover stands in.
         let size = art::box_size(game.console);
-        let cover = self
-            .arts
-            .get_mut(&g)
-            .map(|a| &mut a.cover)
-            .or(self.thumbs.get_mut(&g).map(|ts| &mut ts[v.c]));
+        let same_canvas = self.top.c == self.bot.c;
+        let cover = self.arts.get_mut(&g).map(|a| &mut a.cover).or_else(|| {
+            same_canvas
+                .then(|| self.thumbs.get_mut(&g).map(|(_, t)| t))
+                .flatten()
+        });
         if let Some(cover) = cover {
             let (w, h) = (size.0 as f32, size.1 as f32);
             let dst = v.rect(300.0 - w / 2.0, SH / 2.0 - h / 2.0, w, h);
@@ -917,11 +1010,12 @@ impl Ui<'_> {
     ) -> Result<bool, String> {
         let v = self.top;
         let size = art::box_size(console);
-        let cover = self
-            .arts
-            .get_mut(&g)
-            .map(|a| &mut a.cover)
-            .or(self.thumbs.get_mut(&g).map(|ts| &mut ts[v.c]));
+        let same_canvas = self.top.c == self.bot.c;
+        let cover = self.arts.get_mut(&g).map(|a| &mut a.cover).or_else(|| {
+            same_canvas
+                .then(|| self.thumbs.get_mut(&g).map(|(_, t)| t))
+                .flatten()
+        });
         let Some(cover) = cover else {
             return Ok(false);
         };
@@ -948,6 +1042,13 @@ impl Ui<'_> {
                 Some(r) => Some((texture(&self.creators[self.top.c], &r.picture)?, r.saved)),
                 None => None,
             };
+            if rs.found.len() >= RESUMES && !rs.found.contains_key(&game) {
+                if let Some(&evict) = rs.found.keys().find(|&&k| k != g && k != game) {
+                    if let Some((_, Some((old, _)))) = rs.found.remove(&evict) {
+                        destroy(old);
+                    }
+                }
+            }
             if let Some((_, Some((old, _)))) = rs.found.insert(game, (asked, made)) {
                 destroy(old);
             }
@@ -1063,9 +1164,9 @@ impl Ui<'_> {
         )
     }
 
-    /// The carts over the slot. `carousel` is where the row of carts is (a place in the list,
-    /// between two while it moves), `pull` how far the selected one has moved toward the slot.
-    pub fn draw_carts(&mut self, page: &Page, carousel: f32, pull: f32) -> Result<(), String> {
+    /// The carts (or discs) over the slot. `carousel` is where the row is (a place in the list,
+    /// between two while it moves), `launch` how the selected one is inserting or spinning up.
+    pub fn draw_carts(&mut self, page: &Page, carousel: f32, launch: Launch) -> Result<(), String> {
         let Page {
             games: _,
             list,
@@ -1089,13 +1190,31 @@ impl Ui<'_> {
         for i in order {
             let d = i as f32 - p;
             let away = d.abs().min(1.0);
-            let w = cart_w * (1.0 - 0.3 * away);
+            let scale = if i == sel { launch.scale } else { 1.0 };
+            let w = cart_w * (1.0 - 0.3 * away) * scale;
             let h = w * cart_h / cart_w;
-            let y = CART_Y + if i == sel { pull } else { 0.0 };
+            let y = CART_Y + if i == sel { launch.pull } else { 0.0 };
             let dst = v.rect(SW / 2.0 + d * pitch - w / 2.0, y - h / 2.0, w, h);
             if let Some(a) = self.arts.get_mut(&list[i]) {
-                a.cart.set_alpha_mod((255.0 - 150.0 * away) as u8);
-                self.canvases[v.c].copy(&a.cart, None, dst)?;
+                let dim = if i == sel {
+                    1.0
+                } else {
+                    1.0 - 0.65 * launch.spin
+                };
+                a.cart.set_alpha_mod(((255.0 - 150.0 * away) * dim) as u8);
+                if i == sel && launch.angle != 0.0 {
+                    self.canvases[v.c].copy_ex(
+                        &a.cart,
+                        None,
+                        dst,
+                        launch.angle as f64,
+                        None,
+                        false,
+                        false,
+                    )?;
+                } else {
+                    self.canvases[v.c].copy(&a.cart, None, dst)?;
+                }
             }
         }
 
@@ -1103,7 +1222,13 @@ impl Ui<'_> {
     }
 
     /// A wall of boxes in place of the carts, `scroll` rows down.
-    pub fn draw_grid(&mut self, page: &Page, scroll: f32, stats: &Stats) -> Result<(), String> {
+    pub fn draw_grid(
+        &mut self,
+        page: &Page,
+        grid: Grid,
+        scroll: f32,
+        stats: &Stats,
+    ) -> Result<(), String> {
         let Page {
             games,
             list,
@@ -1122,38 +1247,34 @@ impl Ui<'_> {
         }
 
         // Moved down under a page's sections, as far as the last row's covers reach.
-        let shift = layout::shift();
-        self.canvases[v.c].set_clip_rect(v.rect(
-            0.0,
-            GRID_AT.1 - 8.0 + shift,
-            SW,
-            GRID_ROWS as f32 * GRID_STEP.1 - 8.0 - (shift - 18.0).max(0.0),
-        ));
-        let first = scroll.max(0.0) as usize * COLS;
+        let (clip_top, clip_h) = grid.clip();
+        self.canvases[v.c].set_clip_rect(v.rect(0.0, clip_top, SW, clip_h));
+        let first = scroll.max(0.0) as usize * grid.cols;
+        let cell = (grid.cover.0 as usize, grid.cover.1 as usize);
+        let (tw, th) = art::thumb_size(console, cell);
+        let (w, h) = (tw as f32, th as f32);
+        let frame = grid.frame;
         for (place, &g) in list
             .iter()
             .enumerate()
             .skip(first)
-            .take(COLS * (GRID_ROWS + 1))
+            .take(grid.cols * grid.visible_rows())
         {
-            let (x, y) = grid_cell(place, scroll);
-            let cell = (GRID_COVER.0 as usize, GRID_COVER.1 as usize);
-            let (w, h) = art::thumb_size(console, cell);
-            let (w, h) = (w as f32, h as f32);
-            let (x, y) = (x + (GRID_COVER.0 - w) / 2.0, y + (GRID_COVER.1 - h) / 2.0);
+            let (x, y) = grid.cell(place, scroll);
+            let (x, y) = (x + (grid.cover.0 - w) / 2.0, y + (grid.cover.1 - h) / 2.0);
             self.white[v.c].set_alpha_mod(255);
             if place == sel {
                 self.white[v.c].set_color_mod(WHITE.r, WHITE.g, WHITE.b);
                 self.canvases[v.c].copy(
                     &self.white[v.c],
                     None,
-                    v.rect(x - 5.0, y - 5.0, w + 10.0, h + 10.0),
+                    v.rect(x - frame, y - frame, w + 2.0 * frame, h + 2.0 * frame),
                 )?;
             }
             // The panel colour stands in for a cover that is not composed yet.
             self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
             self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, w, h))?;
-            if let Some(t) = self.thumbs.get_mut(&g).map(|ts| &mut ts[v.c]) {
+            if let Some(t) = self.thumbs.get_mut(&g).map(|(_, t)| t) {
                 t.set_color_mod(255, 255, 255);
                 t.set_alpha_mod(if place == sel { 255 } else { 205 });
                 self.canvases[v.c].copy(t, None, v.rect(x, y, w, h))?;
@@ -1229,7 +1350,7 @@ impl Ui<'_> {
                 self.white[v.c].set_alpha_mod(255);
                 self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
                 self.canvases[v.c].copy(&self.white[v.c], None, v.rect(bx, by, bw, bh))?;
-                if let Some(t) = self.thumbs.get_mut(&g).map(|ts| &mut ts[v.c]) {
+                if let Some(t) = self.thumbs.get_mut(&g).map(|(_, t)| t) {
                     t.set_color_mod(255, 255, 255);
                     t.set_alpha_mod(if lit { 255 } else { 205 });
                     self.canvases[v.c].copy(t, None, v.rect(bx, by, bw, bh))?;
@@ -2344,7 +2465,7 @@ impl Page<'_> {
     /// The buttons under the shelf: A opens a folder of games rather than inserting it, and
     /// B goes back out of the one open.
     pub fn hint(&self) -> String {
-        let hint = if art::has_shell(self.console) {
+        let hint = if art::has_shell(self.console) && !art::disc::is_cd(self.console) {
             HINT
         } else {
             START_HINT

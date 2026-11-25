@@ -1,7 +1,7 @@
 //! Builds each game's cart and box. Real artwork wins when it exists; otherwise both are
 //! generated from the ROM's own icon, title and game code.
 
-mod disc;
+pub mod disc;
 mod finish;
 mod folder;
 mod shells;
@@ -433,11 +433,19 @@ impl Shell {
             (console, _) => self.frame(console),
         };
         let frame = Arc::new(finish::restyle(base, console, style.colour, style.finish));
-        self.styled
-            .lock()
-            .unwrap()
-            .insert((console, style), frame.clone());
+        let mut styled = self.styled.lock().unwrap();
+        // Bound styled shell variants (~1 MiB each) so browsing coloured GB/GBA/SNES libraries
+        // cannot accumulate unbounded shell buffers.
+        if styled.len() >= 16 {
+            styled.clear();
+        }
+        styled.insert((console, style), frame.clone());
         frame
+    }
+
+    /// Drops cached coloured shell variants before starting a game, returning RAM to emulators.
+    pub fn trim(&self) {
+        self.styled.lock().unwrap().clear();
     }
 }
 
@@ -1475,8 +1483,8 @@ fn folder_inside(
 
 /// Fit a box within a grid cell, preserving landscape covers as well as square ones.
 pub fn thumb_size(console: Console, size: (usize, usize)) -> (usize, usize) {
-    if console == Console::Ds {
-        return size; // Keep the DS grid and its existing cached thumbnails unchanged.
+    if console == Console::Ds && size == (180, 164) {
+        return size; // Keep the default DS grid and its existing cached thumbnails unchanged.
     }
     let (bw, bh) = box_size(console);
     (size.0.min(size.1 * bw / bh), size.1.min(size.0 * bh / bw))
@@ -1635,6 +1643,10 @@ mod tests {
         assert_eq!(thumb_size(Console::Snes, (180, 164)), (180, 126));
         assert_eq!(thumb_size(Console::Gba, (180, 164)), (164, 164));
         assert_eq!(thumb_size(Console::Ds, (180, 164)), (180, 164));
+        // Larger and smaller grid presets keep DS boxes at their natural 482:440 aspect ratio.
+        assert_eq!(thumb_size(Console::Ds, (304, 260)), (284, 260));
+        assert_eq!(thumb_size(Console::Ds, (226, 206)), (225, 206));
+        assert_eq!(thumb_size(Console::Ds, (148, 126)), (138, 126));
         assert!(has_shell(Console::Snes));
         // A Game & Watch unit has no cart, but its page is shown: as boxes, landscape.
         assert!(!has_shell(Console::GameWatch));

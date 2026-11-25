@@ -1048,7 +1048,7 @@ impl Menu {
         let mut items = Vec::new();
         let choice = cx.choices(page).len() > 1;
         let shelf = |items: &mut Vec<Item>| {
-            for key in [def::VIEW, def::SORT, def::SHOW, def::CASE] {
+            for key in [def::VIEW, def::GRID_SIZE, def::SORT, def::SHOW, def::CASE] {
                 items.extend(def::builtin(key).map(Item::Setting));
             }
         };
@@ -1103,7 +1103,7 @@ impl Menu {
             // The apps' page is always a grid, of boxes without cases, and has no emulator.
             (Page::Console, Part::Emulator) if cx.console == Console::Apps => {}
             (Page::Console, _) | (Page::View, _) if cx.console == Console::Apps => {
-                setting(&mut items, &[def::SORT, def::SHOW]);
+                setting(&mut items, &[def::GRID_SIZE, def::SORT, def::SHOW]);
             }
             (Page::Console, Part::Emulator) => {
                 if choice {
@@ -3687,12 +3687,16 @@ mod tests {
             [("Emulator".to_owned(), true), ("Shelf".to_owned(), false)]
         );
         menu.go((Page::Console, Part::Shelf));
-        assert_eq!(labels(&menu, &cx), ["View", "Sort by", "Show", "Game case"]);
+        assert_eq!(
+            labels(&menu, &cx),
+            ["View", "Grid size", "Sort by", "Show", "Game case"]
+        );
         menu.turn_to(Page::System);
         assert_eq!(
             labels(&menu, &cx),
             [
                 "View",
+                "Grid size",
                 "Sort by",
                 "Show",
                 "Game case",
@@ -3889,7 +3893,10 @@ mod tests {
         };
         let mut menu = Menu::open_view(&w.ra);
         assert_eq!(menu.pages(&cx), [Page::View]);
-        assert_eq!(labels(&menu, &cx), ["View", "Sort by", "Show", "Game case"]);
+        assert_eq!(
+            labels(&menu, &cx),
+            ["View", "Grid size", "Sort by", "Show", "Game case"]
+        );
         let shown = menu.shown(&cx);
         assert_eq!(shown.title, "How the GBA page is shown");
         assert_eq!(shown.tabs, [("View".to_owned(), true)]);
@@ -3922,7 +3929,7 @@ mod tests {
         // The apps' page has no View or Game case: they are always a grid of bare boxes.
         cx.console = Console::Apps;
         let menu = Menu::open_view(&w.ra);
-        assert_eq!(labels(&menu, &cx), ["Sort by", "Show"]);
+        assert_eq!(labels(&menu, &cx), ["Grid size", "Sort by", "Show"]);
         assert_eq!(menu.shown(&cx).title, "How Apps are shown");
     }
 

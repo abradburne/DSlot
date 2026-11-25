@@ -64,20 +64,75 @@ pub fn rom_roots() -> Vec<PathBuf> {
     nibkit::paths::rom_roots()
 }
 
-/// Powers off, as the system does it, and stays up while it goes down so that nothing (the
-/// stock menu, the console) flashes past.
-pub fn power_off() {
-    if on_device() {
-        device::power_off();
-        std::thread::sleep(std::time::Duration::from_secs(20));
+/// Returns freed heap memory to the OS (glibc's `malloc_trim`), so emulators and the kernel
+/// get unused arena pages back immediately on this 1 GiB handheld.
+pub fn trim_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: libc::size_t) -> libc::c_int;
+        }
+        // SAFETY: malloc_trim(0) is a thread-safe glibc hint with no preconditions.
+        unsafe {
+            malloc_trim(0);
+        }
     }
 }
 
-/// Restarts, as the system does it, staying up while it goes down.
+/// Powers off, as the system does it. On nibOS, systemd already queued poweroff.target and
+/// `nibos-goodbye.service` shows the goodbye picture as soon as DSlot exits, so exit right away
+/// instead of blocking shutdown (and skip nibkit's redundant pre-shutdown `sync`). On stock,
+/// stay up while it goes down so the stock menu does not flash past.
+pub fn power_off() {
+    if on_device() {
+        #[cfg(feature = "nibos")]
+        {
+            if !run_systemctl("poweroff") {
+                device::power_off();
+                std::thread::sleep(std::time::Duration::from_secs(20));
+            }
+        }
+        #[cfg(not(feature = "nibos"))]
+        {
+            device::power_off();
+            std::thread::sleep(std::time::Duration::from_secs(20));
+        }
+    }
+}
+
+/// Restarts, as the system does it.
 pub fn restart() {
     if on_device() {
-        device::restart();
-        std::thread::sleep(std::time::Duration::from_secs(20));
+        #[cfg(feature = "nibos")]
+        {
+            if !run_systemctl("reboot") {
+                device::restart();
+                std::thread::sleep(std::time::Duration::from_secs(20));
+            }
+        }
+        #[cfg(not(feature = "nibos"))]
+        {
+            device::restart();
+            std::thread::sleep(std::time::Duration::from_secs(20));
+        }
+    }
+}
+
+#[cfg(feature = "nibos")]
+fn run_systemctl(action: &str) -> bool {
+    match std::process::Command::new("systemctl").arg(action).output() {
+        Ok(out) if out.status.success() => true,
+        Ok(out) => {
+            eprintln!(
+                "dslot: systemctl {action}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("dslot: systemctl {action}: {e}");
+            false
+        }
     }
 }
 

@@ -3,6 +3,7 @@
 
 use crate::art::{self, Slot, CART_H, CART_W};
 use crate::rom::Console;
+use crate::settings::GridSize;
 use sdl2::rect::Rect;
 
 /// A screen's size in layout units.
@@ -24,12 +25,101 @@ pub const CART_Y: f32 = 318.0;
 /// The status bar along the bottom of the touch screen, with the slot in its top edge.
 pub const BAR_H: f32 = 96.0;
 
-/// The cover grid: columns, whole rows on screen, a cover's size, and the pitch between covers.
-pub const COLS: usize = 5;
-pub const GRID_ROWS: usize = 3;
+/// The default (Medium) cover grid's cover size and origin; other sizes share the same
+/// viewport (from [`GRID_AT`].1 down to the hint line).
 pub const GRID_COVER: (f32, f32) = (180.0, 164.0);
-pub const GRID_STEP: (f32, f32) = (196.0, 190.0);
 pub const GRID_AT: (f32, f32) = (30.0, 62.0);
+/// The cover grid's vertical clip height when no section row is shown (three Medium rows,
+/// matching the room above the hint line).
+const GRID_VIEW_H: f32 = 3.0 * 190.0 - 8.0;
+
+/// Geometry of the cover grid at a chosen [`GridSize`]: columns, whole rows kept on screen,
+/// each cover's cell, pitch between cells, top-left origin, and selection frame thickness.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grid {
+    pub cols: usize,
+    pub rows: usize,
+    pub cover: (f32, f32),
+    pub step: (f32, f32),
+    pub at: (f32, f32),
+    pub frame: f32,
+}
+
+impl Grid {
+    pub const fn of(size: GridSize) -> Grid {
+        match size {
+            GridSize::Small => Grid {
+                cols: 6,
+                rows: 4,
+                cover: (148.0, 126.0),
+                step: (163.0, 140.0),
+                at: (30.5, GRID_AT.1),
+                frame: 4.0,
+            },
+            GridSize::Medium => Grid {
+                cols: 5,
+                rows: 3,
+                cover: GRID_COVER,
+                step: (196.0, 190.0),
+                at: GRID_AT,
+                frame: 5.0,
+            },
+            GridSize::Large => Grid {
+                cols: 4,
+                rows: 2,
+                cover: (226.0, 206.0),
+                step: (246.0, 226.0),
+                at: GRID_AT,
+                frame: 5.0,
+            },
+            GridSize::ExtraLarge => Grid {
+                cols: 3,
+                rows: 2,
+                cover: (304.0, 260.0),
+                step: (330.0, 284.0),
+                at: GRID_AT,
+                frame: 5.0,
+            },
+        }
+    }
+
+    /// Top of row 0, moved down under a sectioned page's section row when shown.
+    pub fn top(&self) -> f32 {
+        self.at.1 + shift()
+    }
+
+    /// The clip rectangle's top and height for this grid (above the hint line).
+    pub fn clip(&self) -> (f32, f32) {
+        let s = shift();
+        (self.at.1 - 8.0 + s, GRID_VIEW_H - (s - 18.0).max(0.0))
+    }
+
+    /// How many rows can appear in the viewport at once (including a peeking row while scrolling).
+    pub fn visible_rows(&self) -> usize {
+        let (_, h) = self.clip();
+        (h / self.step.1).ceil() as usize + 1
+    }
+
+    /// Top-left corner of a place in the cover grid.
+    pub fn cell(&self, place: usize, scroll: f32) -> (f32, f32) {
+        (
+            self.at.0 + (place % self.cols) as f32 * self.step.0,
+            self.top() + ((place / self.cols) as f32 - scroll) * self.step.1,
+        )
+    }
+
+    /// The place in the cover grid under a touch, which may be past the last game.
+    pub fn hit(&self, at: (f32, f32), scroll: f32) -> Option<usize> {
+        let (clip_top, clip_h) = self.clip();
+        if !(clip_top..clip_top + clip_h).contains(&at.1) {
+            return None;
+        }
+        let col = (at.0 - self.at.0) / self.step.0;
+        let row = (at.1 - self.top()) / self.step.1 + scroll;
+        (col >= 0.0 && (col as usize) < self.cols && row >= 0.0)
+            .then(|| row as usize * self.cols + col as usize)
+    }
+}
 
 /// The list: where its rows start, and the room they have down to the hint line.
 pub const LIST_AT: (f32, f32) = (30.0, 62.0);
@@ -66,10 +156,7 @@ pub fn shift() -> f32 {
     }
 }
 
-/// The top of the grid and of the list, as moved.
-pub fn grid_top() -> f32 {
-    GRID_AT.1 + shift()
-}
+/// The top of the list, as moved.
 pub fn list_top() -> f32 {
     LIST_AT.1 + shift()
 }
@@ -369,23 +456,6 @@ impl Blades {
     }
 }
 
-/// Top-left corner of a place in the cover grid.
-pub fn grid_cell(place: usize, scroll: f32) -> (f32, f32) {
-    (
-        GRID_AT.0 + (place % COLS) as f32 * GRID_STEP.0,
-        grid_top() + ((place / COLS) as f32 - scroll) * GRID_STEP.1,
-    )
-}
-
-/// The place in the cover grid under a touch, which may be past the last game.
-pub fn grid_hit(at: (f32, f32), scroll: f32) -> Option<usize> {
-    let (col, row) = (
-        (at.0 - GRID_AT.0) / GRID_STEP.0,
-        (at.1 - grid_top()) / GRID_STEP.1 + scroll,
-    );
-    (col >= 0.0 && (col as usize) < COLS && row >= 0.0).then(|| row as usize * COLS + col as usize)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,16 +531,40 @@ mod tests {
 
     #[test]
     fn grid() {
-        for place in [0, 4, 5, 17] {
-            let (x, y) = grid_cell(place, 1.0);
-            assert_eq!(grid_hit((x + 1.0, y + 1.0), 1.0), Some(place));
+        for size in [
+            GridSize::Small,
+            GridSize::Medium,
+            GridSize::Large,
+            GridSize::ExtraLarge,
+        ] {
+            let g = Grid::of(size);
+            // Horizontally symmetric inside the 1024-wide screen.
+            let right = g.at.0 + (g.cols - 1) as f32 * g.step.0 + g.cover.0;
+            assert!(
+                ((SW - right) - g.at.0).abs() <= 0.5,
+                "{size:?}: right={right}"
+            );
+            // Every whole row fits inside the clip rect above the hint line.
+            let (clip_top, clip_h) = g.clip();
+            let last_bottom = g.at.1 + (g.rows - 1) as f32 * g.step.1 + g.cover.1;
+            assert!(
+                last_bottom + g.frame <= clip_top + clip_h,
+                "{size:?}: bottom={last_bottom}"
+            );
+            // Hit-testing round-trips for visible cells at scroll = 1.0.
+            for place in [g.cols, g.cols + g.cols - 1, g.cols * g.rows] {
+                let (x, y) = g.cell(place, 1.0);
+                assert_eq!(g.hit((x + 1.0, y + 1.0), 1.0), Some(place));
+            }
+            // Left of the first column, right of the last, or below the viewport.
+            assert_eq!(g.hit((g.at.0 - 1.0, 100.0), 0.0), None);
+            assert_eq!(
+                g.hit((g.at.0 + g.cols as f32 * g.step.0 + 1.0, 100.0), 0.0),
+                None
+            );
+            assert_eq!(g.hit((100.0, clip_top + clip_h + 2.0), 0.0), None);
+            assert_eq!(g.hit((100.0, clip_top - 2.0), 0.0), None);
         }
-        // Left of the first column, or right of the last.
-        assert_eq!(grid_hit((GRID_AT.0 - 1.0, 100.0), 0.0), None);
-        assert_eq!(
-            grid_hit((GRID_AT.0 + COLS as f32 * GRID_STEP.0 + 1.0, 100.0), 0.0),
-            None
-        );
     }
 
     #[test]
