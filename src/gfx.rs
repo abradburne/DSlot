@@ -505,6 +505,17 @@ pub fn heart(size: usize) -> Img {
     })
 }
 
+/// House silhouette, for the Home tab on the shelf.
+pub fn home(size: usize) -> Img {
+    shape(size, |x, y| {
+        let ax = x.abs();
+        let roof = y >= ax * 0.85 - 0.82 && y <= 0.02 && ax <= 0.94;
+        let body = ax <= 0.64 && (-0.05..=0.82).contains(&y);
+        let door = ax < 0.22 && y > 0.24;
+        (roof || body) && !door
+    })
+}
+
 /// A picture file: a PNG, JPEG, or WebP.
 pub fn load_png(path: &Path) -> Option<Img> {
     let mut file = File::open(path).ok()?;

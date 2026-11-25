@@ -176,6 +176,7 @@ pub struct Ui<'a> {
     bars: [Option<Texture>; 3],
     star: Option<Vec<Texture>>,
     heart: Option<Vec<Texture>>,
+    home: Option<Vec<Texture>>,
     /// The DSlot logo, for the screensaver, one for each canvas (decoded on first use).
     logo: Option<Vec<Texture>>,
     /// The status bar's battery icon, as last drawn.
@@ -298,6 +299,7 @@ impl<'a> Ui<'a> {
             bars: [None, None, None],
             star: None,
             heart: None,
+            home: None,
             logo: None,
             battery: None,
             radios: None,
@@ -792,6 +794,17 @@ impl Ui<'_> {
             let made: Result<Vec<_>, _> =
                 self.creators.iter().map(|tc| texture(tc, &img)).collect();
             self.heart = Some(made?);
+        }
+        Ok(())
+    }
+
+    fn ensure_home(&mut self) -> Result<(), String> {
+        if self.home.is_none() {
+            let icon = (ICON * self.bot.s).round() as usize;
+            let img = gfx::home(icon);
+            let made: Result<Vec<_>, _> =
+                self.creators.iter().map(|tc| texture(tc, &img)).collect();
+            self.home = Some(made?);
         }
         Ok(())
     }
@@ -1520,14 +1533,32 @@ impl Ui<'_> {
                 )?;
             }
             let ink = if on { Color::RGB(20, 23, 30) } else { DIM };
-            self.text(
-                v,
-                p.label(),
-                (22.0, true),
-                (x + (w - 2.0) / 2.0, y + 7.0),
-                0.5,
-                ink,
-            )?;
+            if p.is_home() {
+                self.ensure_home()?;
+                let icon = 24.0;
+                let home = &mut self.home.as_mut().unwrap()[v.c];
+                home.set_color_mod(ink.r, ink.g, ink.b);
+                home.set_alpha_mod(255);
+                self.canvases[v.c].copy(
+                    home,
+                    None,
+                    v.rect(
+                        x + (w - 2.0 - icon) / 2.0,
+                        y + (h - 3.0 - icon) / 2.0,
+                        icon,
+                        icon,
+                    ),
+                )?;
+            } else {
+                self.text(
+                    v,
+                    p.label(),
+                    (22.0, true),
+                    (x + (w - 2.0) / 2.0, y + 7.0),
+                    0.5,
+                    ink,
+                )?;
+            }
         }
         // The edges with more past them: the tabs fade into the background, a chevron on top.
         let (back, on) = strip.more();
