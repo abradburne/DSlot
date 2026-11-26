@@ -22,7 +22,7 @@
 Description=DSlot game shelf
 Documentation=https://github.com/abradburne/DSlot
 DefaultDependencies=no
-After=systemd-journald.socket systemd-remount-fs.service
+After=systemd-journald.socket
 Conflicts=getty@tty1.service shutdown.target
 Before=shutdown.target
 # Leaving DSlot (Select + Start), or DSlot failing, brings up the shell on tty1.

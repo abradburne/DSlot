@@ -117,11 +117,16 @@ struct RadioIcons {
     phase: u8,
 }
 
-/// The radios, as nibkit's monitor last read them: started the first time they are drawn,
-/// read every few seconds on a thread of its own.
+/// The radios, as nibkit's monitor last read them: started after the first frame is shown
+/// (so frame 0 does no D-Bus/iwd/BlueZ setup), read every few seconds on a thread of its own.
+static RADIOS: OnceLock<nibkit::net::Monitor> = OnceLock::new();
+
 fn radios() -> &'static nibkit::net::Monitor {
-    static MONITOR: OnceLock<nibkit::net::Monitor> = OnceLock::new();
-    MONITOR.get_or_init(|| nibkit::net::Monitor::start(std::time::Duration::from_secs(3)))
+    RADIOS.get_or_init(|| nibkit::net::Monitor::start(std::time::Duration::from_secs(3)))
+}
+
+fn radios_if_started() -> Option<&'static nibkit::net::Monitor> {
+    RADIOS.get()
 }
 
 /// When the connecting animation's clock started.
@@ -403,11 +408,19 @@ impl<'a> Ui<'a> {
         self.radio_icons(v, x)
     }
 
+    /// Starts the background Wi-Fi / Bluetooth monitor (deferred until after frame 0 on boot).
+    pub fn start_radios(&self) {
+        let _ = radios();
+    }
+
     /// Wi-Fi's and Bluetooth's icons from `x`: none while a radio is off; dim while it is on
     /// and nothing is connected; bright when connected (Wi-Fi with its signal, Bluetooth with a
     /// dot, or how many devices).
     fn radio_icons(&mut self, v: View, x: f32) -> Result<(), String> {
-        let now = radios().now();
+        let Some(monitor) = radios_if_started() else {
+            return Ok(());
+        };
+        let now = monitor.now();
         // Connecting: the fan lights up from the dot out, over and over.
         let phase = (START.get_or_init(Instant::now).elapsed().as_millis() / 350 % 4) as u8 + 1;
         let shown = RadioIcons {

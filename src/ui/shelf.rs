@@ -2667,7 +2667,7 @@ fn show(
             && level_opacity <= 0.0
             && !level_drawn
             && !ui.waiting();
-        let status = ui.status();
+        let status = resting.then(|| ui.status()).flatten();
         if resting && status.is_some() && status == drawn_status {
             if state.menu.is_none()
                 && state.power.is_none()
@@ -2974,6 +2974,7 @@ fn show(
             });
         }
         if frame == 1 {
+            ui.start_radios();
             pads = Some(Pads::open(sdl.game_controller()?)?);
             crate::mark("controllers ready");
             // Tell systemd (and dsboot) we are live and interactive so post-boot services

@@ -218,6 +218,16 @@ fn run() -> Result<(), String> {
     let bg_roots = roots.clone();
     let bg_cache = opts.cache.clone();
     let library_bg = std::thread::spawn(move || {
+        // Pre-render the default shell and UI SDF assets immediately on a parallel thread before
+        // `Emulators::load` and ROM scanning, so it finishes well before `ui::open` returns.
+        let prewarm_bg = std::thread::spawn(move || {
+            let shell = art::Shell::load();
+            shell.prewarm(Console::Ds);
+            if on_device {
+                ui::prewarm_ui_assets(Console::Ds);
+            }
+            shell
+        });
         let emulators = Emulators::load(&bg_emulators_dirs);
         let mut searched: [Vec<PathBuf>; Console::COUNT] = Default::default();
         let playable = |c: Console| !on_device || emulators.for_system(c.folder()).next().is_some();
@@ -329,15 +339,7 @@ fn run() -> Result<(), String> {
         games.extend(rom::apps(&apps));
         let settings = early_settings
             .unwrap_or_else(|| Settings::load(bg_settings_path, &bg_legacy, &games, &emulators));
-        let shell = art::Shell::load();
-        if let Some(c) = settings.page.console() {
-            shell.prewarm(c);
-        } else if let Some(first) = games.first() {
-            shell.prewarm(first.console);
-        }
-        if on_device {
-            ui::prewarm_ui_assets(settings.page.console().unwrap_or(Console::Ds));
-        }
+        let shell = prewarm_bg.join().unwrap_or_else(|_| art::Shell::load());
         mark("stats and settings loaded");
         Ok::<_, String>((
             emulators, searched, stats, settings, games, apps, deferred, shell,
