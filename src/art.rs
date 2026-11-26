@@ -401,6 +401,14 @@ impl Shell {
         }
     }
 
+    /// Pre-generates the procedural cartridge shell for `console` on a background thread so
+    /// frame 0 renders the first cart immediately without waiting for procedural bevel shading.
+    pub fn prewarm(&self, console: Console) {
+        if let Some(draw) = shell_of(console) {
+            let _ = self.frames[console as usize].get_or_init(draw);
+        }
+    }
+
     fn frame(&self, console: Console) -> &Frame {
         let draw = shell_of(console)
             .unwrap_or_else(|| unreachable!("no cart shell for {console:?}, so no page"));
@@ -1525,14 +1533,26 @@ pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cach
     let hash = key.bytes().fold(0xcbf29ce484222325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x100000001b3)
     });
+    const LZ4_MAGIC: &[u8; 4] = b"LZ4T";
+    let expected_px = w * h * 4;
     let file = cache.join(format!("{hash:016x}.thumb"));
     if let Ok(bytes) = fs::read(&file) {
-        if bytes.len() == head.len() + w * h * 4 && bytes.starts_with(&head) {
-            return Img {
-                w,
-                h,
-                px: bytes[head.len()..].to_vec(),
-            };
+        if bytes.starts_with(&head) {
+            let body = &bytes[head.len()..];
+            if let Some(compressed) = body.strip_prefix(LZ4_MAGIC) {
+                if let Ok(px) = lz4_flex::decompress_size_prepended(compressed) {
+                    if px.len() == expected_px {
+                        return Img { w, h, px };
+                    }
+                }
+            } else if body.len() == expected_px {
+                // Backwards-compatible read of legacy uncompressed `.thumb` files.
+                return Img {
+                    w,
+                    h,
+                    px: body.to_vec(),
+                };
+            }
         }
     }
 
@@ -1547,7 +1567,12 @@ pub fn thumb(game: &Game, fonts: &Fonts, black: bool, size: (usize, usize), cach
     }
     .shrink(w, h);
     let _ = fs::create_dir_all(cache);
-    let _ = fs::write(&file, [head.as_slice(), &img.px].concat());
+    let compressed = lz4_flex::compress_prepend_size(&img.px);
+    let mut out = Vec::with_capacity(head.len() + LZ4_MAGIC.len() + compressed.len());
+    out.extend_from_slice(&head);
+    out.extend_from_slice(LZ4_MAGIC);
+    out.extend_from_slice(&compressed);
+    let _ = fs::write(&file, out);
     img
 }
 
@@ -2006,5 +2031,45 @@ mod tests {
         assert_eq!(alpha(&gb, w / 2, 6), 255);
         let gbc = gbc_frame();
         assert!(alpha(&gbc, w - 6, 8) > 0);
+    }
+
+    /// Grid thumbnails are cached on disk with LZ4 compression and round-trip identically.
+    #[test]
+    fn thumb_cache_uses_lz4_and_round_trips() {
+        let dir = TempDir::new("thumb-lz4");
+        let cache = dir.path().join("cache");
+        let rom = dir.path().join("GBA/Test.gba");
+        fs::create_dir_all(rom.parent().unwrap()).unwrap();
+        fs::write(&rom, b"rom").unwrap();
+        let game = Game {
+            console: Console::Gba,
+            path: rom,
+            stem: "Test".into(),
+            code: String::new(),
+            title: vec!["Test Game".into()],
+            icon: None,
+            cover: None,
+            gone: false,
+            group: String::new(),
+            folder: false,
+            sub: String::new(),
+        };
+        let fonts = Fonts::load();
+        let first = thumb(&game, &fonts, false, (180, 164), &cache);
+        let entries: Vec<std::path::PathBuf> = fs::read_dir(&cache)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "thumb"))
+            .collect();
+        assert_eq!(entries.len(), 1);
+        let raw_len = first.px.len();
+        let disk = fs::read(&entries[0]).unwrap();
+        assert!(disk.len() < raw_len, "expected LZ4 thumb < raw RGBA");
+        let second = thumb(&game, &fonts, false, (180, 164), &cache);
+        assert_eq!(
+            (second.w, second.h, second.px),
+            (first.w, first.h, first.px)
+        );
     }
 }

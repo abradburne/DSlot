@@ -41,6 +41,7 @@ mod sound;
 mod sysinfo;
 
 pub(crate) use draw::console_colour;
+pub use draw::prewarm_ui_assets;
 pub use screens::{open, Screens};
 pub use shelf::run;
 pub use skeleton::skeleton;

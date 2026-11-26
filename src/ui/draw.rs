@@ -27,7 +27,7 @@ use sdl2::video::WindowContext;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::Scope;
 use std::time::Instant;
 
@@ -756,11 +756,7 @@ impl Ui<'_> {
 
     fn ensure_bar(&mut self, idx: usize) -> Result<(), String> {
         if self.bars[idx].is_none() {
-            let img = match idx {
-                0 => slot_bar(self.bot.s, Slot::One, 0.0),
-                1 => slot_bar(self.bot.s, Slot::Two, cart_geometry(Console::Gba).0),
-                _ => slot_bar(self.bot.s, Slot::Two, cart_geometry(Console::Gb).0),
-            };
+            let img = cached_slot_bar(self.bot.s, idx);
             self.bars[idx] = Some(texture(&self.creators[self.bot.c], &img)?);
         }
         Ok(())
@@ -768,7 +764,7 @@ impl Ui<'_> {
 
     fn ensure_logo(&mut self) -> Result<(), String> {
         if self.logo.is_none() {
-            let img = gfx::decode_png(crate::splash::LOGO).ok_or("the logo is not a PNG")?;
+            let img = cached_logo().ok_or("the logo is not a PNG")?;
             let made: Result<Vec<_>, _> =
                 self.creators.iter().map(|tc| texture(tc, &img)).collect();
             self.logo = Some(made?);
@@ -779,7 +775,7 @@ impl Ui<'_> {
     fn ensure_star(&mut self) -> Result<(), String> {
         if self.star.is_none() {
             let icon = (ICON * self.bot.s).round() as usize;
-            let img = gfx::star(icon);
+            let img = cached_icon(0, icon, gfx::star);
             let made: Result<Vec<_>, _> =
                 self.creators.iter().map(|tc| texture(tc, &img)).collect();
             self.star = Some(made?);
@@ -790,7 +786,7 @@ impl Ui<'_> {
     fn ensure_heart(&mut self) -> Result<(), String> {
         if self.heart.is_none() {
             let icon = (ICON * self.bot.s).round() as usize;
-            let img = gfx::heart(icon);
+            let img = cached_icon(1, icon, gfx::heart);
             let made: Result<Vec<_>, _> =
                 self.creators.iter().map(|tc| texture(tc, &img)).collect();
             self.heart = Some(made?);
@@ -801,7 +797,7 @@ impl Ui<'_> {
     fn ensure_home(&mut self) -> Result<(), String> {
         if self.home.is_none() {
             let icon = (ICON * self.bot.s).round() as usize;
-            let img = gfx::home(icon);
+            let img = cached_icon(2, icon, gfx::home);
             let made: Result<Vec<_>, _> =
                 self.creators.iter().map(|tc| texture(tc, &img)).collect();
             self.home = Some(made?);
@@ -2874,6 +2870,64 @@ fn bar_for(console: Console) -> usize {
 
 /// How much wider slot-2's opening is than the cart that goes into it.
 const SLOT2_FIT: f32 = 600.0 / 560.0;
+
+type ImgCache<K> = OnceLock<Mutex<HashMap<K, Arc<Img>>>>;
+
+/// Pre-rendered CPU buffers for the slot bars and tiny UI icons, kept across game launches so
+/// exiting a game never recomputes the 1024×96 SDF slot bars or supersampled icons.
+fn cached_slot_bar(scale: f32, idx: usize) -> Arc<Img> {
+    static CACHE: ImgCache<(u32, usize)> = OnceLock::new();
+    let key = ((scale * 1000.0).round() as u32, idx);
+    let map = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(img) = map.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        return img.clone();
+    }
+    let made = Arc::new(match idx {
+        0 => slot_bar(scale, Slot::One, 0.0),
+        1 => slot_bar(scale, Slot::Two, cart_geometry(Console::Gba).0),
+        _ => slot_bar(scale, Slot::Two, cart_geometry(Console::Gb).0),
+    });
+    map.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key)
+        .or_insert_with(|| made.clone())
+        .clone()
+}
+
+fn cached_icon(kind: u8, px: usize, make: fn(usize) -> Img) -> Arc<Img> {
+    static CACHE: ImgCache<(u8, usize)> = OnceLock::new();
+    let map = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(img) = map
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&(kind, px))
+    {
+        return img.clone();
+    }
+    let made = Arc::new(make(px));
+    map.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry((kind, px))
+        .or_insert_with(|| made.clone())
+        .clone()
+}
+
+fn cached_logo() -> Option<Arc<Img>> {
+    static CACHE: OnceLock<Option<Arc<Img>>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| gfx::decode_png(crate::splash::LOGO).map(Arc::new))
+        .clone()
+}
+
+/// Pre-renders the native-scale (1024×768, `scale = 1.0`) slot bars and shelf icons off the main
+/// thread during startup so frame 0 presents without running the 98k-pixel SDF loop on CPU.
+pub fn prewarm_ui_assets(console: Console) {
+    let _ = cached_slot_bar(1.0, bar_for(console));
+    let px = ICON.round() as usize;
+    let _ = cached_icon(0, px, gfx::star);
+    let _ = cached_icon(1, px, gfx::heart);
+    let _ = cached_icon(2, px, gfx::home);
+}
 
 /// The status bar with a slot in its top edge: the DS's, or slot-2's opening for carts
 /// `cart_w` wide (in screen units), snug as on the real thing.

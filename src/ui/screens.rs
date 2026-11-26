@@ -60,6 +60,11 @@ pub fn open(opts: &Opts) -> Result<Screens, String> {
     };
     // Covers are drawn small in the grid; smooth them rather than drop pixels.
     sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "1");
+    // On dual-panel KMSDRM (nibOS / stock handheld), go straight to GLES2 instead of probing
+    // OpenGL / Vulkan / software renderers on both windows.
+    if dual && !headless && std::env::var_os("SDL_RENDER_DRIVER").is_none() {
+        sdl2::hint::set("SDL_RENDER_DRIVER", "opengles2");
+    }
     let mut canvases = Vec::new();
     for window in windows {
         let builder = window.map_err(|e| e.to_string())?.into_canvas();

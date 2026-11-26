@@ -243,6 +243,8 @@ struct State {
     strip_on: Option<(ShelfPage, usize)>,
     /// The system picker (Select), open.
     picker: Option<Picker>,
+    /// Cached blades while the system picker is open so gliding never re-stats box art at 60 fps.
+    picker_blades: Vec<Blade>,
     /// The page the shelf had to leave (its games gone, or not there yet at the start): turned
     /// back to when its games are, unless another page has been chosen since.
     away_from: Option<ShelfPage>,
@@ -957,6 +959,7 @@ impl State {
             strip: (0.0, 0.0),
             strip_on: None,
             picker: None,
+            picker_blades: Vec::new(),
             away_from,
             dirs,
             up: false,
@@ -983,6 +986,7 @@ impl State {
             self.turn_page = Some(nearest(here, &self.pages));
         }
         self.picker = None;
+        self.picker_blades.clear();
     }
 
     /// The tab strip for this frame, beside a heading `heading` wide on `page`: it scrolls to
@@ -2611,6 +2615,7 @@ fn show(
             if !updated.is_empty() {
                 artwork_gen += 1;
                 was_settled = false;
+                state.picker_blades.clear();
             }
             runner.snapshot()
         };
@@ -2685,17 +2690,20 @@ fn show(
 
         ui.clear();
         let settled;
-        // With the system picker open, its blades: each page's game whose art it shows. Their
-        // art is asked for along with the page's own, the chosen blade's first, and kept.
-        let shown: Vec<Blade> = match state.picker {
-            Some(_) => state
-                .pages
-                .iter()
-                .map(|&c| blade(games, stats, c, &shelf.opts.cache))
-                .collect(),
-            None => Vec::new(),
-        };
-        let extra: Vec<usize> = shown.iter().filter_map(|b| b.game).collect();
+        // With the system picker open, its blades: computed once on open (or after a rescan /
+        // artwork update) instead of scanning all games and stat()-ing box art at 60 fps.
+        if state.picker.is_some() {
+            if state.picker_blades.len() != state.pages.len() {
+                state.picker_blades = state
+                    .pages
+                    .iter()
+                    .map(|&c| blade(games, stats, c, &shelf.opts.cache))
+                    .collect();
+            }
+        } else if !state.picker_blades.is_empty() {
+            state.picker_blades.clear();
+        }
+        let extra: Vec<usize> = state.picker_blades.iter().filter_map(|b| b.game).collect();
         let mut list = state.order.clone();
         list.extend(&extra);
         let (first, at) = (state.order.len(), state.picker.map_or(0, |p| p.at));
@@ -2856,7 +2864,7 @@ fn show(
         if let Some(p) = state.picker {
             soft(
                 "the system picker",
-                ui.draw_picker(&shown, blades, p.pos, p.at),
+                ui.draw_picker(&state.picker_blades, blades, p.pos, p.at),
             );
         }
         // A system's card on the top screen: the chosen system's in the picker, or the console's

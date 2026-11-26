@@ -329,8 +329,19 @@ fn run() -> Result<(), String> {
         games.extend(rom::apps(&apps));
         let settings = early_settings
             .unwrap_or_else(|| Settings::load(bg_settings_path, &bg_legacy, &games, &emulators));
+        let shell = art::Shell::load();
+        if let Some(c) = settings.page.console() {
+            shell.prewarm(c);
+        } else if let Some(first) = games.first() {
+            shell.prewarm(first.console);
+        }
+        if on_device {
+            ui::prewarm_ui_assets(settings.page.console().unwrap_or(Console::Ds));
+        }
         mark("stats and settings loaded");
-        Ok::<_, String>((emulators, searched, stats, settings, games, apps, deferred))
+        Ok::<_, String>((
+            emulators, searched, stats, settings, games, apps, deferred, shell,
+        ))
     });
 
     // DSlot's own hold on the screens (kms), opened now, while no one else has them, and kept:
@@ -367,7 +378,7 @@ fn run() -> Result<(), String> {
         let _ = t.join();
     }
     let mut screens = Some(ui::open(&opts)?);
-    let (mut emulators, searched, mut stats, mut settings, mut games, mut apps, deferred) =
+    let (mut emulators, searched, mut stats, mut settings, mut games, mut apps, deferred, shell) =
         library_bg
             .join()
             .map_err(|_| "loading the library failed")??;
@@ -375,7 +386,6 @@ fn run() -> Result<(), String> {
     if !deferred.is_empty() {
         *opts.deferred_scan.lock().unwrap_or_else(|e| e.into_inner()) = deferred;
     }
-    let shell = art::Shell::load();
     let fonts = match fonts_fg.take() {
         Some(f) => f,
         None => fonts_bg
