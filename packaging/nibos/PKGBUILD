@@ -17,7 +17,7 @@
 
 pkgname=dslot
 pkgver=0.8.0
-pkgrel=1
+pkgrel=2
 pkgdesc="Game shelf for the Anbernic RG DS+: carts over a slot, boxes on the top screen"
 arch=(aarch64)
 url="https://github.com/abradburne/DSlot"

@@ -918,13 +918,13 @@ impl State {
             .position(|&g| back_from == Some(g))
             .unwrap_or(0);
         let game = order.get(sel).is_some();
-        // The cart pops out of the slot (or a CD spins down); unless the power menu is what the
+        // The cart pops out of the slot (or a CD/UMD spins down); unless the power menu is what the
         // game was put away for.
-        let back_is_cd = back_from
+        let back_is_disc = back_from
             .and_then(|i| games.get(i))
-            .is_some_and(|g| crate::art::disc::is_cd(g.console));
+            .is_some_and(|g| crate::art::disc::is_disc(g.console));
         let eject = (back_from.is_some() && put_away.is_none() && !order.is_empty()).then_some(
-            if back_is_cd {
+            if back_is_disc {
                 0.0
             } else {
                 -sound::EJECT_WARMUP
@@ -1271,7 +1271,7 @@ impl State {
     fn lift(&mut self, d: &Drag, mode: Layout, grid: Grid, console: Console, pitch: f32) {
         let (dx, dy) = d.moved();
         let (n, last) = (self.order.len(), self.last());
-        let cd = crate::art::disc::is_cd(console);
+        let disc = crate::art::disc::is_disc(console);
         if let Some((_, _, row_h)) = rows(mode, grid) {
             if d.is_tap() && d.caught {
                 // A tap on a list still moving only stops it.
@@ -1295,15 +1295,15 @@ impl State {
                 }
                 self.keep_in_view(mode, grid);
             }
-        } else if !cd && d.on_cart && dy > PULL_TO_INSERT && dy > dx.abs() {
+        } else if !disc && d.on_cart && dy > PULL_TO_INSERT && dy > dx.abs() {
             self.insert = Some(0.0);
         } else if d.is_tap() && d.caught {
             // A tap on carts still moving stops them, on the nearest.
             self.sel = self.carousel.round().clamp(0.0, last as f32) as usize;
         } else if d.is_tap() {
-            // A tap on a neighbouring cart brings it to the centre; tapping the centre CD spins it.
+            // A tap on a neighbouring cart brings it to the centre; tapping the centre disc spins it.
             let side = ((d.start.0 - SW / 2.0) / pitch).round() as i32;
-            if cd && d.on_cart && side == 0 {
+            if disc && d.on_cart && side == 0 {
                 self.insert = Some(0.0);
             } else {
                 self.sel = self.step(side);
@@ -1347,14 +1347,14 @@ impl State {
         let (n, last) = (self.order.len(), self.last() as f32);
         let ease = 1.0 - (-dt * FOLLOW).exp();
         let mut pull = 0.0;
-        let cd = crate::art::disc::is_cd(console);
+        let disc = crate::art::disc::is_disc(console);
         // A flick left over from another layout (the view changed under it) has nothing to move.
         let carts = matches!(self.fling, Some(Fling::Carts { .. }));
         if carts != (mode == Layout::Shelf) {
             self.fling = None;
         }
         match self.drag.as_ref().filter(|_| mode == Layout::Shelf) {
-            Some(d) if !cd && d.on_cart && d.moved().1 > d.moved().0.abs() => pull = d.moved().1,
+            Some(d) if !disc && d.on_cart && d.moved().1 > d.moved().0.abs() => pull = d.moved().1,
             Some(d) if d.moved().0.abs() > TAP_SLOP => {
                 self.carousel = (d.carousel - d.moved().0 / pitch).clamp(-0.3, last + 0.3);
                 self.sel = self.carousel.round().clamp(0.0, last) as usize;
@@ -1413,18 +1413,18 @@ impl State {
         pull
     }
 
-    /// The cart going into the slot (or a bare CD spinning up in place), or coming out (or
+    /// The cart going into the slot (or a CD/UMD spinning up in place), or coming out (or
     /// spinning down): its launch motion, and whether the launch animation is done.
     fn slot(&mut self, dt: f32, sound: &mut Sound, pull: f32, console: Console) -> (Launch, bool) {
-        let cd = crate::art::disc::is_cd(console);
+        let disc = crate::art::disc::is_disc(console);
         let mut launch = Launch {
-            pull: if cd { 0.0 } else { pull },
+            pull: if disc { 0.0 } else { pull },
             ..Launch::default()
         };
         let mut done = false;
         if let Some(t) = self.insert.as_mut() {
             *t += dt;
-            if cd {
+            if disc {
                 launch = cd_spin_up(*t);
                 if !self.clicked {
                     crate::mark("disc spin started");
@@ -1448,7 +1448,7 @@ impl State {
             }
         }
         if let Some(t) = self.eject {
-            if cd {
+            if disc {
                 if !self.popped {
                     sound.play_after(0.05, sound::spin_down());
                     self.popped = true;
@@ -1473,7 +1473,7 @@ impl State {
 
     /// How far the screens have faded to black as the game starts.
     fn fade(&self, console: Console) -> f32 {
-        let start = if crate::art::disc::is_cd(console) {
+        let start = if crate::art::disc::is_disc(console) {
             SPIN_UP_SECS
         } else {
             INSERT_SECS + sound::LATCH_GAP
@@ -2926,15 +2926,38 @@ fn show(
                 ui.draw_port_help(games[g].name())?;
             }
         }
-        // Started fresh: said over the fade, and kept on screen as the game starts.
-        if state.fresh {
-            let resumes = state
-                .order
-                .get(state.sel)
-                .is_some_and(|&g| resume_of(shelf, settings, &games[g]).is_some());
-            if resumes {
-                soft("the fresh start", ui.draw_fresh());
+        // Starting / Resuming status card over the fade, kept on screen on the held KMSDRM frame
+        // while the emulator starts and loads the game or its resume state.
+        let launch_card = match leaving {
+            Some(Outcome::Launch { game: g, fresh }) => Some((g, fresh, 1.0f32)),
+            Some(Outcome::Resume(g)) => Some((g, false, 1.0f32)),
+            _ if state.insert.is_some() => {
+                let fade = state.fade(console);
+                (fade > 0.0)
+                    .then(|| {
+                        state
+                            .order
+                            .get(state.sel)
+                            .copied()
+                            .map(|g| (g, state.fresh, fade))
+                    })
+                    .flatten()
             }
+            _ => None,
+        };
+        if let Some((g, fresh, alpha)) = launch_card {
+            let resumes = resume_of(shelf, settings, &games[g]).is_some();
+            let (status, note) = if fresh && resumes {
+                ("Starting fresh", Some("The resume point is set aside"))
+            } else if resumes {
+                ("Resuming\u{2026}", None)
+            } else {
+                ("Starting\u{2026}", None)
+            };
+            soft(
+                "the launch card",
+                ui.draw_starting(games[g].name(), status, note, alpha),
+            );
         }
         // Leaving for a game: this frame is what DSlot keeps on screen while it goes.
         if leaving.is_some() && !headless {

@@ -32,7 +32,6 @@ mod ui;
 
 use emulator::Emulators;
 use launch::{Ended, Launch};
-use nibkit::power::Requests;
 use rom::{Console, Game};
 use settings::Settings;
 use std::path::{Path, PathBuf};
@@ -506,10 +505,21 @@ fn run() -> Result<(), String> {
                 shell.trim();
                 platform::trim_memory();
                 mark("game starting");
+                // Once the game has had time to take over the top display, wipe the launch text
+                // ("Starting…" / "Resuming…") out of DSlot's dumb buffer so tearing down the
+                // emulator's SDL window never flashes the launch overlay back on screen.
+                let cleared = std::cell::Cell::new(false);
+                let poll = || {
+                    if !cleared.get() && began.elapsed() >= STARTED {
+                        cleared.set(true);
+                        clear_top_frame(&opts);
+                    }
+                    power.take()
+                };
                 let played = if game.is_app() {
-                    start_app(game, &apps, &power).map(|ended| (ended, None))
+                    start_app(game, &apps, poll).map(|ended| (ended, None))
                 } else {
-                    play(game, &emulators, &settings, &ra, &power, fresh)
+                    play(game, &emulators, &settings, &ra, poll, fresh)
                 };
                 // Why it came straight back, if it did: the shelf says so when it is up again.
                 let (put_away, notice) = match played {
@@ -527,7 +537,9 @@ fn run() -> Result<(), String> {
                 if !game.is_app() {
                     ra.played(&game.path);
                 }
-                // And until the shelf's first frame again.
+                // Hold clean black until the shelf's first frame again (never re-showing the
+                // launch overlay or stale port help).
+                clear_last_frame(&opts);
                 hold_last_frame(&opts);
                 // An emulator may set its own options in DSlot's settings, from its own menu.
                 settings.reload();
@@ -549,6 +561,30 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+    }
+}
+
+/// Wipes the top screen's held KMS buffer to black (leaving any bottom-screen help intact).
+fn clear_top_frame(opts: &ui::Opts) {
+    if let Some(out) = opts
+        .outputs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        out.clear_top();
+    }
+}
+
+/// Wipes both held KMS buffers to black before holding them on return from a game.
+fn clear_last_frame(opts: &ui::Opts) {
+    if let Some(out) = opts
+        .outputs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        out.clear();
     }
 }
 
@@ -580,7 +616,7 @@ fn play(
     emulators: &Emulators,
     settings: &Settings,
     ra: &achievements::Ra,
-    power: &Requests,
+    put_away: impl Fn() -> bool,
     fresh: bool,
 ) -> Result<(Ended, Option<String>), String> {
     let emulator = launch::emulator_for(emulators, settings, game).ok_or_else(|| {
@@ -601,7 +637,7 @@ fn play(
         .extend(ra.env_for(emulator, game.console.folder(), settings.hardcore_chosen()));
     let began = Instant::now();
     let ended = launch
-        .run(|| power.take())
+        .run(put_away)
         .map_err(|e| format!("cannot start {}: {e}", launch.program))?;
     eprintln!(
         "dslot: {} exited with {}",
@@ -672,7 +708,7 @@ fn stopped(emulator: &str, ran: std::time::Duration, ended: &Ended) -> Option<St
 fn start_app(
     game: &Game,
     apps: &[nibkit::dslot::Found],
-    power: &Requests,
+    put_away: impl Fn() -> bool,
 ) -> Result<Ended, String> {
     let found = apps
         .iter()
@@ -680,7 +716,7 @@ fn start_app(
         .ok_or("the app has gone")?;
     let launch = Launch::app(found)?;
     let ended = launch
-        .run(|| power.take())
+        .run(put_away)
         .map_err(|e| format!("cannot start {}: {e}", launch.program))?;
     eprintln!("dslot: {} exited with {}", found.app.name, ended.status);
     Ok(ended)
@@ -698,12 +734,13 @@ fn launch_one(rom: &Path, dirs: &platform::Dirs) -> Result<(), String> {
         std::slice::from_ref(&game),
         &emulators,
     );
+    let power = nibkit::power::watch();
     let (ended, _) = play(
         &game,
         &emulators,
         &settings,
         &achievements::Ra::new(dirs.achievements.clone(), &dirs.cache),
-        &nibkit::power::watch(),
+        || power.take(),
         false,
     )?;
     std::process::exit(ended.status.code().unwrap_or(1));

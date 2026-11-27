@@ -21,7 +21,7 @@ use crate::systems::Card;
 use nibkit::menu::colour;
 use nibkit::net::{Bluetooth, Wifi};
 use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::rect::Rect;
+use sdl2::rect::{Point, Rect};
 use sdl2::render::{BlendMode, Texture, TextureCreator, WindowCanvas};
 use sdl2::video::WindowContext;
 use std::collections::{HashMap, HashSet};
@@ -160,12 +160,16 @@ pub struct Ui<'a> {
     pub canvases: Vec<WindowCanvas>,
     pub(super) creators: Vec<TextureCreator<WindowContext>>,
     pub(super) fonts: &'a Fonts,
+    /// Where LaunchBox artwork is cached, used to split a PSP UMD on demand when spinning it up.
+    cache: PathBuf,
     /// The look (Game case, SNES cart shape) the artwork was made for.
     pub looks: art::Looks,
     loader: Loader,
     pub top: View,
     pub bot: View,
     arts: HashMap<usize, Art>,
+    /// Active PSP UMD split into `(game, inner_disc, stationary_shell)` textures while spinning.
+    umd_spin: Option<(usize, Texture, Texture)>,
     /// Grid cover size in pixels the loader is composing thumbs at.
     thumb: (usize, usize),
     /// Grid covers, by game: the pixel size they were composed at, and one texture on the bottom
@@ -293,10 +297,12 @@ impl<'a> Ui<'a> {
             canvases,
             creators,
             fonts,
+            cache: cache.clone(),
             looks,
             top,
             bot,
             arts: HashMap::new(),
+            umd_spin: None,
             thumb,
             thumbs: HashMap::new(),
             texts: HashMap::new(),
@@ -542,6 +548,10 @@ impl Ui<'_> {
         for (_, a) in self.arts.drain() {
             a.destroy();
         }
+        if let Some((_, disc, shell)) = self.umd_spin.take() {
+            destroy(disc);
+            destroy(shell);
+        }
         for (_, (_, t)) in self.thumbs.drain() {
             destroy(t);
         }
@@ -564,6 +574,12 @@ impl Ui<'_> {
     pub(super) fn forget_art_of(&mut self, g: usize) {
         if let Some(a) = self.arts.remove(&g) {
             a.destroy();
+        }
+        if self.umd_spin.as_ref().is_some_and(|(id, _, _)| *id == g) {
+            if let Some((_, disc, shell)) = self.umd_spin.take() {
+                destroy(disc);
+                destroy(shell);
+            }
         }
         if let Some((_, t)) = self.thumbs.remove(&g) {
             destroy(t);
@@ -724,18 +740,18 @@ impl Ui<'_> {
         Ok(settled)
     }
 
-    /// Draws one line of text, `size` units high, its top at `y`. `anchor` is where `x` is
-    /// along it: 0 at its left end, 0.5 in its middle, 1 at its right end.
-    pub fn text(
+    /// Draws one line of text with an explicit opacity `alpha` (0..=255), resetting the cached
+    /// texture's alpha mod back to 255 afterwards.
+    fn text_alpha(
         &mut self,
         v: View,
         s: &str,
         (size, bold): (f32, bool),
         (x, y): (f32, f32),
         anchor: f32,
-        c: Color,
+        (c, alpha): (Color, u8),
     ) -> Result<(), String> {
-        if s.is_empty() {
+        if s.is_empty() || alpha == 0 {
             return Ok(());
         }
         let px = (size * v.s).round() as u32;
@@ -758,13 +774,30 @@ impl Ui<'_> {
             return Ok(());
         };
         t.set_color_mod(c.r, c.g, c.b);
+        t.set_alpha_mod(alpha);
         let dst = Rect::new(
             (v.ox + x * v.s - anchor * *w as f32).round() as i32,
             (v.oy + y * v.s).round() as i32,
             *w,
             *h,
         );
-        self.canvases[v.c].copy(t, None, dst)
+        let res = self.canvases[v.c].copy(t, None, dst);
+        t.set_alpha_mod(255);
+        res
+    }
+
+    /// Draws one line of text, `size` units high, its top at `y`. `anchor` is where `x` is
+    /// along it: 0 at its left end, 0.5 in its middle, 1 at its right end.
+    pub fn text(
+        &mut self,
+        v: View,
+        s: &str,
+        (size, bold): (f32, bool),
+        (x, y): (f32, f32),
+        anchor: f32,
+        c: Color,
+    ) -> Result<(), String> {
+        self.text_alpha(v, s, (size, bold), (x, y), anchor, (c, 255))
     }
 
     fn ensure_bar(&mut self, idx: usize) -> Result<(), String> {
@@ -902,7 +935,7 @@ impl Ui<'_> {
     ) -> Result<(), String> {
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         let hint = match hint {
-            HINT if !art::has_shell(console) || art::disc::is_cd(console) => START_HINT,
+            HINT if !art::has_shell(console) || art::disc::is_disc(console) => START_HINT,
             hint => hint,
         };
         self.text(v, hint, (18.0, false), (SW / 2.0, 636.0), 0.5, FAINT)?;
@@ -1258,17 +1291,24 @@ impl Ui<'_> {
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
         self.heading(heading, &strip)?;
 
+        if launch.angle == 0.0 {
+            if let Some((_, disc, shell)) = self.umd_spin.take() {
+                destroy(disc);
+                destroy(shell);
+            }
+        }
         // Furthest carts first, so the centre one sits on top.
         let p = carousel;
         let shown = |i: &usize| (*i as f32 - p).abs() < 2.6 && self.arts.contains_key(&list[*i]);
         let mut order: Vec<usize> = (0..list.len()).filter(shown).collect();
         order.sort_by(|a, b| (*b as f32 - p).abs().total_cmp(&(*a as f32 - p).abs()));
         for i in order {
+            let g = list[i];
             let d = i as f32 - p;
             let away = d.abs().min(1.0);
             let scale = if i == sel { launch.scale } else { 1.0 };
             let (mut cart_w, mut cart_h) = if mixed {
-                let gc = games[list[i]].console;
+                let gc = games[g].console;
                 if art::has_shell(gc) {
                     let (cw, ch, _) = cart_geometry(gc);
                     (cw, ch)
@@ -1289,13 +1329,44 @@ impl Ui<'_> {
             let h = w * cart_h / cart_w;
             let y = base_y + if i == sel { launch.pull } else { 0.0 };
             let dst = v.rect(SW / 2.0 + d * pitch - w / 2.0, y - h / 2.0, w, h);
-            if let Some(a) = self.arts.get_mut(&list[i]) {
-                let dim = if i == sel {
-                    1.0
-                } else {
-                    1.0 - 0.65 * launch.spin
-                };
-                a.cart.set_alpha_mod(((255.0 - 150.0 * away) * dim) as u8);
+            let dim = if i == sel {
+                1.0
+            } else {
+                1.0 - 0.65 * launch.spin
+            };
+            let alpha = ((255.0 - 150.0 * away) * dim) as u8;
+            if i == sel && launch.angle != 0.0 && games[g].console == Console::Psp {
+                if self.umd_spin.as_ref().is_none_or(|(id, _, _)| *id != g) {
+                    let (disc_img, shell_img) =
+                        art::umd_spin_layers(&games[g], self.fonts, &self.cache);
+                    let disc_tex = texture(&self.creators[v.c], &disc_img)?;
+                    let shell_tex = texture(&self.creators[v.c], &shell_img)?;
+                    if let Some((_, old_d, old_s)) = self.umd_spin.replace((g, disc_tex, shell_tex))
+                    {
+                        destroy(old_d);
+                        destroy(old_s);
+                    }
+                }
+                if let Some((_, disc_tex, shell_tex)) = self.umd_spin.as_mut() {
+                    let pivot = Point::new(
+                        (dst.width() as f32 * art::disc::UMD_CENTER.0).round() as i32,
+                        (dst.height() as f32 * art::disc::UMD_CENTER.1).round() as i32,
+                    );
+                    disc_tex.set_alpha_mod(alpha);
+                    shell_tex.set_alpha_mod(alpha);
+                    self.canvases[v.c].copy_ex(
+                        disc_tex,
+                        None,
+                        dst,
+                        launch.angle as f64,
+                        Some(pivot),
+                        false,
+                        false,
+                    )?;
+                    self.canvases[v.c].copy(shell_tex, None, dst)?;
+                }
+            } else if let Some(a) = self.arts.get_mut(&g) {
+                a.cart.set_alpha_mod(alpha);
                 if i == sel && launch.angle != 0.0 {
                     self.canvases[v.c].copy_ex(
                         &a.cart,
@@ -2463,32 +2534,88 @@ impl Ui<'_> {
         Ok(())
     }
 
-    /// A game started fresh (Select + A): said on the top screen, over the fade, so that it
-    /// stays up while the game starts.
-    pub fn draw_fresh(&mut self) -> Result<(), String> {
+    /// Borderless launch overlay centred on the top screen over a deep dark scrim ("Starting…",
+    /// "Resuming…", or "Starting fresh"), matching nibcase's exit screen and kept on the held
+    /// KMSDRM handoff frame while the emulator boots.
+    pub fn draw_starting(
+        &mut self,
+        title: &str,
+        status: &str,
+        note: Option<&str>,
+        alpha: f32,
+    ) -> Result<(), String> {
+        let alpha = alpha.clamp(0.0, 1.0);
+        if alpha <= 0.0 {
+            return Ok(());
+        }
         let v = self.top;
         self.canvases[v.c].set_clip_rect(v.rect(0.0, 0.0, SW, SH));
-        let (width, height) = (360.0, 104.0);
-        let (x, y) = ((SW - width) / 2.0, (SH - height) / 2.0);
-        self.white[v.c].set_alpha_mod(255);
-        self.white[v.c].set_color_mod(PANEL.r, PANEL.g, PANEL.b);
-        self.canvases[v.c].copy(&self.white[v.c], None, v.rect(x, y, width, height))?;
-        self.text(
+        // Deep scrim behind the borderless text so bright box art drops back right away.
+        self.shade(v, (0.82 * alpha).clamp(0.0, 1.0))?;
+
+        const MAX_W: f32 = SW - 96.0;
+        const STATUS_SIZE: f32 = 30.0;
+        const NOTE_SIZE: f32 = 20.0;
+        const GAP: f32 = 20.0;
+        const NOTE_GAP: f32 = 14.0;
+
+        // Fit the game title at 64 px (then 52 / 42 px) across up to two lines, matching
+        // nibkit's top overlay typography.
+        let mut title_size = 42.0;
+        let mut title_lines = Vec::new();
+        for sz in [64.0, 52.0, 42.0] {
+            let probe = self.fonts.wrap(title, sz, true, MAX_W, 3);
+            title_size = sz;
+            if probe.len() <= 2 {
+                title_lines = probe;
+                break;
+            }
+            title_lines = self.fonts.wrap(title, sz, true, MAX_W, 2);
+        }
+        let step = title_size * 1.1;
+        let title_h = if title_lines.is_empty() {
+            0.0
+        } else {
+            title_size + (title_lines.len() - 1) as f32 * step
+        };
+        let note_h = note.map_or(0.0, |_| NOTE_GAP + NOTE_SIZE);
+        let total_h = title_h + if title_h > 0.0 { GAP } else { 0.0 } + STATUS_SIZE + note_h;
+        let mut y = 357.0 - total_h / 2.0;
+        let text_a = (255.0 * alpha).round() as u8;
+
+        for line in &title_lines {
+            self.text_alpha(
+                v,
+                line,
+                (title_size, true),
+                (SW / 2.0, y),
+                0.5,
+                (WHITE, text_a),
+            )?;
+            y += step;
+        }
+        if !title_lines.is_empty() {
+            y += GAP - (step - title_size);
+        }
+        self.text_alpha(
             v,
-            "Starting fresh",
-            (30.0, true),
-            (SW / 2.0, y + 18.0),
+            status,
+            (STATUS_SIZE, true),
+            (SW / 2.0, y),
             0.5,
-            GOLD,
+            (GOLD, text_a),
         )?;
-        self.text(
-            v,
-            "The resume point is set aside",
-            (20.0, false),
-            (SW / 2.0, y + 62.0),
-            0.5,
-            DIM,
-        )
+        if let Some(note) = note {
+            self.text_alpha(
+                v,
+                note,
+                (NOTE_SIZE, false),
+                (SW / 2.0, y + STATUS_SIZE + NOTE_GAP),
+                0.5,
+                (DIM, text_a),
+            )?;
+        }
+        Ok(())
     }
 
     /// Subtle progress pill in the top-right corner of the top screen while a background artwork
@@ -2783,7 +2910,7 @@ impl Page<'_> {
     /// The buttons under the shelf: A opens a folder of games rather than inserting it, and
     /// B goes back out of the one open.
     pub fn hint(&self) -> String {
-        let hint = if art::has_shell(self.console) && !art::disc::is_cd(self.console) {
+        let hint = if art::has_shell(self.console) && !art::disc::is_disc(self.console) {
             HINT
         } else {
             START_HINT

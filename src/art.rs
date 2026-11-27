@@ -1062,6 +1062,21 @@ pub fn art(shell: &Shell, game: &Game, fonts: &Fonts, looks: Looks, cache: &Path
     (cart, boxart(game, fonts, looks.black(game), src.as_ref()))
 }
 
+/// Separate `(disc, shell)` textures for spinning a PSP UMD's inner disc inside its stationary
+/// plastic caddy during launch and eject.
+pub fn umd_spin_layers(game: &Game, fonts: &Fonts, cache: &Path) -> (Img, Img) {
+    let scan = load_png(&game.art("Carts")).map(|c| fit_contain(&c, disc::SIZE.0, disc::SIZE.1));
+    let label = scan
+        .is_none()
+        .then(|| load_png(&game.art("Labels")))
+        .flatten();
+    let cover = scan
+        .is_none()
+        .then(|| load_png(&box_art(game, cache)))
+        .flatten();
+    disc::umd_spin_layers(game, fonts, label.as_ref(), cover.as_ref(), scan.as_ref())
+}
+
 /// Scales `src` to fit inside `w` x `h` while preserving its aspect ratio, centred horizontally
 /// and aligned to the bottom so finished cart/UMD scans sit cleanly over the slot.
 fn fit_contain(src: &Img, w: usize, h: usize) -> Img {

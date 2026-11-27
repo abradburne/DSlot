@@ -29,20 +29,12 @@ const STACKING_RING: f32 = 0.2;
 const MIRROR: f32 = 23.0 / 60.0;
 const RIM: f32 = 0.985;
 
-/// Whether `console`'s games are discs (CDs or PSP UMDs).
+/// Whether `console`'s games are discs (bare optical CDs or PSP UMDs), which spin up in place
+/// when started rather than sliding down into a cartridge slot.
 pub fn is_disc(console: Console) -> bool {
     matches!(
         console,
         Console::PlayStation | Console::Psp | Console::PcEngineCd | Console::MegaCd
-    )
-}
-
-/// Whether `console`'s games are bare round optical CDs (which spin up in place when started,
-/// unlike cartridges and PSP UMDs that slide into a slot).
-pub fn is_cd(console: Console) -> bool {
-    matches!(
-        console,
-        Console::PlayStation | Console::PcEngineCd | Console::MegaCd
     )
 }
 
@@ -190,6 +182,172 @@ const UMD_CORNER: f32 = 5.0;
 const UMD_ARC: f32 = 68.0;
 const UMD_DISC: f32 = 60.0;
 const UMD_HUB: f32 = 21.0;
+
+/// Normalized `(x, y)` centre of the inner 60 mm disc inside the `SIZE` (480 × 480) UMD canvas,
+/// used as the rotation pivot when spinning the disc inside its stationary shell.
+pub const UMD_CENTER: (f32, f32) = (
+    0.5,
+    (4.0 + (UMD_SHELL.0 / 2.0) * ((SIZE.1 as f32 - 8.0) / UMD_SHELL.1)) / SIZE.1 as f32,
+);
+
+/// Splits a PSP UMD into `(disc, shell)` layers of `SIZE` so the inner disc can spin clockwise
+/// behind its stationary milky plastic caddy and white "UMD" hub cap. Works for both scanned
+/// UMD artwork (`scan`) and generated UMDs (`label` / `cover`).
+pub fn umd_spin_layers(
+    game: &Game,
+    fonts: &Fonts,
+    label: Option<&Img>,
+    cover: Option<&Img>,
+    scan: Option<&Img>,
+) -> (Img, Img) {
+    let (w, h) = SIZE;
+    let mm = (h as f32 - 8.0) / UMD_SHELL.1;
+    let (cx, top) = (w as f32 / 2.0, 4.0);
+    let half = UMD_SHELL.0 / 2.0 * mm;
+    let cy = top + half;
+    let bottom = top + UMD_SHELL.1 * mm;
+    let (disc_r, hub_r) = (UMD_DISC / 2.0 * mm, UMD_HUB / 2.0 * mm);
+    let corner = UMD_CORNER * mm;
+    let arc = UMD_ARC * mm;
+    let arc_y = bottom - arc;
+    let bow = arc - (arc * arc - (half - corner).powi(2)).sqrt() + corner * 0.6;
+    let inner_r = disc_r - 0.9 * mm;
+
+    if let Some(src) = scan {
+        let mut disc_img = Img::new(w, h);
+        let mut shell_img = Img::new(w, h);
+        for py in 0..h {
+            for px in 0..w {
+                let i = (py * w + px) * 4;
+                let a = src.px[i + 3];
+                if a == 0 {
+                    continue;
+                }
+                let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+                let d = (x - cx).hypot(y - cy);
+                // Soft 1.5 px mask for the spinning disc annulus between hub_r and inner_r.
+                let in_outer = ((inner_r - d) / 1.5 + 0.5).clamp(0.0, 1.0);
+                let out_hub = ((d - hub_r) / 1.5 + 0.5).clamp(0.0, 1.0);
+                let disc_w = in_outer * out_hub;
+                let shell_w = 1.0 - disc_w;
+                if disc_w > 0.0 {
+                    let angle = (y - cy).atan2(x - cx);
+                    let sweep = (2.0 * angle - 0.9).cos() * 0.5 + 0.5;
+                    let gloss = 14.0 * sweep;
+                    for k in 0..3 {
+                        disc_img.px[i + k] = (src.px[i + k] as f32 + gloss).clamp(0.0, 255.0) as u8;
+                    }
+                    disc_img.px[i + 3] = (a as f32 * disc_w).round() as u8;
+                }
+                if shell_w > 0.0 {
+                    shell_img.px[i..i + 3].copy_from_slice(&src.px[i..i + 3]);
+                    shell_img.px[i + 3] = (a as f32 * shell_w).round() as u8;
+                }
+            }
+        }
+        return (disc_img, shell_img);
+    }
+
+    // Generated UMD: render the printed disc with optical sheen into disc_img, and the stationary
+    // milky plastic shell (translucent window over the disc, opaque rim, hub cap, notch, arrow)
+    // into shell_img.
+    let side = (disc_r * 2.0) as usize;
+    let print = face(game, fonts, label, cover, side);
+    let (fx, fy) = (cx - disc_r, cy - disc_r);
+    let shell_sdf = |x: f32, y: f32| -> f32 {
+        let ax = (x - cx).abs();
+        if y <= cy {
+            (x - cx).hypot(y - cy) - half
+        } else {
+            let side = ax - (half - corner);
+            let under = (x - cx).hypot(y - arc_y) - arc + corner;
+            side.max(0.0).hypot(under.max(0.0)) + side.max(under).min(0.0) - corner
+        }
+    };
+    let mut disc_img = Img::new(w, h);
+    let mut shell_img = Img::new(w, h);
+    for py in 0..h {
+        for px in 0..w {
+            let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+            let out = shell_sdf(x, y);
+            let alpha = (0.5 - out).clamp(0.0, 1.0);
+            if alpha <= 0.0 {
+                continue;
+            }
+            let d = (x - cx).hypot(y - cy);
+            let light = 1.0 - 0.10 * ((x + y) / (w + h) as f32);
+            let milky = [214.0 * light, 217.0 * light, 222.0 * light];
+            let i = (py * w + px) * 4;
+
+            // Inner spinning disc layer.
+            let disc_a = ((disc_r - d) + 0.5).clamp(0.0, 1.0);
+            if disc_a > 0.0 && d >= hub_r - 1.5 {
+                let (ix, iy) = ((x - fx) as usize, (y - fy) as usize);
+                let pi = (iy.min(side - 1) * side + ix.min(side - 1)) * 4;
+                let p = &print.px[pi..pi + 3];
+                let angle = (y - cy).atan2(x - cx);
+                let sweep = (2.0 * angle - 0.9).cos() * 0.5 + 0.5;
+                let gloss = 20.0 * sweep;
+                for (k, &v) in p.iter().enumerate() {
+                    disc_img.px[i + k] = (v as f32 + gloss).clamp(0.0, 255.0) as u8;
+                }
+                disc_img.px[i + 3] = (disc_a * alpha * 255.0).round() as u8;
+            }
+
+            // Stationary shell overlay layer.
+            let edge = (1.0 - (out + 2.0).abs() / 2.0).max(0.0);
+            let (c, sa) = if d < hub_r {
+                let ring = (1.0 - (d - (hub_r - 3.0)).abs() / 2.5).max(0.0);
+                ([246.0 - 70.0 * ring; 3], alpha)
+            } else if d < inner_r {
+                // Translucent milky plastic window over the spinning disc.
+                (milky, alpha * 0.12)
+            } else if d < disc_r {
+                ([168.0; 3], alpha)
+            } else {
+                (milky.map(|v| v * (1.0 - 0.3 * edge)), alpha)
+            };
+            for (k, v) in c.into_iter().enumerate() {
+                shell_img.px[i + k] = v.clamp(0.0, 255.0) as u8;
+            }
+            shell_img.px[i + 3] = (sa * 255.0).round() as u8;
+        }
+    }
+    const INK: Rgba = [40, 42, 48, 255];
+    let t = fonts.render("UMD", hub_r * 0.62, true);
+    shell_img.stamp(
+        &t,
+        (cx - t.w as f32 / 2.0) as i32,
+        (cy - t.h as f32 / 2.0) as i32,
+        INK,
+    );
+    shell_img.rrect(
+        cx + half - 9.0 * mm,
+        bottom - bow - 4.4 * mm,
+        6.0 * mm,
+        2.2 * mm,
+        [1.1 * mm; 4],
+        [150, 153, 160, 255],
+    );
+    let (ax, ay, size) = (cx - 0.64 * half, cy - 0.64 * half, 3.6 * mm);
+    for py in (ay - size) as usize..(ay + size) as usize {
+        for px in (ax - size) as usize..(ax + size) as usize {
+            let (u, v) = (px as f32 + 0.5 - ax, py as f32 + 0.5 - ay);
+            let (along, across) = (
+                (u + v) * std::f32::consts::FRAC_1_SQRT_2,
+                (v - u) * std::f32::consts::FRAC_1_SQRT_2,
+            );
+            let inside = along > -size * 0.7
+                && along < size * 0.7
+                && across.abs() < (along + size * 0.7) * 0.62;
+            if inside {
+                let i = (py * w + px) * 4;
+                shell_img.px[i..i + 4].copy_from_slice(&[250, 206, 50, 255]);
+            }
+        }
+    }
+    (disc_img, shell_img)
+}
 
 /// `game`'s UMD: its print (`label`, else `cover`) on the disc seen through the shell.
 fn umd(game: &Game, fonts: &Fonts, label: Option<&Img>, cover: Option<&Img>) -> Img {
@@ -382,5 +540,33 @@ mod tests {
             .chunks(4)
             .any(|p| p[..3] == [255, 196, 60]);
         assert!(gold);
+    }
+
+    #[test]
+    fn umd_spin_layers_separates_disc_and_shell() {
+        let dir = TempDir::new("umd-spin");
+        let psp = dir.path().join("PSP");
+        std::fs::create_dir_all(&psp).unwrap();
+        let iso = psp.join("Lumen Drift (USA).iso");
+        std::fs::write(&iso, b"").unwrap();
+        let fonts = Fonts::load();
+        let g = game(&iso, Console::Psp);
+        let (disc_img, shell_img) = umd_spin_layers(&g, &fonts, None, None, None);
+        assert_eq!((disc_img.w, disc_img.h), SIZE);
+        assert_eq!((shell_img.w, shell_img.h), SIZE);
+        let alpha = |img: &Img, x: usize, y: usize| img.px[(y * img.w + x) * 4 + 3];
+        let (cx, cy) = (
+            (SIZE.0 as f32 * UMD_CENTER.0) as usize,
+            (SIZE.1 as f32 * UMD_CENTER.1) as usize,
+        );
+        // Hub cap belongs to the stationary shell, not the spinning disc.
+        assert_eq!(alpha(&shell_img, cx, cy - 40), 255);
+        assert_eq!(alpha(&disc_img, cx, cy - 40), 0);
+        // Mid-disc annulus is opaque on the spinning disc and translucent on the shell window.
+        assert_eq!(alpha(&disc_img, cx, cy + 140), 255);
+        assert!(alpha(&shell_img, cx, cy + 140) < 60);
+        // Bottom shell outside the disc is opaque on the shell and transparent on the disc.
+        assert_eq!(alpha(&shell_img, cx, SIZE.1 - 7), 255);
+        assert_eq!(alpha(&disc_img, cx, SIZE.1 - 7), 0);
     }
 }

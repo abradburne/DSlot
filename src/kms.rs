@@ -28,6 +28,8 @@ impl Kms {
         Ok(())
     }
     pub fn paint(&mut self, _imgs: &[&crate::gfx::Img]) {}
+    pub fn clear_top(&mut self) {}
+    pub fn clear(&mut self) {}
     pub fn set(&self) -> Result<(), String> {
         Ok(())
     }
@@ -375,6 +377,23 @@ mod linux {
                         px.copy_from_slice(&[p[2], p[1], p[0], 255]);
                     }
                 }
+            }
+        }
+
+        /// Fills the top screen's mapped buffer with black (leaving any bottom-screen buffer,
+        /// such as port exit help, intact). Needs no DRM master.
+        pub fn clear_top(&mut self) {
+            if let Some(s) = self.screens.first() {
+                // SAFETY: `s.map` is a valid read/write mapping of `s.size` bytes.
+                unsafe { std::ptr::write_bytes(s.map, 0, s.size) };
+            }
+        }
+
+        /// Fills every screen's mapped buffer with black. Needs no DRM master.
+        pub fn clear(&mut self) {
+            for s in &self.screens {
+                // SAFETY: `s.map` is a valid read/write mapping of `s.size` bytes.
+                unsafe { std::ptr::write_bytes(s.map, 0, s.size) };
             }
         }
 
