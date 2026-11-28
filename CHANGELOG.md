@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.0.0-beta1
+
+The first beta of DSlot 1.0: a Home page across every console, artwork DSlot fetches itself,
+games sent over Wi-Fi, grid sizes, discs that spin, and a much faster start.
+
+- **Home**: a page at the left of the tabs (a house on its tab, the first blade in the system
+  picker) with the games of every console together: Recent, Favourites, Rating and Name, picked
+  by a tap on the bar under the tabs or with L2 and R2. Carts, discs and boxes of different
+  consoles sit side by side in the Carts view, each its own shape; Grid, List and the top
+  screen mark each game's console. On the Home blade the top screen shows a card of the whole
+  library. Start opens Home's own view sheet (`[console.HOME]`). Apps and folders are not on it.
+- **Name, Recent, Favourites, Rating on every console**: the same bar under the tabs on each
+  console's page, in step with the console's show and sort settings. Arcade keeps its boards'
+  sections where there is more than one board.
+- **Artwork DSlot fetches itself** (Game, Console and System → Artwork): boxes, cart labels
+  and discs for the games on the cards, matched by name, by the game code in a DS ROM, and by
+  CRC-32 for DS, GBA, GB and GBC cart scans. From Libretro Thumbnails, GameTDB (DS covers and
+  labels), art.slot-cfw.fyi (cart scans), and LaunchBox's games database for carts, discs and
+  boxes the others lack, with No-Intro and FBNeo names to match by. It runs in the background:
+  the shelf fills in as pictures arrive, a pill at the top right of the top screen shows the
+  job, and it can be cancelled. An index of LaunchBox's pictures for the 23 consoles (25,953
+  games, 2 MB) is installed with DSlot (`/usr/share/dslot/art/` on nibOS, `<app>/art/` on the
+  stock OS; `tools/update-launchbox-art.py` refreshes it).
+- **Receive games** (Network → Receive games, on nibOS): games sent from a phone or computer
+  with LocalSend land in the right console's folder, through nibOS's `nibos-drop`. The page
+  turns the receiver on and off and shows the device's name and address, an optional PIN,
+  which card games go to, and the last transfers. With Fetch artwork on, a game that arrives
+  gets its box and cart art by itself.
+- **Grid sizes**: Small (6 × 4), Medium (5 × 3), Large (4 across) and Extra large (3 × 2), for
+  everything or per console (Apps too), previewed as you choose from Start.
+- **Discs spin**: PlayStation, Mega-CD and PC Engine CD discs spin up as a game starts and
+  down when it comes back, with the drive's sound; a tap spins one. A PSP UMD's inner disc
+  turns inside its shell.
+- **Starting and resuming**: as a game goes in, the top screen shows its title over a dark
+  scrim with "Starting…", "Resuming…" or "Starting fresh", held until the game draws.
+  "Resuming…" only when there is a resume point on the card. Coming back from a game never
+  flashes the old text.
+- **Cart and box art drawn whole**: a finished scan in `Carts/` keeps its shape (disc
+  consoles too, a PSP UMD for one); box art standing in for a cart label on GB, GBC, Game Gear
+  and Lynx is shown whole over a blurred copy of itself where it would have been cropped; and
+  Japanese GB, GBC, GBA and Super Famicom boxes are drawn in their own proportions. Grid
+  thumbnails made before this are redrawn.
+- **A faster start**: DSlot tells systemd when the first shelf frame is up (`Type=notify`),
+  scans the games and loads its fonts while the screens and SDL come up, leaves what the first
+  frame doesn't need until after it, and starts the Wi-Fi and Bluetooth watch a frame later.
+  Thumbnails are cached LZ4-compressed (old ones are still read), and the system picker reads
+  its blades once, not every frame.
+- **Less memory, less power at rest**: a resting shelf no longer rescans the library or lays
+  out text every frame (it looks for changes twice a second), the screensaver runs at 10
+  frames a second, and the emulators' descriptions are re-read only when their folder
+  changes. Thumbnail, resume-picture and cart caches are bounded, the CJK font loads when
+  first needed, and memory is handed back before a game starts and after an artwork job.
+- **Power off and restart on nibOS** go straight to systemd, so the goodbye picture is up in
+  about a quarter of a second.
+- `dslot.service` no longer waits for `systemd-remount-fs.service`.
+
 ## 0.8.0
 
 - **GBA DS page**: a page after the GBA's for the games in `Roms/GBA` that

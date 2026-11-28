@@ -16,8 +16,8 @@
 # Emulators ship their own descriptions in /usr/share/dslot/emulators (docs/emulators.md).
 
 pkgname=dslot
-pkgver=0.8.0
-pkgrel=2
+pkgver=1.0.0beta1
+pkgrel=1
 pkgdesc="Game shelf for the Anbernic RG DS+: carts over a slot, boxes on the top screen"
 arch=(aarch64)
 url="https://github.com/abradburne/DSlot"
@@ -33,8 +33,10 @@ _root=$(cd "$startdir/../.." && pwd)
 # names a local checkout to build both against instead (docs/building.md).
 _nibkit=${NIBKIT:+$(cd "$NIBKIT" && pwd)}
 
+# Cargo.toml's version without the hyphen pacman doesn't allow: 1.0.0-beta1 is 1.0.0beta1 here,
+# which pacman orders before 1.0.0.
 pkgver() {
-    sed -n 's/^version = "\(.*\)"/\1/p' "$_root/Cargo.toml" | head -1
+    sed -n 's/^version = "\(.*\)"/\1/p' "$_root/Cargo.toml" | head -1 | tr -d -
 }
 
 prepare() {
