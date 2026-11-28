@@ -12,6 +12,7 @@ What is not DSlot's own keeps its own licence:
 | nibkit (nibOS's SDK: settings, the shared menu, the radios) | MIT | [github.com/abradburne/nibkit](https://github.com/abradburne/nibkit), by tag |
 | Roboto Condensed, embedded for the text | SIL Open Font License 1.1 | [assets/OFL.txt](../assets/OFL.txt), shipped beside every copy |
 | The system cards' console photos | public domain, or CC BY 4.0 as credited | [photo-credits.md](photo-credits.md) |
+| The artwork index (`data/art/`): game names and picture file names from the [LaunchBox Games Database](https://gamesdb.launchbox-app.com) | LaunchBox's; it publishes no licence for its database dump | see "Artwork" below |
 | The crates built into the program | their own; listed below | [THIRD-PARTY.md](../THIRD-PARTY.md) |
 | SDL2 | zlib | the system's `libSDL2`, linked at run time, not built in |
 | The emulators DSlot starts | their own | separate programs and packages |
@@ -19,6 +20,20 @@ What is not DSlot's own keeps its own licence:
 The emulators are separate programs that DSlot starts with a command line, so their licences
 and DSlot's do not mix. The OFL covers the font file alone: embedding a font in a program does
 not make the program a derivative of the font.
+
+## Artwork
+
+DSlot ships no box art, cart labels or disc pictures. The Artwork menu fetches them, when the
+player asks, for the games on the player's own cards, from Libretro Thumbnails, GameTDB,
+art.slot-cfw.fyi and the LaunchBox Games Database; each picture stays its source's and its
+rights holder's.
+
+What DSlot does ship is an index for the last of these (`data/art/<console>.tsv.z`, made by
+`tools/update-launchbox-art.py` from LaunchBox's daily public dump, `Metadata.zip`): for each
+game, its name and the file names of its pictures on LaunchBox's server, and nothing else from
+the database. LaunchBox publishes no licence for the dump. The index is not covered by DSlot's
+GPL, it is credited here to the LaunchBox Games Database and its contributors, and it will be
+taken out if LaunchBox asks.
 
 ## The crates
 
