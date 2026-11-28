@@ -8,6 +8,7 @@ mod artwork;
 mod bugreport;
 mod details;
 mod device;
+mod drop;
 mod emulator;
 mod folders;
 mod gfx;

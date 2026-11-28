@@ -170,6 +170,14 @@ fn resume_files(wanted: &Wanted) -> Vec<PathBuf> {
     }
 }
 
+/// Whether `wanted`'s game currently has a resume state file on disk.
+pub fn exists(wanted: &Wanted) -> bool {
+    resume_files(wanted).into_iter().any(|p| {
+        let s = p.to_string_lossy();
+        (s.ends_with(".dss") || s.ends_with(".state")) && p.is_file()
+    })
+}
+
 /// Sets `wanted`'s game's resume point aside, so that it starts from the beginning: each file
 /// renamed `<file>.before-fresh`, replacing one set aside before. Returns the files moved
 /// (none, if there was no resume point).
@@ -675,5 +683,22 @@ mod tests {
             vec![d.join("Moon Bay.auto.state")]
         );
         assert!(!d.join("Moon Bay.auto.state").exists());
+    }
+
+    #[test]
+    fn exists_reflects_state_on_disk() {
+        let dir = TempDir::new("resume-exists");
+        let d = dir.path();
+        let snes9x = wanted(d, By::Nibcase("snes9x".into()));
+        assert!(!exists(&snes9x));
+        fs::write(
+            d.join("Moon Bay.auto.state"),
+            nibstate("Snes9x", 100, &png(4, 3)),
+        )
+        .unwrap();
+        assert!(exists(&snes9x));
+        assert!(!exists(&wanted(d, By::Nibcase("bsnes".into()))));
+        set_aside(&snes9x).unwrap();
+        assert!(!exists(&snes9x));
     }
 }

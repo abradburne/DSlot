@@ -155,6 +155,8 @@ pub struct Runner {
     cancel: Arc<AtomicBool>,
     batch: Arc<AtomicU64>,
     state: Arc<Mutex<Snapshot>>,
+    queue: Option<Arc<Mutex<VecDeque<Game>>>>,
+    active_kind: ArtKind,
     updated: Option<Receiver<PathBuf>>,
 }
 
@@ -165,6 +167,8 @@ impl Runner {
             cancel: Arc::new(AtomicBool::new(false)),
             batch: Arc::new(AtomicU64::new(0)),
             state: Arc::new(Mutex::new(Snapshot::default())),
+            queue: None,
+            active_kind: ArtKind::Both,
             updated: None,
         }
     }
@@ -218,6 +222,8 @@ impl Runner {
         self.updated = Some(rx);
 
         let queue = Arc::new(Mutex::new(VecDeque::from(targets)));
+        self.queue = Some(queue.clone());
+        self.active_kind = kind;
         let service = self.service.clone();
         let batch_counter = self.batch.clone();
         let my_batch = batch_counter.fetch_add(1, Ordering::Relaxed) + 1;
@@ -285,6 +291,33 @@ impl Runner {
                 }
             });
         }
+    }
+
+    /// Appends `targets` to the active batch if one is already running with the same `kind`,
+    /// otherwise starts a new non-replacing batch. Returns whether any work was queued.
+    pub fn enqueue(&mut self, label: String, targets: Vec<Game>, kind: ArtKind) -> bool {
+        if targets.is_empty() {
+            return false;
+        }
+        if !self.cancel.load(Ordering::Relaxed) && self.active_kind == kind {
+            if let Some(queue) = &self.queue {
+                let mut st = self.state.lock().unwrap();
+                if st.running {
+                    let mut q = queue.lock().unwrap();
+                    let mut added = 0usize;
+                    for g in targets {
+                        if !q.iter().any(|existing| existing.path == g.path) {
+                            q.push_back(g);
+                            added += 1;
+                        }
+                    }
+                    st.total += added;
+                    return added > 0;
+                }
+            }
+        }
+        self.start(label, targets, kind, false);
+        true
     }
 
     /// Game paths whose artwork just finished saving since the last frame.

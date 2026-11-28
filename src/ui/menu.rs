@@ -40,6 +40,7 @@ use super::radios::{Ask, Do, Radios, Reply, Snapshot};
 use super::sleepoff;
 use super::sysinfo;
 use crate::achievements::{self, Ra};
+use crate::drop as rom_drop;
 use crate::emulator::{Action, Emulator, Emulators};
 use crate::launch;
 use crate::platform::{self, Control};
@@ -103,6 +104,8 @@ pub enum Part {
     Time,
     /// System: the device and what it is using, read every second (sysinfo.rs).
     About,
+    /// Wi-Fi: receiving ROMs over LocalSend (`nibos-drop`, drop.rs).
+    Drop,
     /// Wi-Fi: what a player is asked for when something won't connect (netinfo.rs).
     NetInfo,
     /// System: What's new in the running nibOS and the help topics, from the files nibOS keeps
@@ -128,6 +131,7 @@ const SECTIONS: &[(Page, Part)] = &[
     (Page::System, Part::Help),
     (Page::Wifi, Part::Whole),
     (Page::Bluetooth, Part::Whole),
+    (Page::Wifi, Part::Drop),
     (Page::Wifi, Part::NetInfo),
     (Page::Achievements, Part::Whole),
     (Page::View, Part::Whole),
@@ -205,6 +209,22 @@ pub enum Item {
     Joined,
     /// Wi-Fi: the IPv4 address, for the common case; shown, not changed.
     Address,
+    /// LocalSend ROM receiver: on or off (`nibos-drop.service`).
+    DropPower,
+    /// LocalSend ROM receiver: device name and IP shown to senders; read-only.
+    DropDevice,
+    /// LocalSend ROM receiver: optional 4-digit PIN (Off / generated PIN).
+    DropPin,
+    /// LocalSend ROM receiver: destination card (Auto / TF2 card / Internal card).
+    DropTarget,
+    /// LocalSend ROM receiver: auto-fetch box + cart art when new ROMs land.
+    DropArtwork,
+    /// LocalSend ROM receiver: one recent accepted or rejected file; read-only.
+    DropRecent {
+        file: String,
+        detail: String,
+        rejected: bool,
+    },
     /// A line of the Network info page; A on any runs the reachability checks again.
     Info(InfoRow),
     /// Wi-Fi: look for networks again.
@@ -297,6 +317,12 @@ impl Item {
             Item::SleepOff => "Power off when asleep",
             Item::Joined => "Joined",
             Item::Address => "Address",
+            Item::DropPower => "Receive games",
+            Item::DropDevice => "Device name",
+            Item::DropPin => "PIN",
+            Item::DropTarget => "Save to",
+            Item::DropArtwork => "Fetch artwork",
+            Item::DropRecent { file, .. } => file,
             Item::Info(row) => row.label(),
             Item::Scan => "Look for networks",
             Item::Network(name) => name,
@@ -783,6 +809,8 @@ pub struct Menu {
     /// The network's facts, read on a thread while the Wi-Fi page is up (nibOS).
     netinfo: Option<netinfo::Watch>,
     net: netinfo::Info,
+    /// LocalSend ROM receiver's status and config (nibOS), and when they were read.
+    drop: Option<(rom_drop::Status, rom_drop::Config, Instant)>,
     /// The clock (nibOS): `nib clock status`, read on a thread while the System page is up.
     clock: Option<clock::Watch>,
     time: clock::Info,
@@ -837,6 +865,7 @@ fn section(page: Page, part: Part, cx: &Context) -> &'static str {
         Part::Power => return "Power",
         Part::Time => return "Time",
         Part::About => return "About",
+        Part::Drop => return "Receive games",
         Part::NetInfo => return "Network info",
         Part::Help => return "Help",
         Part::Whole => {}
@@ -923,6 +952,7 @@ impl Menu {
             help_drag: None,
             netinfo: None,
             net: netinfo::Info::default(),
+            drop: None,
             clock: None,
             time: clock::Info::default(),
             clock_view: ClockView::Closed,
@@ -1216,6 +1246,36 @@ impl Menu {
                 }));
             }
             (Page::System, _) => {}
+            (Page::Wifi, Part::Drop) => {
+                if rom_drop::there() {
+                    items.extend([
+                        Item::DropPower,
+                        Item::DropDevice,
+                        Item::DropPin,
+                        Item::DropTarget,
+                        Item::DropArtwork,
+                    ]);
+                    if let Some((status, _, _)) = &self.drop {
+                        for ev in status.recent.iter().take(6) {
+                            let rejected = ev.outcome != "accepted";
+                            let detail = if rejected {
+                                if ev.reason.is_empty() {
+                                    "Rejected".into()
+                                } else {
+                                    format!("Rejected: {}", ev.reason)
+                                }
+                            } else {
+                                format!("Added to {}", ev.console)
+                            };
+                            items.push(Item::DropRecent {
+                                file: ev.file.clone(),
+                                detail,
+                                rejected,
+                            });
+                        }
+                    }
+                }
+            }
             (Page::Wifi, Part::NetInfo) => {
                 items.extend(InfoRow::ALL.into_iter().map(Item::Info));
             }
@@ -1409,6 +1469,9 @@ impl Menu {
         if self.page == Page::Update {
             self.read_update();
         }
+        if self.page == Page::Wifi && self.part == Part::Drop && rom_drop::there() {
+            self.read_drop();
+        }
         // The network's facts, while the Wi-Fi page is up.
         if self.page == Page::Wifi && self.radios.is_some() {
             if self.netinfo.is_none() {
@@ -1486,6 +1549,9 @@ impl Menu {
             self.clock_row(&item, chosen, turn, cx);
         } else if self.page == Page::System && self.part == Part::About {
             // Shown only: nothing to press or turn.
+        } else if self.page == Page::Wifi && self.part == Part::Drop {
+            let item = item.clone();
+            self.drop_row(&item, chosen, turn);
         } else if self.page == Page::Wifi && self.part == Part::NetInfo {
             if chosen {
                 if let Some(watch) = &self.netinfo {
@@ -1645,6 +1711,93 @@ impl Menu {
             self.update_notes = Some((s.available.clone(), s.notes.clone()));
         }
         self.update = Some((s, Instant::now()));
+    }
+
+    /// Reads the LocalSend ROM receiver's status and config, at most every [`UPDATE_EVERY`].
+    fn read_drop(&mut self) {
+        if self
+            .drop
+            .as_ref()
+            .is_some_and(|(_, _, at)| at.elapsed() < UPDATE_EVERY)
+        {
+            return;
+        }
+        let s = rom_drop::status().unwrap_or_default();
+        let cfg = rom_drop::config();
+        self.drop = Some((s, cfg, Instant::now()));
+    }
+
+    /// A button on a Receive games row: `chosen` A (or a tap) on it, `turn` left or right.
+    fn drop_row(&mut self, item: &Item, chosen: bool, turn: i32) {
+        if !chosen && turn == 0 {
+            return;
+        }
+        let (active, pin_set, target, auto_art) = match &self.drop {
+            Some((s, cfg, _)) => (
+                s.active,
+                !cfg.pin.is_empty(),
+                cfg.target_mode().to_owned(),
+                cfg.auto_artwork,
+            ),
+            None => (false, false, "auto".to_owned(), true),
+        };
+        match item {
+            Item::DropPower => {
+                if active {
+                    rom_drop::stop();
+                } else {
+                    rom_drop::start();
+                }
+                self.drop = None;
+            }
+            Item::DropPin => {
+                if pin_set {
+                    rom_drop::set_pin(None, active);
+                } else {
+                    let pin = rom_drop::random_pin();
+                    rom_drop::set_pin(Some(&pin), active);
+                }
+                self.drop = None;
+            }
+            Item::DropTarget => {
+                let dir = if turn != 0 { turn.signum() } else { 1 };
+                let next = rom_drop::step_target(&target, dir);
+                rom_drop::set_target(next, active);
+                self.drop = None;
+            }
+            Item::DropArtwork => {
+                rom_drop::set_auto_artwork(!auto_art);
+                self.drop = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// Title line for Network → Receive games.
+    fn drop_title(&self) -> String {
+        let Some((s, _, _)) = &self.drop else {
+            return "Receive ROMs over LocalSend".into();
+        };
+        if let Some(t) = &s.transfer {
+            return format!("Receiving {} ({}%)\u{2026}", t.file, t.percent());
+        }
+        if s.active {
+            let name = if s.alias.is_empty() {
+                "this device"
+            } else {
+                &s.alias
+            };
+            if s.counts.accepted > 0 || s.counts.rejected > 0 {
+                format!(
+                    "Listening as {name}  \u{b7}  {} added, {} rejected",
+                    s.counts.accepted, s.counts.rejected
+                )
+            } else {
+                format!("Open LocalSend and drag ROMs to {name}")
+            }
+        } else {
+            "Receive ROMs over LocalSend".into()
+        }
     }
 
     /// A button on an Update row: `chosen` A (or a tap) on it, `turn` left or right.
@@ -2094,6 +2247,12 @@ impl Menu {
             | Item::RaNoneEarned
             | Item::Joined
             | Item::Address
+            | Item::DropPower
+            | Item::DropDevice
+            | Item::DropPin
+            | Item::DropTarget
+            | Item::DropArtwork
+            | Item::DropRecent { .. }
             | Item::Info(_)
             | Item::Scan
             | Item::Network(_)
@@ -2236,6 +2395,7 @@ impl Menu {
                 (Some(Ask::Show(code)), ..) => format!("Type {code} on the device, then Enter"),
                 (_, Some(busy), _) => busy.clone(),
                 (_, _, Some(said)) if !said.is_empty() => said.clone(),
+                _ if here == (Page::Wifi, Part::Drop) => self.drop_title(),
                 _ if here == (Page::Wifi, Part::NetInfo) => self.net.summary(),
                 _ if self.page == Page::Wifi => "Wi-Fi networks".into(),
                 _ => "Bluetooth devices".into(),
@@ -2297,6 +2457,13 @@ impl Menu {
             .filter(|i| i.set_here)
             .map(|i| format!("Y  use {}   \u{b7}   ", i.from));
         let hint = match (self.page, items.get(self.row)) {
+            (
+                Page::Wifi,
+                Some(Item::DropPower | Item::DropPin | Item::DropTarget | Item::DropArtwork),
+            ) => "A / D-pad  change   \u{b7}   L / R  page   \u{b7}   B  back".into(),
+            (Page::Wifi, Some(Item::DropDevice | Item::DropRecent { .. })) => {
+                "L / R  page   \u{b7}   B  back".into()
+            }
             (Page::Wifi, Some(Item::Info(_))) => {
                 "A  check again   \u{b7}   L / R  page   \u{b7}   B  back".into()
             }
@@ -2705,6 +2872,84 @@ impl Menu {
                     (None, false) => "\u{2013}".into(),
                 },
                 warning: false,
+            },
+            Item::DropPower => Value::Prompt {
+                text: match self.drop.as_ref().map(|(s, _, _)| s.active) {
+                    Some(true) => "On".into(),
+                    Some(false) => "Off".into(),
+                    None => "\u{2013}".into(),
+                },
+                warning: false,
+            },
+            Item::DropDevice => {
+                let alias = self
+                    .drop
+                    .as_ref()
+                    .and_then(|(s, cfg, _)| {
+                        (!s.alias.is_empty())
+                            .then(|| s.alias.clone())
+                            .or_else(|| (!cfg.alias.is_empty()).then(|| cfg.alias.clone()))
+                    })
+                    .unwrap_or_else(|| "DSlot".into());
+                let text = match &self.net.address {
+                    Some((ip, _)) => format!("{alias}  ({ip})"),
+                    None => alias,
+                };
+                Value::Prompt {
+                    text,
+                    warning: false,
+                }
+            }
+            Item::DropPin => {
+                let pin = self
+                    .drop
+                    .as_ref()
+                    .map(|(_, cfg, _)| cfg.pin.as_str())
+                    .unwrap_or("");
+                Value::Prompt {
+                    text: if pin.is_empty() {
+                        "Off".into()
+                    } else {
+                        pin.to_owned()
+                    },
+                    warning: false,
+                }
+            }
+            Item::DropTarget => {
+                let text = match &self.drop {
+                    Some((s, cfg, _)) => {
+                        let base = match cfg.target_mode() {
+                            "tf2" => "TF2 card",
+                            "tf1" => "Internal card",
+                            _ if !s.target_label.is_empty() => &s.target_label,
+                            _ => "Auto (TF2 else Internal)",
+                        };
+                        if s.free_bytes > 0 {
+                            format!("{base} ({})", rom_drop::format_free(s.free_bytes))
+                        } else {
+                            base.to_owned()
+                        }
+                    }
+                    None => "\u{2013}".into(),
+                };
+                Value::Prompt {
+                    text,
+                    warning: false,
+                }
+            }
+            Item::DropArtwork => Value::Prompt {
+                text: match self.drop.as_ref().map(|(_, cfg, _)| cfg.auto_artwork) {
+                    Some(true) => "On (box & cart)".into(),
+                    Some(false) => "Off".into(),
+                    None => "\u{2013}".into(),
+                },
+                warning: false,
+            },
+            Item::DropRecent {
+                detail, rejected, ..
+            } => Value::Prompt {
+                text: detail.clone(),
+                warning: *rejected,
             },
             Item::Info(row) => self.info_value(*row),
             Item::Sys(row) => self

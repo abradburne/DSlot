@@ -1678,11 +1678,14 @@ fn show(
     let mut level_drawn = false;
     let mut artwork_counts: Option<(Console, crate::artwork::ArtKind, u64, usize, usize)> = None;
     let mut artwork_gen: u64 = 0;
+    let mut auto_art_queued: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     let mut was_artwork_running = false;
     let mut artwork_done_at: Option<Instant> = None;
     let mut drawn_artwork_key = None;
     let mut drawn_artwork_current = String::new();
     let mut artwork_pill_drawn = false;
+    let mut launch_resumes: Option<(usize, bool)> = None;
     loop {
         // A game chosen (or one put away carrying on): this frame is drawn, then the shelf
         // goes.
@@ -1869,6 +1872,47 @@ fn show(
                     Found::Games(console, mut list) => {
                         crate::rom::name_from_lists(&mut list, shelf.emulators);
                         let (came, went) = library::merge(games, console, list);
+                        if went > 0 {
+                            auto_art_queued
+                                .retain(|p| games.iter().any(|g| !g.gone && g.path == *p));
+                        }
+                        if came > 0 && crate::drop::there() && crate::drop::config().auto_artwork {
+                            let recent = crate::drop::recent_accepted_paths();
+                            if !recent.is_empty() {
+                                let targets: Vec<Game> = games
+                                    .iter()
+                                    .filter(|g| {
+                                        g.console == console
+                                            && !g.gone
+                                            && recent.contains(&g.path)
+                                            && !auto_art_queued.contains(&g.path)
+                                            && crate::artwork::eligible(g)
+                                            && crate::artwork::needs_art(
+                                                g,
+                                                crate::artwork::ArtKind::Both,
+                                            )
+                                    })
+                                    .cloned()
+                                    .collect();
+                                if !targets.is_empty() {
+                                    for g in &targets {
+                                        auto_art_queued.insert(g.path.clone());
+                                    }
+                                    let mut runner =
+                                        opts.artwork.lock().unwrap_or_else(|e| e.into_inner());
+                                    if runner.available()
+                                        && runner.enqueue(
+                                            "Received games".into(),
+                                            targets,
+                                            crate::artwork::ArtKind::Both,
+                                        )
+                                    {
+                                        artwork_gen += 1;
+                                        idle = Instant::now();
+                                    }
+                                }
+                            }
+                        }
                         if came + went > 0 {
                             eprintln!("dslot: {}: {came} new, {went} gone", console.label());
                             changed = true;
@@ -2946,7 +2990,17 @@ fn show(
             _ => None,
         };
         if let Some((g, fresh, alpha)) = launch_card {
-            let resumes = resume_of(shelf, settings, &games[g]).is_some();
+            let resumes = match launch_resumes {
+                Some((prev, has)) if prev == g => has,
+                _ => {
+                    let has = matches!(leaving, Some(Outcome::Resume(_)))
+                        || resume_of(shelf, settings, &games[g])
+                            .as_ref()
+                            .is_some_and(crate::resume::exists);
+                    launch_resumes = Some((g, has));
+                    has
+                }
+            };
             let (status, note) = if fresh && resumes {
                 ("Starting fresh", Some("The resume point is set aside"))
             } else if resumes {
@@ -2958,6 +3012,8 @@ fn show(
                 "the launch card",
                 ui.draw_starting(games[g].name(), status, note, alpha),
             );
+        } else {
+            launch_resumes = None;
         }
         // Leaving for a game: this frame is what DSlot keeps on screen while it goes.
         if leaving.is_some() && !headless {
